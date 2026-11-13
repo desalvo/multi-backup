@@ -619,87 +619,75 @@ class BackupGUI(tk.Tk):
         except Exception as exc:messagebox.showerror('Plugin error',str(exc))
 
     def _build_encryption(self,page):
-        self._heading(page,'Local encryption keys',
-                      'Encryption is automatic. Save your private recovery key separately.')
-        ttk.Label(page,text='Your age private key stays on this computer, outside the backup '
-                  'directory. It is needed to restore encrypted files.',
-                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(0,8))
+        self._heading(page,'Protected encryption key',
+                      'Unlock once per app session; back up your private key separately.')
+        ttk.Label(page,text='Your age private identity is encrypted with your password '
+                  'and stored outside Multi Backup.app. Updates preserve it.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(1,10))
         ttk.Label(page,textvariable=self.key_location,style='Sub.TLabel',
-                  wraplength=710).pack(anchor='w',pady=(3,12))
-        PremiumButton(page,text='Locate private recovery key',
-                      command=self._reveal_key).pack(anchor='w',pady=(0,15))
+                  wraplength=710).pack(anchor='w',pady=(1,10))
         row=ttk.Frame(page)
-        row.pack(fill='x',pady=6)
-        PremiumButton(row,text='Generate another key',style='Accent.TButton',
-                      command=self._generate_key).pack(side='left')
-        PremiumButton(row,text='Show public recipient',
-                      command=self._public_key).pack(side='left',padx=9)
-        PremiumButton(row,text='Choose existing key',
-                      command=self._choose_key).pack(side='left')
-        self.key_info=tk.Text(page,height=8,wrap='word',background='white',
+        row.pack(fill='x',pady=7)
+        PremiumButton(row,text='Create encryption key',style='Accent.TButton',
+                      command=self._create_from_encryption_page).pack(side='left',padx=(0,10))
+        PremiumButton(row,text='Locate encrypted vault',
+                      command=self._reveal_key).pack(side='left')
+        row2=ttk.Frame(page)
+        row2.pack(fill='x',pady=7)
+        PremiumButton(row2,text='Save encrypted recovery copy',
+                      command=self._export_recovery,
+                      style='Accent.TButton').pack(side='left',padx=(0,10))
+        PremiumButton(row2,text='Import recovery copy',
+                      command=self._import_recovery).pack(side='left')
+        row3=ttk.Frame(page)
+        row3.pack(fill='x',pady=7)
+        PremiumButton(row3,text='Change vault password',
+                      command=self._change_vault_password).pack(side='left',padx=(0,10))
+        PremiumButton(row3,text='Show public recipient',
+                      command=self._public_key).pack(side='left')
+        ttk.Label(page,text='Touch ID (macOS): available after a password unlock '
+                  'and explicit opt-in. Enrollment uses the macOS Keychain '
+                  'and current biometric set.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(19,5))
+        row4=ttk.Frame(page)
+        row4.pack(fill='x',pady=7)
+        PremiumButton(row4,text='Enable Touch ID',
+                      command=self._enable_biometrics).pack(side='left',padx=(0,10))
+        PremiumButton(row4,text='Disable Touch ID',
+                      command=self._disable_biometrics).pack(side='left')
+        self.key_info=tk.Text(page,height=5,wrap='word',background='#FFFFFF',
                               relief='flat',font=('Courier',10))
-        self.key_info.pack(fill='x',pady=12)
-        ttk.Label(page,text='Never share the private identity with a third party or '
-                  'keep its only copy alongside the backup ciphertext.',
-                  style='Sub.TLabel',wraplength=700).pack(anchor='w',pady=8)
+        self.key_info.pack(fill='x',pady=14)
+        ttk.Label(page,text='Save the recovery copy to another location, protected by '
+                  'a separate password. Without the key or its recovery copy, '
+                  'encrypted backups cannot be decrypted.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=7)
 
-    def _load_existing_identity(self):
-        path=private_key_path()
-        self.key_location.set('Private recovery key: '+str(path))
-        if path.is_file() or path.is_symlink():
-            try:
-                public=recipient_for_identity(path)
-                self.identity.set(str(path))
-                self.recipient.set(public)
-            except (OSError,ValueError,RuntimeError) as exc:
-                self.key_location.set('Recovery key unavailable: '+str(exc))
-
-    def _prepare_identity(self):
-        if self.identity.get().strip():
-            path=Path(self.identity.get()).expanduser()
-            self.recipient.set(recipient_for_identity(path))
-            self.key_location.set('Private recovery key: '+str(path))
-            return False
-        info=ensure_default_identity()
-        self.identity.set(info['private_key_file'])
-        self.recipient.set(info['public_recipient'])
-        self.key_location.set('Private recovery key: '+info['private_key_file'])
-        return info['created']
-
-    def _generate_key(self):
-        name=simpledialog.askstring('Key name','New key name (letters, digits, hyphen):',parent=self)
-        if not name:return
+    def _create_from_encryption_page(self):
+        if self._session_secret is not None:
+            messagebox.showinfo('Encryption key ready',
+                                'Your current age key is already unlocked for this session.')
+            return
         try:
-            from key_management import generate_key
-            info=generate_key(name)
-            self.identity.set(info['private_key_file'])
-            self.recipient.set(info['public_recipient'])
-            self.key_location.set('Private recovery key: '+info['private_key_file'])
-            self.key_info.insert('end','Generated key at '+info['private_key_file']+'\n')
-        except Exception as exc:
-            messagebox.showerror('Key generation failed',str(exc))
-
-    def _choose_key(self):
-        path=filedialog.askopenfilename(title='Choose an existing age private key')
-        if not path:return
-        try:
-            self.recipient.set(recipient_for_identity(Path(path)))
-            self.identity.set(path)
-            self.key_location.set('Private recovery key: '+path)
-        except Exception as exc:
-            messagebox.showerror('Invalid private key',str(exc))
+            if self._prepare_identity():
+                messagebox.showinfo('Encryption key created',
+                    'Your age key is password-protected at:\n'+str(vault_path())+
+                    '\n\nCreate an independently encrypted recovery copy before '
+                    'relying on it for important backups.')
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Key creation cancelled or failed',str(exc))
 
     def _reveal_key(self):
-        path=Path(self.identity.get()) if self.identity.get() else private_key_path()
+        path=vault_path()
         if not path.is_file():
-            messagebox.showinfo('Recovery key',
-                                'The key is generated when you start your first backup.\n'
-                                'Expected location:\n'+str(path))
+            messagebox.showinfo('Protected vault',
+                'The encrypted vault will be created on the first backup.\n'
+                'Expected location:\n'+str(path))
             return
-        messagebox.showinfo('Protect your recovery key',
-                            'Private age identity:\n'+str(path)+
-                            '\n\nSave a separate secure/offline copy. '
-                            'Anyone with this file can decrypt your backups.')
+        messagebox.showinfo('Password-protected vault',
+            'Your protected vault is saved outside the application at:\n'+str(path)+
+            '\n\nIt is not your plaintext private key. '
+            'Use Save encrypted recovery copy to create another protected backup.')
         if sys.platform=='darwin':
             try:subprocess.Popen(['open','-R',str(path)])
             except OSError:pass
@@ -708,13 +696,12 @@ class BackupGUI(tk.Tk):
             except OSError:pass
 
     def _public_key(self):
-        try:
-            path=Path(self.identity.get()) if self.identity.get() else private_key_path()
-            public=recipient_for_identity(path)
-            self.recipient.set(public)
-            self.key_info.insert('end','Public recipient: '+public+'\n')
-        except Exception as exc:
-            messagebox.showerror('Identity error',str(exc))
+        if self._session_secret is None:
+            messagebox.showwarning('No encryption key',
+                                   'Create and unlock the age identity first.')
+            return
+        self.key_info.insert('end','Public recipient: '+self.recipient.get()+'\n')
+        self.key_info.see('end')
 
     def _discover_github_account(self,force=False):
         def work():
