@@ -312,6 +312,10 @@ class BackupGUI(tk.Tk):
             raise VaultError('Encryption key is locked. Restart and unlock the application.')
         if private_key_path().exists():
             raise VaultError('A previous key must be protected on application startup.')
+        if not messagebox.askyesno('Generate encryption key?',
+                    'No encryption key exists yet.\n\n'
+                    'Generate a new age key and protect it with a password now?'):
+            raise VaultError('Encryption key creation cancelled')
         password=self._ask_new_password()
         if password is None:
             raise VaultError('Backup cancelled before creating the encryption key')
@@ -1007,6 +1011,7 @@ class BackupGUI(tk.Tk):
                         'eligible artifacts from GitHub. Select No to back up '
                         'without cleanup.'):
                     self.cleanup.set(False)
+                    self._save_preferences()
                 else:
                     args+=['--cleanup-ci-artifacts']
                     if self.dryrun.get():args+=['--cleanup-ci-dry-run']
@@ -1065,6 +1070,10 @@ class BackupGUI(tk.Tk):
                     self.github_status.set('Connected to GitHub as '+login)
                 elif kind=='github-error':
                     self.github_status.set('GitHub not connected: '+str(payload))
+                elif kind=='operation-result':
+                    self._log(payload)
+                    if hasattr(self,'restore_summary'):
+                        self.restore_summary.set(payload)
                 elif kind=='update':
                     self.update_status.set(payload)
                 else:self._log(payload)
@@ -1089,8 +1098,8 @@ class BackupGUI(tk.Tk):
 
     def _background(self,fn):
         def work():
-            try:self.events.put(('out',str(fn())))
-            except Exception as exc:self.events.put(('out','ERROR: '+str(exc)))
+            try:self.events.put(('operation-result',str(fn())))
+            except Exception as exc:self.events.put(('operation-result','ERROR: '+str(exc)))
         threading.Thread(target=work,daemon=True).start()
 
     def _view(self):
