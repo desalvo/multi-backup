@@ -211,6 +211,235 @@ class BackupGUI(tk.Tk):
         self._session_secret=None
         self.destroy()
 
+    def _ask_new_password(self,title='Protect your encryption key'):
+        password=simpledialog.askstring(title,
+            'Choose a strong password (at least 12 characters).\n'
+            'You will need it to unlock Multi Backup on every launch.',
+            show='*',parent=self)
+        if password is None:
+            return None
+        if len(password)<12:
+            messagebox.showerror('Weak password','Use at least 12 characters.')
+            return None
+        again=simpledialog.askstring(title,'Confirm your encryption password:',
+                                     show='*',parent=self)
+        if again!=password:
+            messagebox.showerror('Password mismatch','The two passwords did not match.')
+            return None
+        return password
+
+    def _unlock_password(self,password):
+        clear,recipient=unlock(password)
+        self._session_secret=bytearray(clear)
+        self.recipient.set(recipient)
+        self.key_location.set('Password-protected age vault: '+str(vault_path()))
+
+    def _startup_security(self):
+        if self._startup_completed:
+            return
+        protected=vault_path()
+        legacy=private_key_path()
+        if protected.is_symlink() or legacy.is_symlink():
+            messagebox.showerror('Encryption vault error','Refusing a symlinked encryption key.')
+            self._quit_securely()
+            return
+        if protected.exists():
+            unlocked=False
+            if self.cfg.get('biometric_enabled') and biometric.available():
+                if messagebox.askyesno('Unlock Multi Backup',
+                                       'Use Touch ID to unlock your encrypted key?\n'
+                                       'Choose No to enter your application password.'):
+                    try:
+                        self._unlock_password(biometric.unlock_password())
+                        unlocked=True
+                    except (VaultError,biometric.BiometricError,OSError) as exc:
+                        messagebox.showwarning('Touch ID unavailable',
+                                               'Biometric unlock was not successful. '
+                                               'Your password is still available.\n'+str(exc))
+            if not unlocked:
+                for attempt in range(5):
+                    password=simpledialog.askstring(
+                        'Unlock Multi Backup encryption key',
+                        'Enter the password protecting your age key.\n'
+                        'It will not be requested again until you close the app.',
+                        parent=self,show='*')
+                    if password is None:
+                        self._quit_securely()
+                        return
+                    try:
+                        self._unlock_password(password)
+                        unlocked=True
+                        break
+                    except (VaultError,OSError,ValueError) as exc:
+                        messagebox.showerror('Cannot unlock encryption key',str(exc))
+            if not unlocked:
+                messagebox.showerror('Access denied','Too many incorrect password attempts.')
+                self._quit_securely()
+                return
+        elif legacy.exists():
+            messagebox.showinfo(
+                'Protect your existing age key',
+                'A previous unencrypted age identity was found.\n'
+                'It will be encrypted with a new password without changing the key, '
+                'so your existing backups remain restorable.')
+            password=self._ask_new_password('Protect existing encryption key')
+            if password is None:
+                self._quit_securely()
+                return
+            try:
+                clear,recipient=migrate_legacy(password)
+                self._session_secret=bytearray(clear)
+                self.recipient.set(recipient)
+                self.key_location.set('Password-protected age vault: '+str(protected))
+            except (VaultError,OSError,ValueError) as exc:
+                messagebox.showerror('Cannot protect existing key',
+                                     str(exc)+'\nThe original identity has been preserved.')
+                self._quit_securely()
+                return
+        self._startup_completed=True
+        self._locked=False
+        self._show('Dashboard')
+        self.after(400,self._discover_github_account)
+        if self.cfg.get('auto_update_check'):
+            self.after(1400,self._check_updates)
+            self.after(self.cfg['update_interval_hours']*3600*1000,
+                       self._periodic_update)
+
+    def _prepare_identity(self):
+        if self._session_secret is not None:
+            return False
+        if vault_path().exists():
+            raise VaultError('Encryption key is locked. Restart and unlock the application.')
+        if private_key_path().exists():
+            raise VaultError('A previous key must be protected on application startup.')
+        password=self._ask_new_password()
+        if password is None:
+            raise VaultError('Backup cancelled before creating the encryption key')
+        clear,recipient=create_identity(password)
+        self._session_secret=bytearray(clear)
+        self.recipient.set(recipient)
+        self.key_location.set('Password-protected age vault: '+str(vault_path()))
+        return True
+
+    @contextmanager
+    def _identity_file(self):
+        if self._session_secret is None:
+            raise VaultError('Create an encryption key before restoring or browsing backups')
+        with temporary_identity(bytes(self._session_secret)) as path:
+            yield path
+
+    def _ask_current_password(self,reason):
+        password=simpledialog.askstring('Confirm encryption password',
+                                         reason+'\nEnter your app encryption password:',
+                                         parent=self,show='*')
+        if password is None:
+            return None
+        try:
+            clear,_recipient=unlock(password)
+            if self._session_secret is None or clear!=bytes(self._session_secret):
+                raise VaultError('This is not the unlocked session identity')
+            return password
+        except (VaultError,ValueError,OSError) as exc:
+            messagebox.showerror('Password verification failed',str(exc))
+            return None
+
+    def _export_recovery(self):
+        password=self._ask_current_password('Protect a recovery copy in another location.')
+        if password is None:return
+        destination=filedialog.asksaveasfilename(
+            title='Save separately encrypted recovery key',
+            defaultextension='.agevault',
+            initialfile='Multi-Backup-recovery.agevault')
+        if not destination:return
+        backup_password=self._ask_new_password('Choose recovery-copy password')
+        if backup_password is None:return
+        try:
+            exported=export_recovery_copy(password,backup_password,Path(destination))
+            messagebox.showinfo('Recovery copy created',
+                'Encrypted recovery copy saved to:\n'+str(exported)+
+                '\n\nKeep the copy and its password in a separate safe place.')
+        except (VaultError,OSError,ValueError,FileExistsError) as exc:
+            messagebox.showerror('Recovery export failed',str(exc))
+
+    def _import_recovery(self):
+        if vault_path().exists() or private_key_path().exists():
+            messagebox.showwarning('Identity exists',
+                'Import is allowed only when no local encryption identity exists. '
+                'Existing backups must not lose their decryption key.')
+            return
+        source=filedialog.askopenfilename(title='Select encrypted age recovery copy',
+                                          filetypes=[('Age vault files','*.agevault'),('All files','*')])
+        if not source:return
+        old=simpledialog.askstring('Recovery copy password',
+                                  'Enter the password of the saved recovery copy:',
+                                  parent=self,show='*')
+        if old is None:return
+        new=self._ask_new_password('New local encryption password')
+        if new is None:return
+        try:
+            clear,recipient=import_recovery_copy(Path(source),old,new)
+            self._session_secret=bytearray(clear)
+            self.recipient.set(recipient)
+            self.key_location.set('Password-protected age vault: '+str(vault_path()))
+            messagebox.showinfo('Recovery key imported',
+                                'Your previous encryption key is ready to restore existing backups.')
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Cannot import recovery key',str(exc))
+
+    def _change_vault_password(self):
+        if self._session_secret is None:
+            messagebox.showinfo('No encryption key','Create a key with your first backup.')
+            return
+        password=self._ask_current_password('Change the primary vault password.')
+        if password is None:return
+        replacement=self._ask_new_password('New vault password')
+        if replacement is None:return
+        try:
+            change_password(password,replacement)
+            if self.cfg.get('biometric_enabled'):
+                try:biometric.disable()
+                except (biometric.BiometricError,OSError):pass
+                self.cfg['biometric_enabled']=False
+                save_settings(self.cfg)
+            messagebox.showinfo('Password changed',
+                                'New password saved. Enable Touch ID again if desired.')
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Cannot change password',str(exc))
+
+    def _enable_biometrics(self):
+        if self._session_secret is None:
+            messagebox.showwarning('No encryption key','Create or import an age vault first.')
+            return
+        if not biometric.available():
+            messagebox.showwarning('Touch ID unavailable',
+                'Touch ID must be supported and enabled in macOS, and the native '
+                'Keychain helper must be installed. Other platforms use the vault password.')
+            return
+        password=self._ask_current_password('Enable Touch ID for subsequent app launches.')
+        if password is None:return
+        try:
+            if not biometric.enable(password):
+                raise biometric.BiometricError('Touch ID enrollment was not confirmed')
+            self.cfg['biometric_enabled']=True
+            save_settings(self.cfg)
+            messagebox.showinfo('Touch ID enabled',
+                'This Mac can now unlock the age vault with enrolled Touch ID. '
+                'The password remains a recovery option.')
+        except (biometric.BiometricError,OSError,ValueError) as exc:
+            messagebox.showerror('Touch ID enrollment failed',str(exc))
+
+    def _disable_biometrics(self):
+        password=self._ask_current_password('Disable biometric app unlocking.')
+        if password is None:return
+        try:
+            biometric.disable()
+            self.cfg['biometric_enabled']=False
+            save_settings(self.cfg)
+            messagebox.showinfo('Touch ID disabled',
+                                'The vault password is required at the next app launch.')
+        except (biometric.BiometricError,OSError,ValueError) as exc:
+            messagebox.showerror('Cannot disable Touch ID',str(exc))
+
     def _update_ci_hint(self):
         count=self.backup_ci_runs.get().strip() or '?'
         self.ci_hint.set('Latest '+count+
