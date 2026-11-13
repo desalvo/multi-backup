@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r003-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r010-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -106,3 +106,14 @@ python3 -m unittest discover -s tests -v
 Every push first runs a single **Production Gate**, including security scanning; native jobs and publication run **only after it passes**. A commit with `[full-ci]` on `main` triggers early-release binaries, while an ordinary version tag targets stable (still blocked pending platform signing policies). You can manually trigger a full release from **Actions → Multi Backup - Production CI → Run workflow**.
 
 The corrected macOS DMG contains only **`Multi Backup.app`**. Drag it into **Applications** and launch from Finder. The application bundle includes the CLI and cryptography helpers; `git` must be available on macOS. The macOS package **will not be published** unless Apple Developer ID signing and both app+DMG notarizations pass, followed by a mounted-DMG relocation and Gatekeeper test. See [Release channels and required GitHub secrets](docs/RELEASE_CHANNELS.md). Previously published, unsigned RC DMGs are not guaranteed to open and should not be installed. Do not bypass Gatekeeper.
+
+### Dropbox integrity verification (r009)
+
+Each newly downloaded Dropbox revision must match its listing file ID, revision, byte count and official Dropbox content hash before encrypted archive creation. A damaged pre-existing ciphertext is preserved and reported, never silently replaced. Dropbox objects without a valid content hash are not accepted.
+
+### Try the macOS app without an Apple Developer account (r010)
+
+To test the native app before general distribution, download `TEST-ONLY-macos-arm64` (Apple Silicon) or `TEST-ONLY-macos-x86_64` (Intel) from the successful **Multi Backup - Production CI** Actions run's Artifacts, or `multi-backup-macos-<arch>-test.dmg` from the `early-release` prerelease after a completed full CI on main. Verify the SHA-256 checksum included alongside the DMG; open the image and drag its **only visible item, `Multi Backup.app`**, into `/Applications`. No Python installation is required.
+
+**Testing only:** the Mac app is ad-hoc signed, **not** Apple Developer ID signed or notarized. Gatekeeper can block its first launch. First attempt to open the app, then choose **System Settings → Privacy & Security → Open Anyway** if you trust the GitHub Actions build (labels vary by macOS release). Never disable Gatekeeper globally or use a command to strip quarantine. Do not use the preview as a generally trusted software distribution; `stable` still requires developer signing/notarization and all the other platform acceptance tests.
+

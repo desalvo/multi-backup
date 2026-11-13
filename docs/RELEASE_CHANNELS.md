@@ -1,6 +1,6 @@
 # Native releases, channels, and trust
 
-**Version:** `0.1.0-r003-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
+**Version:** `0.1.0-r010-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
 
 ## Trigger contract
 
@@ -58,3 +58,12 @@ Configure these under **Settings → Secrets and variables → Actions → Repos
 After adding them, run **Multi Backup - Production CI** with `workflow_dispatch` on `main`, or push a commit containing `[full-ci]`. GitHub Actions will import the signing key only into a temporary keychain and delete it after the run. Apple notarization uses `xcrun notarytool` and two independently verified tickets. You must have a valid Apple Developer Program account to obtain these credentials. Without these secrets, the old public DMGs are **not** validated for a normal Gatekeeper install.
 
 **Important distinction:** The static Production Gate can be green even when a notarization credential is missing; actual code signing and running the app on macOS are separate native *release acceptance checks*, and release publication requires both. Windows Authenticode and RPM GPG signing are still required for the future stable channel.
+
+## r009 unsigned macOS startup qualification
+
+After the sole Production Gate, both macOS architectures build and exercise the real unsigned application (GUI self-test and bundled CLI). These builds are intentionally never uploaded or released; a distinct Developer ID signed and notarized build plus mounted-DMG Gatekeeper acceptance is still required for publication.
+
+## r010 macOS experimental delivery (no Apple Developer membership needed)
+
+After the sole Production Gate the macOS Apple Silicon and Intel smoke jobs produce an ad-hoc signed single-app DMG, validate it mounted and relocated into a disposable Applications directory, and upload the packages as GitHub Actions artifacts `TEST-ONLY-macos-arm64` and `TEST-ONLY-macos-x86_64`. On `[full-ci]` on main, early-release additionally publishes these packages as `multi-backup-macos-<arch>-test.dmg`. Publication removes legacy broken, ambiguous macOS DMG filenames and clearly marks the rolling release as TEST ONLY. These are not notarized; macOS may need an explicit Open Anyway approval. Never globally disable Gatekeeper. Full Apple Developer ID signing, app/DMG notarization and Gatekeeper testing still apply to the separate stable channel. Stable is also blocked pending Windows and RPM signing.
+

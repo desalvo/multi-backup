@@ -26,7 +26,8 @@ def validate():
     native=load('.github/workflows/build-native.yml')
     jobs=flow['jobs']; assert 'production-gate' in jobs
     assert 'native-release' in jobs
-    assert jobs['native-release']['needs']==['production-gate'], 'Native release must depend on sole production gate'
+    assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
+    assert jobs['native-release']['needs']==['production-gate','macos-smoke'], 'Native release must wait for gate and app startup'
     assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
     assert 'workflow_call' in native['on'] and len(native['on'])==1, 'Native workflow must not publish independently'
     release=native['jobs']
@@ -44,11 +45,28 @@ def validate():
     verify=(ROOT/'scripts/verify-macos-dmg.sh').read_text('utf-8')
     assert "--windowed --onedir" in build_macos, 'Missing relocatable GUI bundle'
     assert "Contents/Resources/bin" in build_macos, 'Native helper executables not embedded'
+    assert 'MAC_UNSIGNED_SMOKE' in build_macos, 'Missing test app build mode'
+    test_package=(ROOT/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
+    for token in ('Signature=adhoc','hdiutil create','hdiutil attach','ditto',
+                  '--self-test','codesign --verify --deep --strict','checksums-macos-'):
+        assert token in test_package, 'Missing TEST DMG invariant: '+token
+    mac_steps=release['macos']['steps']
+    for prefix in ('Import Developer ID','Notarize app','Mount DMG'):
+        step=next(s for s in mac_steps if s.get('name','').startswith(prefix))
+        assert step.get('if') == "needs.qualify.outputs.channel == 'stable'", 'Stable macOS trust requirement bypassed'
+    test_step=next(s for s in mac_steps if s.get('name','').startswith('Create and verify early-release TEST DMG'))
+    assert test_step.get('if') == "needs.qualify.outputs.channel == 'early-release'"
+    assert 'MAC_UNSIGNED_SMOKE' in str(mac_steps), 'Missing early Mac test configuration'
     assert "--self-test" in build_macos, 'GUI smoke test missing'
     assert 'codesign --verify --deep --strict' in build_macos
     assert 'notarytool submit' in notarize and 'stapler staple' in notarize
     assert 'ditto "$APP" "$TMP/dmg-root/Multi Backup.app"' in notarize
     assert 'spctl --assess' in verify and 'hdiutil attach' in verify
+    assert 'MAC_UNSIGNED_SMOKE' in str(jobs['macos-smoke']['steps']), 'Missing unsigned app boot test'
+    smoke=str(jobs['macos-smoke']['steps'])
+    assert 'TEST-ONLY-macos-' in smoke, 'Missing clearly labeled macOS test artifact'
+    assert 'package-macos-test-dmg.sh' in smoke, 'Missing installable macOS TEST DMG'
+    assert 'gh release' not in smoke, 'Smoke job must never publish a GitHub release'
     native_macos_steps='\n'.join(x.get('name','') for x in release['macos']['steps'])
     for required in ('Developer ID','Notarize app','Mount DMG'):
         assert required in native_macos_steps
