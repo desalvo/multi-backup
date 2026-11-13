@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r003-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r009-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -106,3 +106,7 @@ python3 -m unittest discover -s tests -v
 Every push first runs a single **Production Gate**, including security scanning; native jobs and publication run **only after it passes**. A commit with `[full-ci]` on `main` triggers early-release binaries, while an ordinary version tag targets stable (still blocked pending platform signing policies). You can manually trigger a full release from **Actions → Multi Backup - Production CI → Run workflow**.
 
 The corrected macOS DMG contains only **`Multi Backup.app`**. Drag it into **Applications** and launch from Finder. The application bundle includes the CLI and cryptography helpers; `git` must be available on macOS. The macOS package **will not be published** unless Apple Developer ID signing and both app+DMG notarizations pass, followed by a mounted-DMG relocation and Gatekeeper test. See [Release channels and required GitHub secrets](docs/RELEASE_CHANNELS.md). Previously published, unsigned RC DMGs are not guaranteed to open and should not be installed. Do not bypass Gatekeeper.
+
+### Dropbox integrity verification (r009)
+
+Each newly downloaded Dropbox revision must match its listing file ID, revision, byte count and official Dropbox content hash before encrypted archive creation. A damaged pre-existing ciphertext is preserved and reported, never silently replaced. Dropbox objects without a valid content hash are not accepted.

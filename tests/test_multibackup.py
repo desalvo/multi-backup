@@ -1,5 +1,6 @@
 """Offline plugin, settings and update security tests."""
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -8,7 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from backends import available
-from backends.dropbox_backend import object_key,DropboxAPI,run as dropbox_run
+from backends.dropbox_backend import (object_key, DropboxAPI, run as dropbox_run,
+                                      dropbox_content_hash, verify_downloaded_revision)
 from settings import load_settings,save_settings,set_backend_enabled
 from updater import release_endpoint,detect_asset_prefix,select_asset,verified_asset_from_release,download_asset
 from key_management import private_key_path
@@ -64,6 +66,58 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(object_key(a),object_key(a))
         self.assertNotEqual(object_key(a),object_key(dict(a,rev='ab13')))
         with self.assertRaises(ValueError):object_key({'id':'id:a'})
+
+    def test_dropbox_content_hash_vectors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'file'
+            source.write_bytes(b'')
+            self.assertEqual(dropbox_content_hash(source),hashlib.sha256(b'').hexdigest())
+            first=b'A'*(4*1024*1024)
+            source.write_bytes(first+b'B')
+            expected=hashlib.sha256(hashlib.sha256(first).digest()+
+                                    hashlib.sha256(b'B').digest()).hexdigest()
+            self.assertEqual(dropbox_content_hash(source),expected)
+            source.write_bytes(b'example')
+            self.assertEqual(dropbox_content_hash(source),
+                             'f0a7447cc7c8ab136c4c253e224377ac108af790d55cd9a9dd372bf2a7a3e737')
+
+    def test_dropbox_corrupted_revision_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'payload'
+            source.write_bytes(b'example')
+            item={'.tag':'file','id':'id:abc','rev':'rev1','size':7,
+                  'content_hash':dropbox_content_hash(source)}
+            meta={key:item[key] for key in ('id','rev','size','content_hash')}
+            verify_downloaded_revision(source,item,meta)
+            for bad in (dict(meta,rev='other'),dict(meta,id='id:other'),
+                        dict(meta,size=6),dict(meta,content_hash='0'*64)):
+                with self.assertRaises(RuntimeError):
+                    verify_downloaded_revision(source,item,bad)
+            source.write_bytes(b'EXAMPLE')
+            with self.assertRaises(RuntimeError):
+                verify_downloaded_revision(source,item,meta)
+            source.write_bytes(b'short')
+            with self.assertRaises(RuntimeError):
+                verify_downloaded_revision(source,item,meta)
+
+    def test_dropbox_corrupted_download_does_not_publish(self):
+        class CorruptAPI:
+            def list_entries(self,path):
+                yield {'.tag':'file','id':'id:abc','rev':'rev1','size':7,
+                       'content_hash':'0'*64,'name':'example'}
+            def download(self,file_id,revision,dst):
+                dst.write_bytes(b'example')
+                return {'id':file_id,'rev':revision,'size':7}
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'backup'
+            args=argparse.Namespace(cleanup_ci_artifacts=False,purge_obsolete_metadata=False,
+                    max_copies_per_repo=5,recipient='age1test',output_dir=root,staging_dir=None,
+                    dropbox_path='')
+            with mock.patch('backends.dropbox_backend.shutil.which',return_value='/usr/bin/age'):
+                with self.assertRaises(RuntimeError):
+                    dropbox_run(args,api=CorruptAPI())
+            self.assertFalse(list(root.rglob('*.age')))
+            self.assertFalse(list(root.rglob('*.partial')))
 
     def test_dropbox_rejects_remote_purge_options(self):
         args=argparse.Namespace(cleanup_ci_artifacts=True,purge_obsolete_metadata=False,

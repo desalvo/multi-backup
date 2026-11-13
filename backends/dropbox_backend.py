@@ -9,6 +9,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -83,6 +84,39 @@ def object_key(item):
     return hashlib.sha256((item['id']+'\x00'+item['rev']).encode('utf-8')).hexdigest()
 
 
+def dropbox_content_hash(source: Path) -> str:
+    """Dropbox SHA-256 of concatenated 4-MiB block SHA-256 digests."""
+    overall = hashlib.sha256()
+    with source.open('rb') as stream:
+        while True:
+            block = stream.read(4 * 1024 * 1024)
+            if not block:
+                break
+            overall.update(hashlib.sha256(block).digest())
+    return overall.hexdigest()
+
+
+def verify_downloaded_revision(source: Path, item: dict, metadata: dict) -> None:
+    """Reject changed, truncated or corrupted data before encrypting it."""
+    if not isinstance(metadata, dict) or metadata.get('rev') != item.get('rev'):
+        raise RuntimeError('Dropbox revision changed during download')
+    if metadata.get('id') != item.get('id'):
+        raise RuntimeError('Dropbox file identity changed during download')
+    expected_size = item.get('size')
+    if type(expected_size) is not int or expected_size < 0:
+        raise RuntimeError('Dropbox listing omitted a valid file size')
+    if metadata.get('size') != expected_size or source.stat().st_size != expected_size:
+        raise RuntimeError('Dropbox download length differs from listing metadata')
+    expected_hash = item.get('content_hash')
+    if not isinstance(expected_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', expected_hash):
+        raise RuntimeError('Dropbox listing omitted a valid content hash')
+    downloaded_hash = metadata.get('content_hash')
+    if downloaded_hash is not None and downloaded_hash != expected_hash:
+        raise RuntimeError('Dropbox download content hash differs from listing')
+    if dropbox_content_hash(source) != expected_hash:
+        raise RuntimeError('Dropbox downloaded bytes failed content hash verification')
+
+
 def token_from_environment():
     value=os.environ.get('MULTI_BACKUP_DROPBOX_TOKEN','').strip()
     if value:return value
@@ -138,6 +172,9 @@ def run(args, progress=None, api=None):
             if parts and parts[0]==sha256(dest):
                 counts['reused']+=1
                 reused=True
+        if dest.exists() and not reused:
+            # Keep existing ciphertext for possible recovery, never overwrite silently.
+            raise RuntimeError('Encrypted Dropbox object failed SHA-256 verification; preserved: '+str(dest))
         if not reused:
             dest.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             pending=dest.with_name(dest.name+'.partial')
@@ -145,7 +182,8 @@ def run(args, progress=None, api=None):
             with tempfile.TemporaryDirectory(prefix='.dropbox-item-',dir=stage) as tmp:
                 source=Path(tmp)/'payload'
                 try:
-                    api.download(item['id'],item['rev'],source)
+                    downloaded = api.download(item['id'],item['rev'],source)
+                    verify_downloaded_revision(source,item,downloaded)
                     with StreamingArchive(pending,args.recipient) as archive:
                         archive.add_tree(source,'multi-backup/dropbox/payload')
                     os.replace(pending,dest)
