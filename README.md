@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r011-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r012-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -105,7 +105,7 @@ python3 -m unittest discover -s tests -v
 
 Every push first runs a single **Production Gate**, including security scanning; native jobs and publication run **only after it passes**. A commit with `[full-ci]` on `main` triggers early-release binaries, while an ordinary version tag targets stable (still blocked pending platform signing policies). You can manually trigger a full release from **Actions → Multi Backup - Production CI → Run workflow**.
 
-The corrected macOS DMG contains only **`Multi Backup.app`**. Drag it into **Applications** and launch from Finder. The application bundle includes the CLI and cryptography helpers; `git` must be available on macOS. The macOS package **will not be published** unless Apple Developer ID signing and both app+DMG notarizations pass, followed by a mounted-DMG relocation and Gatekeeper test. See [Release channels and required GitHub secrets](docs/RELEASE_CHANNELS.md). Previously published, unsigned RC DMGs are not guaranteed to open and should not be installed. Do not bypass Gatekeeper.
+The corrected macOS DMG contains only **`Multi Backup.app`**. Drag it into **Applications** and launch from Finder. The application bundle includes the CLI and cryptography helpers; `git` must be available on macOS. The **stable** macOS package requires Developer ID signing, notarization and Gatekeeper testing. Early-release builds use ad-hoc signatures solely for prerelease evaluation and may require explicit macOS Privacy & Security approval. See [Release channels and required GitHub secrets](docs/RELEASE_CHANNELS.md). Previously published, unsigned RC DMGs are not guaranteed to open and should not be installed. Do not bypass Gatekeeper.
 
 ### Dropbox integrity verification (r009)
 
@@ -113,7 +113,7 @@ Each newly downloaded Dropbox revision must match its listing file ID, revision,
 
 ### Try the macOS app without an Apple Developer account (r010)
 
-To test the native app before general distribution, download `TEST-ONLY-macos-arm64` (Apple Silicon) or `TEST-ONLY-macos-x86_64` (Intel) from the successful **Multi Backup - Production CI** Actions run's Artifacts, or `multi-backup-macos-<arch>-test.dmg` from the `early-release` prerelease after a completed full CI on main. Verify the SHA-256 checksum included alongside the DMG; open the image and drag its **only visible item, `Multi Backup.app`**, into `/Applications`. No Python installation is required.
+To test the native app before general distribution, download `macos-arm64-preview` (Apple Silicon) or `macos-x86_64-preview` (Intel) from the successful **Multi Backup - Production CI** Actions run's Artifacts, or `multi-backup-macos-<arch>.dmg` from the `early-release` prerelease after a completed full CI on main. Verify the SHA-256 checksum included alongside the DMG; open the image and drag its **only visible item, `Multi Backup.app`**, into `/Applications`. No Python installation is required.
 
 **Testing only:** the Mac app is ad-hoc signed, **not** Apple Developer ID signed or notarized. Gatekeeper can block its first launch. First attempt to open the app, then choose **System Settings → Privacy & Security → Open Anyway** if you trust the GitHub Actions build (labels vary by macOS release). Never disable Gatekeeper globally or use a command to strip quarantine. Do not use the preview as a generally trusted software distribution; `stable` still requires developer signing/notarization and all the other platform acceptance tests.
 
@@ -121,3 +121,15 @@ To test the native app before general distribution, download `TEST-ONLY-macos-ar
 ### Native navigation refresh (r011)
 
 The desktop sidebar uses a high-contrast dark-navy design with clean rounded navigation surfaces, vector-drawn icons and explicit white text. This avoids the macOS Aqua Tk button foreground-colour override that could make sidebar labels unreadable. The active page has a vivid blue accent, hover and keyboard-focus feedback. Buttons are operable with mouse or Tab + Return/Space, and the same sidebar renders across macOS, Windows and Linux.
+
+### Simplified GitHub backup (r012)
+
+The desktop app now defaults to just **Backup destination** (the folder where encrypted archives are stored) and **GitHub username**. A one-time GitHub authorization is still necessary for private repositories: use **Connect GitHub account** to run `gh auth login` securely, then **Detect** to fill the name of the authenticated account. The app never stores GitHub access tokens in its settings. The selected account must match the signed-in login; other owners' repositories are not silently included.
+
+**No staging or encryption configuration is required.** Staging is managed automatically inside the selected destination. On the first run the application creates an age X25519 key at the operating-system application-config location (macOS: `~/Library/Application Support/multi-backup/keys/default.txt`) with private permissions; thereafter it reuses that key, without overwriting it. The public recipient is derived from the key automatically. Use **Encryption → Locate private recovery key** to see/reveal its location. Back up this private identity separately and securely: without it encrypted archives cannot be restored. If the destination is not on an encrypted volume, temporary decrypted staging data may be exposed to local disk recovery; prefer an encrypted filesystem.
+
+**GitHub Actions CI runs:** Preferences → **CI runs to back up per repo** (default 5) controls recent runs saved, including logs and available artifacts, even with cleanup disabled. **CI runs to keep if cleaning** is a different value and has no effect until the user explicitly selects cleanup in Advanced options. Cleanup runs only after a successful backup; an incomplete backup prevents deletion. The advanced controls can be expanded when necessary.
+
+All GUI action buttons now have rounded glossy rendering and explicit readable labels independently of the macOS Aqua native theme. The sidebar can be collapsed with **Hide navigation** (or Ctrl+B) and reopened with **Show navigation**. Progress is presented as a rounded 3D-style bar with a red→yellow→green position gradient from 0% to 100%.
+
+**Early-release macOS images:** `multi-backup-macos-arm64.dmg` and `multi-backup-macos-x86_64.dmg`, without test-only filename labels. The release is still a clearly marked prerelease, ad-hoc signed and not Apple-notarized. General distribution remains gated on the separate stable signing policy.

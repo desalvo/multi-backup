@@ -53,6 +53,7 @@ class ResumableBackup:
             'skip_gists', 'skip_ci_logs', 'skip_ci_artifacts', 'skip_release_assets',
             'skip_issue_details', 'skip_issue_events', 'skip_org_settings',
             'include_gh_token', 'metadata_workers', 'purge_obsolete_metadata')}
+        cfg['github_user'] = getattr(args,'github_user',None)
         cfg['credentials_dir'] = str(args.credentials_dir or '')
         self.journal = Journal(self.output / '.state',cfg,restart=args.restart)
         self.cycle_dir = self.output / 'metadata' / 'cycles' / self.journal.cycle
@@ -216,6 +217,8 @@ class ResumableBackup:
         if report and not report.get('dry_run') and report.get('keep_run_ids') is not None:
             allowed=set(report['keep_run_ids'])
             runs=[r for r in runs if r.get('id') in allowed]
+        # GitHub usually lists newest first, but enforce deterministic newest-N.
+        runs.sort(key=lambda r:(r.get('created_at') or '',r.get('id') or 0),reverse=True)
         if self.args.max_runs_per_repo:
             runs=runs[:self.args.max_runs_per_repo]
         atomic_json(output,runs)
@@ -434,11 +437,15 @@ class ResumableBackup:
             0 if self.args.skip_gists else 1)+2
         self.overall_total=1+len(repos)*5+extras
         self.progress.emit('account','Repository discovery complete',completed=1,total=self.overall_total)
-        self._cleanup(repos)
         self.progress.emit('account','Starting repository snapshots',completed=1,total=self.overall_total)
         self._metadata(repos)
         self._common(repos)
         self.counts['errors'] += sum(bool(e.get('critical')) for e in self.backup.errors)
+        # Never DELETE remotely before a verified backup of those Actions runs.
+        if self.counts['errors']==0:
+            self._cleanup(repos)
+        elif self.args.cleanup_ci_artifacts:
+            self.progress.emit('cleanup-skipped','Backup incomplete; refusing CI cleanup')
         summary=self._manifest(repos,migrations)
         if self.counts['errors']:
             self.progress.emit('incomplete',f"{self.counts['errors']} errors; preserving checkpoint for resume")
@@ -458,6 +465,7 @@ def build_parser():
     b.add_argument('--output-dir',type=Path,default=Path.home()/'Multi-Backups')
     b.add_argument('--backend', choices=['github','dropbox'],default='github',help='Backup source plugin (default github)')
     b.add_argument('--dropbox-path',default='',help='Dropbox folder path (Dropbox backend only)')
+    b.add_argument('--github-user',help='GitHub login to back up (must match authenticated account)')
     b.add_argument('--staging-dir',type=Path,help='Private encrypted-volume staging directory')
     b.add_argument('--identity',type=Path,help='Age private key for migrating legacy metadata')
     b.add_argument('--recipient',help='Age public recipient key (recommended)')
@@ -465,7 +473,7 @@ def build_parser():
     b.add_argument('--include-gh-token',action='store_true')
     b.add_argument('--max-copies-per-repo',type=int,default=5)
     b.add_argument('--max-metadata-backups',type=int,default=5)
-    b.add_argument('--max-runs-per-repo',type=int,default=0)
+    b.add_argument('--max-runs-per-repo',type=int,default=5,help='Most recent workflow runs backed up per repo (default 5; 0=all)')
     b.add_argument('--cleanup-ci-artifacts',action='store_true',help='Opt in to deleting eligible Actions artifacts')
     b.add_argument('--keep-ci-runs',type=int,default=5)
     b.add_argument('--cleanup-ci-dry-run',action='store_true',help='Only simulate Actions deletion; still back up')
@@ -610,6 +618,10 @@ def main(argv=None):
     if args.command!='backup':raise ValueError('Unsupported command')
     if args.backend=='dropbox' and (args.cleanup_ci_artifacts or args.purge_obsolete_metadata or args.cleanup_ci_dry_run):
         raise ValueError('Dropbox never supports source cleanup or purge')
+    if args.github_user and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',args.github_user):
+        raise ValueError('Invalid GitHub username')
+    if args.backend=='dropbox' and args.github_user:
+        raise ValueError('--github-user is for the GitHub backend only')
     if args.keep_ci_runs<1 or args.metadata_workers<1 or args.metadata_workers>16:
         raise ValueError('keep-ci-runs must be >= 1; metadata-workers must be in [1,16]')
     if args.max_copies_per_repo<1 or args.max_metadata_backups<1 or args.max_runs_per_repo<0:

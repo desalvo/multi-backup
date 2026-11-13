@@ -8,6 +8,9 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -18,6 +21,10 @@ from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
+from ui_widgets import PremiumButton, GradientProgress
+from key_management import ensure_default_identity, private_key_path, recipient_for_identity
+from backup_paths import prepare_destination
+from settings import settings_path
 from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
 
 ROOT=Path(__file__).resolve().parent
@@ -37,7 +44,16 @@ class BackupGUI(tk.Tk):
         self.cfg=load_settings()
         self.events=queue.Queue();self.proc=None;self.selected_archive=None;self.archive_index=[]
         self.root_dir=tk.StringVar(value=self.cfg['output_directory'])
-        self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar(value=self.cfg.get('default_recipient',''))
+        self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar()
+        self.github_user=tk.StringVar(value=self.cfg.get('github_username',''))
+        self.github_status=tk.StringVar(value='Checking your GitHub connection…')
+        self.key_location=tk.StringVar(value='Recovery key: '+str(private_key_path()))
+        self.backup_ci_runs=tk.StringVar(value=str(self.cfg.get('backup_ci_runs',5)))
+        self.ci_hint=tk.StringVar()
+        self.backup_ci_runs.trace_add('write',lambda *_:self._update_ci_hint())
+        self._update_ci_hint()
+        self.sidebar_visible=True
+        self.advanced_visible=False
         self.backend=tk.StringVar(value='github');self.dropbox_path=tk.StringVar()
         self.keep=tk.StringVar(value=str(self.cfg['keep_ci_runs']))
         self.workers=tk.StringVar(value=str(self.cfg['metadata_workers']))
@@ -47,6 +63,9 @@ class BackupGUI(tk.Tk):
         self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
         self.update_status=tk.StringVar(value='Not checked yet')
         self._make_styles();self._make_shell();self._show('Dashboard')
+        self._load_existing_identity()
+        self.after(350,self._discover_github_account)
+        self.bind('<Control-b>',lambda _event:self._toggle_sidebar())
         self.after(120,self._poll)
         if self.cfg['auto_update_check']:
             self.after(1250,self._check_updates)
@@ -108,6 +127,13 @@ class BackupGUI(tk.Tk):
                  font=('Helvetica Neue',9),fg='#B4CAE4',
                  bg=SIDEBAR_BG).pack(anchor='w')
         self.content=tk.Frame(self,bg='#f5f8fc');self.content.pack(fill='both',expand=True)
+        toolbar=ttk.Frame(self.content)
+        toolbar.pack(fill='x',padx=(16,18),pady=(7,5))
+        self.menu_button=PremiumButton(toolbar,text='Hide navigation',
+                                       command=self._toggle_sidebar)
+        self.menu_button.pack(side='left')
+        ttk.Label(toolbar,text='PRIVATE BACKUP WORKSPACE',
+                  style='Sub.TLabel').pack(side='right')
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
         self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
         body=tk.Frame(self.content,bg='#f5f8fc');body.pack(fill='both',expand=True)
@@ -121,6 +147,20 @@ class BackupGUI(tk.Tk):
         self._build_encryption(self.pages['Encryption'])
         self._build_updates(self.pages['Updates'])
         self._build_settings(self.pages['Settings'])
+
+    def _toggle_sidebar(self):
+        self.sidebar_visible=not self.sidebar_visible
+        if self.sidebar_visible:
+            self.sidebar.pack(side='left',fill='y',before=self.content)
+        else:
+            self.sidebar.pack_forget()
+        self.menu_button.set_text('Hide navigation' if self.sidebar_visible
+                                  else 'Show navigation')
+
+    def _update_ci_hint(self):
+        count=self.backup_ci_runs.get().strip() or '?'
+        self.ci_hint.set('Latest '+count+
+            ' GitHub Actions runs per repository backed up regardless of CI cleanup.')
 
     def _draw_hero(self,event):
         canvas=self.hero;canvas.delete('all');w=max(1,event.width);h=185
@@ -160,9 +200,9 @@ class BackupGUI(tk.Tk):
             tk.Label(frame,text=subtitle,font=('Helvetica',9),fg='#4e6480',bg='white').pack(anchor='w',padx=15)
         ttk.Label(page,text='Start with a provider and choose what to protect.',style='Title.TLabel').pack(anchor='w',pady=(35,14))
         action=ttk.Frame(page);action.pack(anchor='w')
-        ttk.Button(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
-        ttk.Button(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
-        ttk.Button(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
+        PremiumButton(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
+        PremiumButton(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
+        PremiumButton(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
         ttk.Label(page,text='Latest update status',style='Sub.TLabel').pack(anchor='w',pady=(38,8))
         ttk.Label(page,textvariable=self.update_status,wraplength=650).pack(anchor='w')
 
@@ -171,56 +211,98 @@ class BackupGUI(tk.Tk):
         ttk.Label(row,text=label,width=20).pack(side='left')
         ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
         if browse:
-            ttk.Button(row,text='Browse',command=lambda:var.set(
+            PremiumButton(row,text='Browse',command=lambda:var.set(
                 filedialog.askopenfilename() if browse=='file' else filedialog.askdirectory())).pack(side='left',padx=(6,0))
+        return row
 
     def _build_backup(self,page):
-        self._heading(page,'New backup','Runs in a separate process. Interrupt and resume safely from verified checkpoints.')
-        self._line(page,'Output directory',self.root_dir,'directory');self._line(page,'Staging directory',self.staging,'directory')
-        self._line(page,'Age recipient',self.recipient)
-        self._line(page,'Age private key',self.identity,'file')
-        row=ttk.Frame(page);row.pack(fill='x',pady=(6,12))
-        ttk.Label(row,text='Backend',width=20).pack(side='left')
-        combo=ttk.Combobox(row,textvariable=self.backend,values=('github','dropbox'),state='readonly',width=18)
-        combo.pack(side='left');combo.bind('<<ComboboxSelected>>',lambda _:self._update_backend_fields())
-        ttk.Label(row,text='CI runs to retain',width=19).pack(side='left',padx=(30,3))
-        ttk.Entry(row,textvariable=self.keep,width=6).pack(side='left')
-        ttk.Label(row,text='Workers').pack(side='left',padx=(15,3))
-        ttk.Entry(row,textvariable=self.workers,width=5).pack(side='left')
-        self.dropbox_row=ttk.Frame(page);self.dropbox_row.pack(fill='x',pady=(0,8))
-        ttk.Label(self.dropbox_row,text='Dropbox folder',width=20).pack(side='left')
-        ttk.Entry(self.dropbox_row,textvariable=self.dropbox_path).pack(side='left',fill='x',expand=True)
-        options=ttk.Frame(page);options.pack(anchor='w',pady=10)
-        for label,var in [('Cleanup CI artifacts',self.cleanup),('Cleanup dry-run',self.dryrun),
-                          ('Force fresh cycle',self.restart),('Skip CI logs',self.skiplogs)]:
-            ttk.Checkbutton(options,text=label,variable=var).pack(side='left',padx=(0,20))
-        commands=ttk.Frame(page);commands.pack(fill='x',pady=10)
-        self.start_button=ttk.Button(commands,text='Run or resume',style='Accent.TButton',command=self._start)
+        self._heading(page,'GitHub backup',
+                      'Choose where to store backups and which GitHub account to protect.')
+        self._line(page,'Backup destination',self.root_dir,'directory')
+        self.source_fields=ttk.Frame(page)
+        self.source_fields.pack(fill='x')
+        self.github_row=self._line(self.source_fields,'GitHub username',self.github_user)
+        PremiumButton(self.github_row,text='Detect',
+                      command=lambda:self._discover_github_account(True)).pack(side='left',padx=(8,0))
+        self.dropbox_row=self._line(self.source_fields,'Dropbox folder',self.dropbox_path)
+        self.auth_status_label=ttk.Label(page,textvariable=self.github_status,style='Sub.TLabel')
+        self.auth_status_label.pack(anchor='w',pady=(3,0))
+        self.connect_button=PremiumButton(page,text='Connect GitHub account',
+                                          command=self._connect_github)
+        self.connect_button.pack(anchor='w',pady=(5,9))
+        ttk.Label(page,textvariable=self.ci_hint,style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(2,8))
+        self.advanced_button=PremiumButton(page,text='Advanced options ▾',
+                                            command=self._toggle_advanced)
+        self.advanced_button.pack(anchor='w',pady=(4,6))
+        self.advanced_frame=ttk.Frame(page)
+        backend_row=ttk.Frame(self.advanced_frame)
+        backend_row.pack(anchor='w',fill='x',pady=6)
+        ttk.Label(backend_row,text='Backup provider').pack(side='left',padx=(0,12))
+        combo=ttk.Combobox(backend_row,textvariable=self.backend,
+                           values=('github','dropbox'),state='readonly',width=18)
+        combo.pack(side='left')
+        combo.bind('<<ComboboxSelected>>',lambda _:self._update_backend_fields())
+        options=ttk.Frame(self.advanced_frame)
+        options.pack(fill='x',pady=5)
+        for label,var in [
+            ('Cleanup CI artifacts only after verified backup',self.cleanup),
+            ('Simulate cleanup only',self.dryrun),
+            ('Start a fresh cycle',self.restart),
+            ('Skip CI logs',self.skiplogs),
+        ]:
+            ttk.Checkbutton(options,text=label,variable=var).pack(anchor='w',pady=2)
+
+        self.commands_frame=ttk.Frame(page)
+        self.commands_frame.pack(fill='x',pady=(8,6))
+        self.start_button=PremiumButton(self.commands_frame,text='Start / resume backup',
+                                        style='Accent.TButton',command=self._start)
         self.start_button.pack(side='left')
-        self.stop_button=ttk.Button(commands,text='Interrupt safely',command=self._stop,state='disabled')
+        self.stop_button=PremiumButton(self.commands_frame,text='Interrupt safely',
+                                       command=self._stop,state='disabled')
         self.stop_button.pack(side='left',padx=12)
-        self.status=tk.StringVar(value='Ready')
-        ttk.Label(page,textvariable=self.status).pack(anchor='w',pady=5)
-        self.progress=ttk.Progressbar(page,orient='horizontal',mode='determinate',maximum=100)
-        self.progress.pack(fill='x',pady=(0,8))
-        logs=ttk.Frame(page);logs.pack(fill='both',expand=True,pady=7)
-        self.text=tk.Text(logs,height=10,wrap='word',background='#182a40',foreground='#d8eaff',
-                          insertbackground='white',relief='flat',font=('Courier',10),state='disabled')
-        bar=ttk.Scrollbar(logs,command=self.text.yview);self.text.configure(yscrollcommand=bar.set)
-        self.text.pack(side='left',fill='both',expand=True);bar.pack(side='right',fill='y')
+        self.status=tk.StringVar(value='Ready to protect your account')
+        ttk.Label(page,textvariable=self.status,wraplength=710).pack(anchor='w',pady=5)
+        self.progress=GradientProgress(page)
+        self.progress.pack(fill='x',pady=(1,8))
+        logs=ttk.Frame(page)
+        logs.pack(fill='both',expand=True,pady=5)
+        self.text=tk.Text(logs,height=8,wrap='word',background='#182a40',
+                          foreground='#E5F3FF',insertbackground='white',
+                          relief='flat',font=('Courier',10),state='disabled')
+        bar=ttk.Scrollbar(logs,command=self.text.yview)
+        self.text.configure(yscrollcommand=bar.set)
+        self.text.pack(side='left',fill='both',expand=True)
+        bar.pack(side='right',fill='y')
         self._update_backend_fields()
+
+    def _toggle_advanced(self):
+        self.advanced_visible=not self.advanced_visible
+        if self.advanced_visible:
+            self.advanced_frame.pack(fill='x',before=self.commands_frame,pady=(0,5))
+        else:
+            self.advanced_frame.pack_forget()
+        self.advanced_button.set_text('Advanced options ▴' if self.advanced_visible
+                                      else 'Advanced options ▾')
 
     def _update_backend_fields(self):
         if self.backend.get()=='dropbox':
-            self.dropbox_row.pack(fill='x',before=self.start_button.master,pady=4)
-        else:self.dropbox_row.pack_forget()
+            self.github_row.pack_forget()
+            self.dropbox_row.pack(fill='x')
+            self.auth_status_label.pack_forget()
+            self.connect_button.pack_forget()
+        else:
+            self.dropbox_row.pack_forget()
+            self.github_row.pack(fill='x')
+            self.auth_status_label.pack(anchor='w',pady=(3,0))
+            self.connect_button.pack(anchor='w',pady=(5,9))
 
     def _build_archives(self,page):
         self._heading(page,'Archive library','Inspect, extract, checkout or mount encrypted repository snapshots.')
         row=ttk.Frame(page);row.pack(fill='x')
         for name,fn in [('Refresh',self._refresh),('List contents',self._view),('Show file',self._show_member),
                         ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount)]:
-            ttk.Button(row,text=name,command=fn).pack(side='left',padx=(0,7))
+            PremiumButton(row,text=name,command=fn).pack(side='left',padx=(0,7))
         self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.archives.pack(fill='both',expand=True,pady=(12,5))
         ttk.Label(page,text='Encrypted archive members').pack(anchor='w')
@@ -249,37 +331,142 @@ class BackupGUI(tk.Tk):
         except Exception as exc:messagebox.showerror('Plugin error',str(exc))
 
     def _build_encryption(self,page):
-        self._heading(page,'Encryption identities','Create age X25519 keys locally, or use an existing identity file.')
-        ttk.Label(page,text='Private keys stay on your computer. Backups are encrypted before publication.',
-                  style='Sub.TLabel').pack(anchor='w')
-        row=ttk.Frame(page);row.pack(fill='x',pady=20)
-        ttk.Button(row,text='Generate new age key',style='Accent.TButton',command=self._generate_key).pack(side='left')
-        ttk.Button(row,text='Show public recipient',command=self._public_key).pack(side='left',padx=12)
-        ttk.Button(row,text='Select existing key',command=lambda:self.identity.set(filedialog.askopenfilename())).pack(side='left')
-        self.key_info=tk.Text(page,height=8,wrap='word',background='white',relief='flat')
+        self._heading(page,'Local encryption keys',
+                      'Encryption is automatic. Save your private recovery key separately.')
+        ttk.Label(page,text='Your age private key stays on this computer, outside the backup '
+                  'directory. It is needed to restore encrypted files.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(0,8))
+        ttk.Label(page,textvariable=self.key_location,style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(3,12))
+        PremiumButton(page,text='Locate private recovery key',
+                      command=self._reveal_key).pack(anchor='w',pady=(0,15))
+        row=ttk.Frame(page)
+        row.pack(fill='x',pady=6)
+        PremiumButton(row,text='Generate another key',style='Accent.TButton',
+                      command=self._generate_key).pack(side='left')
+        PremiumButton(row,text='Show public recipient',
+                      command=self._public_key).pack(side='left',padx=9)
+        PremiumButton(row,text='Choose existing key',
+                      command=self._choose_key).pack(side='left')
+        self.key_info=tk.Text(page,height=8,wrap='word',background='white',
+                              relief='flat',font=('Courier',10))
         self.key_info.pack(fill='x',pady=12)
-        ttk.Label(page,text='Save private identities on encrypted storage, back them up separately and avoid sharing them.',
-                  wraplength=690).pack(anchor='w',pady=10)
+        ttk.Label(page,text='Never share the private identity with a third party or '
+                  'keep its only copy alongside the backup ciphertext.',
+                  style='Sub.TLabel',wraplength=700).pack(anchor='w',pady=8)
+
+    def _load_existing_identity(self):
+        path=private_key_path()
+        self.key_location.set('Private recovery key: '+str(path))
+        if path.is_file() or path.is_symlink():
+            try:
+                public=recipient_for_identity(path)
+                self.identity.set(str(path))
+                self.recipient.set(public)
+            except (OSError,ValueError,RuntimeError) as exc:
+                self.key_location.set('Recovery key unavailable: '+str(exc))
+
+    def _prepare_identity(self):
+        if self.identity.get().strip():
+            path=Path(self.identity.get()).expanduser()
+            self.recipient.set(recipient_for_identity(path))
+            self.key_location.set('Private recovery key: '+str(path))
+            return False
+        info=ensure_default_identity()
+        self.identity.set(info['private_key_file'])
+        self.recipient.set(info['public_recipient'])
+        self.key_location.set('Private recovery key: '+info['private_key_file'])
+        return info['created']
 
     def _generate_key(self):
         name=simpledialog.askstring('Key name','New key name (letters, digits, hyphen):',parent=self)
         if not name:return
         try:
             from key_management import generate_key
-            data=generate_key(name)
-            self.identity.set(data['private_key_file']);self.recipient.set(data['public_recipient'])
-            self.key_info.insert('end',f"Generated {name}\nIdentity: {data['private_key_file']}\nRecipient: {data['public_recipient']}\n")
-        except Exception as exc:messagebox.showerror('Key generation failed',str(exc))
+            info=generate_key(name)
+            self.identity.set(info['private_key_file'])
+            self.recipient.set(info['public_recipient'])
+            self.key_location.set('Private recovery key: '+info['private_key_file'])
+            self.key_info.insert('end','Generated key at '+info['private_key_file']+'\n')
+        except Exception as exc:
+            messagebox.showerror('Key generation failed',str(exc))
+
+    def _choose_key(self):
+        path=filedialog.askopenfilename(title='Choose an existing age private key')
+        if not path:return
+        try:
+            self.recipient.set(recipient_for_identity(Path(path)))
+            self.identity.set(path)
+            self.key_location.set('Private recovery key: '+path)
+        except Exception as exc:
+            messagebox.showerror('Invalid private key',str(exc))
+
+    def _reveal_key(self):
+        path=Path(self.identity.get()) if self.identity.get() else private_key_path()
+        if not path.is_file():
+            messagebox.showinfo('Recovery key',
+                                'The key is generated when you start your first backup.\n'
+                                'Expected location:\n'+str(path))
+            return
+        messagebox.showinfo('Protect your recovery key',
+                            'Private age identity:\n'+str(path)+
+                            '\n\nSave a separate secure/offline copy. '
+                            'Anyone with this file can decrypt your backups.')
+        if sys.platform=='darwin':
+            try:subprocess.Popen(['open','-R',str(path)])
+            except OSError:pass
+        elif os.name=='nt':
+            try:subprocess.Popen(['explorer','/select,',str(path)])
+            except OSError:pass
 
     def _public_key(self):
         try:
-            from key_management import public_recipient
-            p=Path(self.identity.get())
-            cmd=subprocess.run(['age-keygen','-y',str(p)],text=True,capture_output=True,check=False)
-            if cmd.returncode:raise RuntimeError('Cannot read age identity')
-            self.recipient.set(cmd.stdout.strip())
-            self.key_info.insert('end','Public recipient: '+cmd.stdout.strip()+'\n')
-        except Exception as exc:messagebox.showerror('Identity error',str(exc))
+            path=Path(self.identity.get()) if self.identity.get() else private_key_path()
+            public=recipient_for_identity(path)
+            self.recipient.set(public)
+            self.key_info.insert('end','Public recipient: '+public+'\n')
+        except Exception as exc:
+            messagebox.showerror('Identity error',str(exc))
+
+    def _discover_github_account(self,force=False):
+        def work():
+            try:
+                result=subprocess.run(['gh','api','user','--jq','.login'],
+                                      text=True,capture_output=True,timeout=25,check=False)
+                login=result.stdout.strip()
+                if result.returncode or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',login):
+                    raise RuntimeError('Not connected. Choose Connect GitHub account.')
+                self.events.put(('github-login',(login,force)))
+            except (OSError,subprocess.TimeoutExpired,RuntimeError) as exc:
+                self.events.put(('github-error',str(exc)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def _connect_github(self):
+        if sys.platform=='darwin':
+            try:
+                binary=shutil.which('gh')
+                if not binary:
+                    raise RuntimeError('GitHub CLI (gh) is unavailable')
+                directory=settings_path().parent
+                if directory.is_symlink():
+                    raise RuntimeError('Refusing a symlinked application directory')
+                directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+                script=directory/'connect-github.command'
+                if script.is_symlink():
+                    raise RuntimeError('Refusing a symlinked GitHub sign-in launcher')
+                script.write_text('#!/bin/sh\n'+shlex.quote(binary)+
+                                  ' auth login --hostname github.com --git-protocol https --web\n'
+                                  'echo "Return to Multi Backup and click Detect after login."\n'
+                                  'read -r _\n',encoding='utf-8')
+                script.chmod(0o700)
+                subprocess.Popen(['open','-a','Terminal',str(script)])
+                self.github_status.set('Complete sign-in in Terminal, then click Detect.')
+            except (OSError,RuntimeError) as exc:
+                messagebox.showerror('GitHub sign-in',str(exc))
+        else:
+            messagebox.showinfo('GitHub authentication',
+                                'Run gh auth login in a terminal once, then click Detect.\n'
+                                'The connected account must match the GitHub username.')
 
     def _build_updates(self,page):
         self._heading(page,'Native application updates','Discover signed release channels; download only when SHA-256 is available.')
@@ -287,31 +474,53 @@ class BackupGUI(tk.Tk):
         ttk.Label(row,text='Release channel').pack(side='left',padx=(0,12))
         combo=ttk.Combobox(row,textvariable=self.update_channel,values=('stable','early-release'),width=22,state='readonly')
         combo.pack(side='left');combo.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
-        ttk.Button(page,text='Check for updates',style='Accent.TButton',command=self._check_updates).pack(anchor='w',pady=12)
-        ttk.Button(page,text='Download verified update',command=self._download_update).pack(anchor='w')
+        PremiumButton(page,text='Check for updates',style='Accent.TButton',command=self._check_updates).pack(anchor='w',pady=12)
+        PremiumButton(page,text='Download verified update',command=self._download_update).pack(anchor='w')
         ttk.Label(page,textvariable=self.update_status,wraplength=720).pack(anchor='w',pady=20)
         ttk.Label(page,text='After download, the operating system installer opens only with your approval.\n'
                   'Unattended installation is disabled until code signing and notarization are configured.',
                   style='Sub.TLabel',wraplength=720).pack(anchor='w',pady=12)
 
     def _build_settings(self,page):
-        self._heading(page,'Preferences','Global settings shared with the command-line interface.')
-        ttk.Checkbutton(page,text='Check for updates at startup and periodically',variable=self.autocheck,
-                        command=self._save_preferences).pack(anchor='w',pady=7)
+        self._heading(page,'Preferences','Application updates, CI retention and advanced limits.')
+        ttk.Checkbutton(page,text='Check for updates at startup and periodically',
+                        variable=self.autocheck,command=self._save_preferences).pack(anchor='w',pady=7)
         ttk.Label(page,text='Update channel').pack(anchor='w',pady=6)
-        c=ttk.Combobox(page,textvariable=self.update_channel,values=('stable','early-release'),state='readonly')
-        c.pack(anchor='w');c.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
-        ttk.Label(page,text='Keep CI artifacts only when cleanup is explicitly selected.',style='Sub.TLabel').pack(anchor='w',pady=20)
-        ttk.Button(page,text='Save all preferences',command=self._save_preferences).pack(anchor='w')
+        box=ttk.Combobox(page,textvariable=self.update_channel,
+                         values=('stable','early-release'),state='readonly')
+        box.pack(anchor='w')
+        box.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
+        self._line(page,'CI runs to back up per repo',self.backup_ci_runs)
+        ttk.Label(page,text='Always include this many recent GitHub Actions runs, '
+                  'even if you do not enable cleanup.',style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(1,12))
+        self._line(page,'CI runs to keep if cleaning',self.keep)
+        ttk.Label(page,text='Cleanup is optional, off by default, and happens only '
+                  'after a successful backup.',style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(1,12))
+        self._line(page,'Parallel workers',self.workers)
+        PremiumButton(page,text='Save all preferences',
+                      style='Accent.TButton',command=self._save_preferences).pack(
+                      anchor='w',pady=18)
 
     def _save_preferences(self):
         try:
-            self.cfg.update({'output_directory':self.root_dir.get(), 'update_channel':self.update_channel.get(),
-              'auto_update_check':self.autocheck.get(),'metadata_workers':int(self.workers.get()),
-              'keep_ci_runs':int(self.keep.get()),'cleanup_ci_artifacts':self.cleanup.get(),
-              'default_recipient':self.recipient.get()})
+            self.cfg.update({
+                'output_directory':self.root_dir.get(),
+                'github_username':self.github_user.get().strip(),
+                'backup_ci_runs':int(self.backup_ci_runs.get()),
+                'update_channel':self.update_channel.get(),
+                'auto_update_check':self.autocheck.get(),
+                'metadata_workers':int(self.workers.get()),
+                'keep_ci_runs':int(self.keep.get()),
+                'cleanup_ci_artifacts':self.cleanup.get(),
+                'default_recipient':self.recipient.get(),
+            })
             save_settings(self.cfg)
-        except Exception as exc:messagebox.showerror('Settings error',str(exc))
+            return True
+        except (ValueError,OSError,RuntimeError) as exc:
+            messagebox.showerror('Settings error',str(exc))
+            return False
 
     def _cli(self):
         if getattr(sys,'frozen',False):
@@ -322,36 +531,72 @@ class BackupGUI(tk.Tk):
 
     def _start(self):
         if self.proc is not None and self.proc.poll() is None:return
-        if self.backend.get() not in self.cfg['enabled_backends']:
-            messagebox.showwarning('Backend disabled','Enable this backend on the Plugins page first.');return
-        if self.backend.get()=='dropbox' and not self.recipient.get():
-            messagebox.showwarning('Recipient required','Dropbox incremental backup requires a public age recipient.');return
-        if self.backend.get()=='github' and not self.recipient.get() and not messagebox.askyesno('Interactive encryption',
-                'No age recipient provided. Each archive may request a password. Continue?'):
+        backend=self.backend.get()
+        if backend not in self.cfg['enabled_backends']:
+            messagebox.showwarning('Backend disabled',
+                                   'Enable this backend in Plugins first.')
             return
-        args=self._cli()+['backup','--backend',self.backend.get(),'--output-dir',self.root_dir.get(),
-                          '--keep-ci-runs',self.keep.get(),'--metadata-workers',self.workers.get(),'--json-progress']
-        if self.staging.get():args+=['--staging-dir',self.staging.get()]
+        chosen=self.github_user.get().strip()
+        if backend=='github' and not chosen:
+            messagebox.showwarning('GitHub username required',
+                                   'Enter your GitHub username or click Detect.')
+            return
+        if backend=='github' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',chosen):
+            messagebox.showerror('Invalid GitHub username','Please enter a valid GitHub login.')
+            return
+        try:
+            safe=prepare_destination(self.root_dir.get())
+            self.root_dir.set(str(safe))
+        except (OSError,ValueError,RuntimeError) as exc:
+            messagebox.showerror('Destination unavailable',str(exc))
+            return
+        if not self._save_preferences():return
+        try:
+            created=self._prepare_identity()
+        except (OSError,ValueError,RuntimeError) as exc:
+            messagebox.showerror('Backup encryption unavailable',str(exc))
+            return
+        if created:
+            messagebox.showwarning(
+                'Protect your recovery key',
+                'Your private age key was generated automatically at:\n\n'+
+                self.identity.get()+'\n\nKeep a separate secure copy. Without this '
+                'file, encrypted backups cannot be restored.')
+        args=self._cli()+['backup','--backend',backend,
+                          '--output-dir',self.root_dir.get(),
+                          '--max-runs-per-repo',self.backup_ci_runs.get(),
+                          '--keep-ci-runs',self.keep.get(),
+                          '--metadata-workers',self.workers.get(),
+                          '--recipient',self.recipient.get(),
+                          '--json-progress']
         if self.identity.get():args+=['--identity',self.identity.get()]
-        if self.recipient.get():args+=['--recipient',self.recipient.get()]
-        if self.backend.get()=='github':
-            if self.cleanup.get():args+=['--cleanup-ci-artifacts']
-            if self.cleanup.get() and self.dryrun.get():args+=['--cleanup-ci-dry-run']
+        if backend=='github':
+            args+=['--github-user',chosen]
+            if self.cleanup.get():
+                args+=['--cleanup-ci-artifacts']
+                if self.dryrun.get():args+=['--cleanup-ci-dry-run']
             if self.skiplogs.get():args+=['--skip-ci-logs']
             if self.restart.get():args+=['--restart']
-        elif self.dropbox_path.get():args+=['--dropbox-path',self.dropbox_path.get()]
-        self._save_preferences();self.progress['value']=0
-        self.start_button['state']='disabled';self.stop_button['state']='normal';self.status.set('Starting backup…')
+        elif self.dropbox_path.get():
+            args+=['--dropbox-path',self.dropbox_path.get()]
+        self.progress.set_percent(0)
+        self.start_button['state']='disabled'
+        self.stop_button['state']='normal'
+        self.status.set('Starting encrypted backup…')
         try:
             kw={'creationflags':subprocess.CREATE_NEW_PROCESS_GROUP} if os.name=='nt' else {}
             self.proc=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                                        text=True,bufsize=1,**kw)
-        except Exception as exc:
-            self.start_button['state']='normal';self.stop_button['state']='disabled'
-            messagebox.showerror('Start failed',str(exc));return
+        except (OSError,RuntimeError) as exc:
+            self.start_button['state']='normal'
+            self.stop_button['state']='disabled'
+            messagebox.showerror('Start failed',str(exc))
+            return
         for kind,stream in [('out',self.proc.stdout),('err',self.proc.stderr)]:
             threading.Thread(target=self._read,args=(kind,stream),daemon=True).start()
-        threading.Thread(target=lambda:self.events.put(('finished',self.proc.wait())),daemon=True).start()
+        proc=self.proc
+        threading.Thread(target=lambda:self.events.put(('finished',proc.wait())),
+                         daemon=True).start()
 
     def _read(self,kind,stream):
         for line in iter(stream.readline,''):self.events.put((kind,line.rstrip()))
@@ -374,10 +619,17 @@ class BackupGUI(tk.Tk):
                     try:
                         obj=json.loads(payload)
                         if obj.get('type')=='progress':
-                            self.progress['value']=obj.get('percent',0)
+                            self.progress.set_percent(obj.get('percent',0))
                             self.status.set(obj.get('message',''))
                         else:self._log(payload)
                     except ValueError:self._log(payload)
+                elif kind=='github-login':
+                    login,force=payload
+                    if force or not self.github_user.get().strip():
+                        self.github_user.set(login)
+                    self.github_status.set('Connected to GitHub as '+login)
+                elif kind=='github-error':
+                    self.github_status.set('GitHub not connected: '+str(payload))
                 elif kind=='update':
                     self.update_status.set(payload)
                 else:self._log(payload)

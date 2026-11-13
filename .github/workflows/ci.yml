@@ -89,10 +89,10 @@ jobs:
         run: bash scripts/package-macos-test-dmg.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: TEST-ONLY-macos-${{ matrix.arch }}
+          name: macos-${{ matrix.arch }}-preview
           path: |
-            multi-backup-macos-${{ matrix.arch }}-test.dmg
-            checksums-macos-${{ matrix.arch }}-test.txt
+            multi-backup-macos-${{ matrix.arch }}.dmg
+            checksums-macos-${{ matrix.arch }}.txt
           if-no-files-found: error
           retention-days: 14
 

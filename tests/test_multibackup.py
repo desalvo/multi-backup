@@ -13,7 +13,7 @@ from backends.dropbox_backend import (object_key, DropboxAPI, run as dropbox_run
                                       dropbox_content_hash, verify_downloaded_revision)
 from settings import load_settings,save_settings,set_backend_enabled
 from updater import release_endpoint,detect_asset_prefix,select_asset,verified_asset_from_release,download_asset
-from key_management import private_key_path
+from key_management import private_key_path,ensure_default_identity
 from version import VERSION
 
 
@@ -79,6 +79,117 @@ class PluginTests(unittest.TestCase):
         self.assertIn("self.bind('<Return>'",sidebar)
         self.assertIn("self.bind('<space>'",sidebar)
         self.assertIn("self.bind('<Button-1>'",sidebar)
+
+    def test_simple_backup_defaults_and_ci_retention_are_independent(self):
+        from multi_backup import build_parser
+        from settings import DEFAULTS
+        args=build_parser().parse_args(['backup'])
+        self.assertEqual(args.max_runs_per_repo,5)
+        self.assertFalse(args.cleanup_ci_artifacts)
+        self.assertEqual(DEFAULTS['backup_ci_runs'],5)
+        self.assertEqual(DEFAULTS['keep_ci_runs'],5)
+        self.assertEqual(args.keep_ci_runs,5)
+        root=Path(__file__).resolve().parents[1]
+        src=(root/'gui.py').read_text('utf-8')
+        core=(root/'multi_backup.py').read_text('utf-8')
+        self.assertIn("'--max-runs-per-repo',self.backup_ci_runs.get()",src)
+        self.assertIn("'--github-user',chosen",src)
+        self.assertIn('self._metadata(repos)',core)
+        self.assertLess(core.index('self._metadata(repos)'),core.index('self._cleanup(repos)',core.index('def run(self):')))
+        self.assertIn("if self.counts['errors']==0:",core)
+
+    def test_ci_index_backups_latest_n_without_cleanup(self):
+        from multi_backup import ResumableBackup
+        with tempfile.TemporaryDirectory() as folder:
+            backup=object.__new__(ResumableBackup)
+            backup.cycle_dir=Path(folder)
+            backup.args=argparse.Namespace(max_runs_per_repo=2)
+            backup.journal=mock.Mock()
+            backup.journal.done.return_value=False
+            backup.cleanup_reports={}
+            backup.backup=mock.Mock()
+            backup.backup.api.return_value=[
+                {'id':8,'created_at':'2026-11-09T01:00:00Z'},
+                {'id':10,'created_at':'2026-11-13T01:00:00Z'},
+                {'id':9,'created_at':'2026-11-12T01:00:00Z'},
+            ]
+            selected=backup._ci_index('account/repo')
+            self.assertEqual([item['id'] for item in selected],[10,9])
+            backup.journal.record.assert_called_once()
+
+    def test_key_identity_is_discovered_or_generated_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            dest=private_key_path('default',root)
+            with mock.patch('key_management.generate_key',return_value={
+                'private_key_file':str(dest),'public_recipient':'age1test'
+            }) as generated:
+                data=ensure_default_identity(root)
+            self.assertTrue(data['created'])
+            generated.assert_called_once()
+            dest.write_text('AGE-SECRET-KEY-EXAMPLE\n')
+            if os.name!='nt':dest.chmod(0o600)
+            with mock.patch('key_management.recipient_for_identity',return_value='age1existing') as existing:
+                data=ensure_default_identity(root)
+            self.assertFalse(data['created'])
+            self.assertEqual(data['private_key_file'],str(dest))
+            self.assertEqual(data['public_recipient'],'age1existing')
+            existing.assert_called_once_with(dest)
+
+    def test_private_backup_destination_requires_no_manual_chmod(self):
+        from backup_paths import prepare_destination
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            chosen=root/'selected'
+            chosen.mkdir()
+            if os.name!='nt':
+                chosen.chmod(0o755)
+                actual=prepare_destination(chosen)
+                self.assertEqual(actual,chosen/'Multi-Backup')
+                self.assertEqual(actual.stat().st_mode & 0o077,0)
+                self.assertEqual(prepare_destination(actual),actual)
+                existing=root/'old-backup'
+                existing.mkdir(mode=0o755)
+                existing.chmod(0o755)
+                (existing/'.state').mkdir()
+                with self.assertRaises(PermissionError):
+                    prepare_destination(existing)
+            else:
+                self.assertEqual(prepare_destination(chosen),chosen)
+            if os.name!='nt':
+                shortcut=root/'alias'
+                shortcut.symlink_to(chosen,target_is_directory=True)
+                with self.assertRaises(ValueError):
+                    prepare_destination(shortcut)
+
+    def test_native_buttons_progress_and_sidebar_are_not_aqua_dependent(self):
+        from ui_widgets import PremiumButton,GradientProgress,progress_color
+        import tkinter
+        self.assertTrue(issubclass(PremiumButton,tkinter.Canvas))
+        self.assertTrue(issubclass(GradientProgress,tkinter.Canvas))
+        self.assertEqual(progress_color(0),progress_color(-10))
+        self.assertEqual(progress_color(100),progress_color(125))
+        red=progress_color(0)
+        green=progress_color(100)
+        self.assertGreater(int(red[1:3],16),int(red[3:5],16))
+        self.assertGreater(int(green[3:5],16),int(green[1:3],16))
+        root=Path(__file__).resolve().parents[1]
+        gui=(root/'gui.py').read_text('utf-8')
+        self.assertNotIn('ttk.Button(',gui)
+        self.assertIn('self.sidebar.pack_forget()',gui)
+        self.assertIn("self.progress.set_percent(",gui)
+        self.assertIn('self._prepare_identity()',gui)
+
+    def test_mac_early_release_uses_clean_file_names_without_bypassing_stable(self):
+        root=Path(__file__).resolve().parents[1]
+        script=(root/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
+        native=(root/'.github/workflows/build-native.yml').read_text('utf-8')
+        self.assertIn('DMG="multi-backup-macos-${MAC_ARCH}.dmg"',script)
+        self.assertNotIn('-test.dmg"',script)
+        self.assertIn("needs.qualify.outputs.channel == 'stable'",native)
+        self.assertIn('multi-backup-macos-arm64-test.dmg',native)
+        self.assertIn("gh release edit",native)
+        self.assertIn("--prerelease --title 'Multi Backup - Early Release'",native)
 
     def test_dropbox_keys_are_stable_and_revision_sensitive(self):
         a={'.tag':'file','id':'id:aaa','rev':'ab12'}
@@ -205,7 +316,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn('    needs: [production-gate]',ci)
         self.assertIn('    needs: [production-gate, macos-smoke]',ci)
         self.assertIn('MAC_UNSIGNED_SMOKE',ci)
-        self.assertIn('TEST-ONLY-macos-',ci)
+        self.assertIn('macos-${{ matrix.arch }}-preview',ci)
+        self.assertNotIn('TEST-ONLY-macos-',ci)
         self.assertIn('package-macos-test-dmg.sh',ci)
         self.assertIn('    uses: ./.github/workflows/build-native.yml',ci)
         self.assertIn('on:\n  workflow_call:',native)
@@ -246,6 +358,10 @@ class PluginTests(unittest.TestCase):
         content=(Path(__file__).resolve().parents[1]/'gui_launcher.py').read_text('utf-8')
         self.assertIn('def bundle_self_test',content)
         self.assertIn("'--self-test'",content)
+        self.assertIn("def gui_smoke()",content)
+        self.assertIn("'--gui-smoke'",content)
+        pkg=(Path(__file__).resolve().parents[1]/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
+        self.assertIn(' --gui-smoke',pkg)
 
     def test_ci_workflow_uses_installable_windows_encryption_package(self):
         workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')

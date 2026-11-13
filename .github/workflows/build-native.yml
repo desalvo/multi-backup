@@ -286,15 +286,15 @@ jobs:
               --latest --notes 'Stable release. Install only signed and verified packages.'
           fi
           if [[ "$CHANNEL" == early-release ]]; then
-            # Discard legacy, untested DMG names so testers cannot accidentally
-            # download a nonworking package from the previous release.
-            for obsolete in multi-backup-macos-arm64.dmg multi-backup-macos-x86_64.dmg; do
+            # Remove legacy -test DMG assets as new clean names become available.
+            # The release remains explicitly marked as a prerelease.
+            for obsolete in multi-backup-macos-arm64-test.dmg multi-backup-macos-x86_64-test.dmg; do
               if gh release view "$TARGET" --json assets -q '.assets[].name' | grep -Fxq "$obsolete"; then
                 gh release delete-asset "$TARGET" "$obsolete" --yes
               fi
             done
-            gh release edit "$TARGET" --prerelease --title 'Multi Backup - Early Release (TEST ONLY)' \
-              --notes 'TEST ONLY: macOS DMGs are ad-hoc signed, NOT Apple Developer ID signed or notarized. After verifying SHA-256, drag the sole Multi Backup.app into Applications; first launch may require explicit Open Anyway approval via macOS Privacy & Security. Never disable Gatekeeper globally. Stable distribution is not yet available.'
+            gh release edit "$TARGET" --prerelease --title 'Multi Backup - Early Release' \
+              --notes 'PRE-RELEASE: macOS DMGs use ad-hoc code signing and are NOT Apple Developer ID signed or notarized. Verify SHA-256, copy Multi Backup.app to Applications, and explicitly approve the first launch in macOS Privacy & Security if required. Never disable Gatekeeper globally. Stable distribution remains gated on signing and notarization.'
           fi
           gh release upload "$TARGET" release/* --clobber
       - uses: actions/upload-artifact@v4

@@ -64,8 +64,12 @@ def validate():
     assert 'spctl --assess' in verify and 'hdiutil attach' in verify
     assert 'MAC_UNSIGNED_SMOKE' in str(jobs['macos-smoke']['steps']), 'Missing unsigned app boot test'
     smoke=str(jobs['macos-smoke']['steps'])
-    assert 'TEST-ONLY-macos-' in smoke, 'Missing clearly labeled macOS test artifact'
-    assert 'package-macos-test-dmg.sh' in smoke, 'Missing installable macOS TEST DMG'
+    assert 'macos-' in smoke and '-preview' in smoke, 'Missing clearly labeled macOS preview artifact'
+    assert 'package-macos-test-dmg.sh' in smoke, 'Missing installable macOS preview DMG'
+    assert 'TEST-ONLY' not in smoke, 'Legacy test-only image naming leaked'
+    assert 'multi-backup-macos-' in test_package and '-test.dmg' not in test_package
+    assert 'multi-backup-macos-arm64-test.dmg' in native['jobs']['publish']['steps'][-2].get('run','') or (
+        'multi-backup-macos-arm64-test.dmg' in str(native['jobs']['publish']['steps'])), 'Old early images must be retired'
     assert 'gh release' not in smoke, 'Smoke job must never publish a GitHub release'
     native_macos_steps='\n'.join(x.get('name','') for x in release['macos']['steps'])
     for required in ('Developer ID','Notarize app','Mount DMG'):
