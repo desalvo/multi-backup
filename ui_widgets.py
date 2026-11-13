@@ -211,7 +211,8 @@ class GradientProgress(tk.Canvas):
             gd.line((px, y2 - 8, px, y2 - 2), fill=(
                 *_blend(colour, (15, 35, 47), .25), 255))
         mask = Image.new('L', (width, height), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((x1 + 2, y1 + 2, x2 - 2, y2 - 2),
+        ImageDraw.Draw(mask).rounded_rectangle((x1 + 2, y1 + 2,
+                                                min(x2 - 2, x1 + 2 + fill_width), y2 - 2),
                                                 radius=10, fill=255)
         img.paste(gradient, (0, 0), mask)
         draw = ImageDraw.Draw(img, 'RGBA')
