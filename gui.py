@@ -8,6 +8,9 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -18,6 +21,9 @@ from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
+from ui_widgets import PremiumButton, GradientProgress
+from key_management import ensure_default_identity, private_key_path, recipient_for_identity
+from settings import settings_path
 from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
 
 ROOT=Path(__file__).resolve().parent
@@ -37,7 +43,16 @@ class BackupGUI(tk.Tk):
         self.cfg=load_settings()
         self.events=queue.Queue();self.proc=None;self.selected_archive=None;self.archive_index=[]
         self.root_dir=tk.StringVar(value=self.cfg['output_directory'])
-        self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar(value=self.cfg.get('default_recipient',''))
+        self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar()
+        self.github_user=tk.StringVar(value=self.cfg.get('github_username',''))
+        self.github_status=tk.StringVar(value='Checking your GitHub connection…')
+        self.key_location=tk.StringVar(value='Recovery key: '+str(private_key_path()))
+        self.backup_ci_runs=tk.StringVar(value=str(self.cfg.get('backup_ci_runs',5)))
+        self.ci_hint=tk.StringVar()
+        self.backup_ci_runs.trace_add('write',lambda *_:self._update_ci_hint())
+        self._update_ci_hint()
+        self.sidebar_visible=True
+        self.advanced_visible=False
         self.backend=tk.StringVar(value='github');self.dropbox_path=tk.StringVar()
         self.keep=tk.StringVar(value=str(self.cfg['keep_ci_runs']))
         self.workers=tk.StringVar(value=str(self.cfg['metadata_workers']))
@@ -47,6 +62,9 @@ class BackupGUI(tk.Tk):
         self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
         self.update_status=tk.StringVar(value='Not checked yet')
         self._make_styles();self._make_shell();self._show('Dashboard')
+        self._load_existing_identity()
+        self.after(350,self._discover_github_account)
+        self.bind('<Control-b>',lambda _event:self._toggle_sidebar())
         self.after(120,self._poll)
         if self.cfg['auto_update_check']:
             self.after(1250,self._check_updates)
@@ -108,6 +126,13 @@ class BackupGUI(tk.Tk):
                  font=('Helvetica Neue',9),fg='#B4CAE4',
                  bg=SIDEBAR_BG).pack(anchor='w')
         self.content=tk.Frame(self,bg='#f5f8fc');self.content.pack(fill='both',expand=True)
+        toolbar=ttk.Frame(self.content)
+        toolbar.pack(fill='x',padx=(16,18),pady=(7,5))
+        self.menu_button=PremiumButton(toolbar,text='Hide navigation',
+                                       command=self._toggle_sidebar)
+        self.menu_button.pack(side='left')
+        ttk.Label(toolbar,text='PRIVATE BACKUP WORKSPACE',
+                  style='Sub.TLabel').pack(side='right')
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
         self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
         body=tk.Frame(self.content,bg='#f5f8fc');body.pack(fill='both',expand=True)
@@ -121,6 +146,20 @@ class BackupGUI(tk.Tk):
         self._build_encryption(self.pages['Encryption'])
         self._build_updates(self.pages['Updates'])
         self._build_settings(self.pages['Settings'])
+
+    def _toggle_sidebar(self):
+        self.sidebar_visible=not self.sidebar_visible
+        if self.sidebar_visible:
+            self.sidebar.pack(side='left',fill='y',before=self.content)
+        else:
+            self.sidebar.pack_forget()
+        self.menu_button.set_text('Hide navigation' if self.sidebar_visible
+                                  else 'Show navigation')
+
+    def _update_ci_hint(self):
+        count=self.backup_ci_runs.get().strip() or '?'
+        self.ci_hint.set('Latest '+count+
+            ' GitHub Actions runs per repository backed up regardless of CI cleanup.')
 
     def _draw_hero(self,event):
         canvas=self.hero;canvas.delete('all');w=max(1,event.width);h=185
@@ -160,9 +199,9 @@ class BackupGUI(tk.Tk):
             tk.Label(frame,text=subtitle,font=('Helvetica',9),fg='#4e6480',bg='white').pack(anchor='w',padx=15)
         ttk.Label(page,text='Start with a provider and choose what to protect.',style='Title.TLabel').pack(anchor='w',pady=(35,14))
         action=ttk.Frame(page);action.pack(anchor='w')
-        ttk.Button(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
-        ttk.Button(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
-        ttk.Button(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
+        PremiumButton(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
+        PremiumButton(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
+        PremiumButton(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
         ttk.Label(page,text='Latest update status',style='Sub.TLabel').pack(anchor='w',pady=(38,8))
         ttk.Label(page,textvariable=self.update_status,wraplength=650).pack(anchor='w')
 
@@ -171,8 +210,9 @@ class BackupGUI(tk.Tk):
         ttk.Label(row,text=label,width=20).pack(side='left')
         ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
         if browse:
-            ttk.Button(row,text='Browse',command=lambda:var.set(
+            PremiumButton(row,text='Browse',command=lambda:var.set(
                 filedialog.askopenfilename() if browse=='file' else filedialog.askdirectory())).pack(side='left',padx=(6,0))
+        return row
 
     def _build_backup(self,page):
         self._heading(page,'New backup','Runs in a separate process. Interrupt and resume safely from verified checkpoints.')
@@ -195,9 +235,9 @@ class BackupGUI(tk.Tk):
                           ('Force fresh cycle',self.restart),('Skip CI logs',self.skiplogs)]:
             ttk.Checkbutton(options,text=label,variable=var).pack(side='left',padx=(0,20))
         commands=ttk.Frame(page);commands.pack(fill='x',pady=10)
-        self.start_button=ttk.Button(commands,text='Run or resume',style='Accent.TButton',command=self._start)
+        self.start_button=PremiumButton(commands,text='Run or resume',style='Accent.TButton',command=self._start)
         self.start_button.pack(side='left')
-        self.stop_button=ttk.Button(commands,text='Interrupt safely',command=self._stop,state='disabled')
+        self.stop_button=PremiumButton(commands,text='Interrupt safely',command=self._stop,state='disabled')
         self.stop_button.pack(side='left',padx=12)
         self.status=tk.StringVar(value='Ready')
         ttk.Label(page,textvariable=self.status).pack(anchor='w',pady=5)
@@ -220,7 +260,7 @@ class BackupGUI(tk.Tk):
         row=ttk.Frame(page);row.pack(fill='x')
         for name,fn in [('Refresh',self._refresh),('List contents',self._view),('Show file',self._show_member),
                         ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount)]:
-            ttk.Button(row,text=name,command=fn).pack(side='left',padx=(0,7))
+            PremiumButton(row,text=name,command=fn).pack(side='left',padx=(0,7))
         self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.archives.pack(fill='both',expand=True,pady=(12,5))
         ttk.Label(page,text='Encrypted archive members').pack(anchor='w')
@@ -253,9 +293,9 @@ class BackupGUI(tk.Tk):
         ttk.Label(page,text='Private keys stay on your computer. Backups are encrypted before publication.',
                   style='Sub.TLabel').pack(anchor='w')
         row=ttk.Frame(page);row.pack(fill='x',pady=20)
-        ttk.Button(row,text='Generate new age key',style='Accent.TButton',command=self._generate_key).pack(side='left')
-        ttk.Button(row,text='Show public recipient',command=self._public_key).pack(side='left',padx=12)
-        ttk.Button(row,text='Select existing key',command=lambda:self.identity.set(filedialog.askopenfilename())).pack(side='left')
+        PremiumButton(row,text='Generate new age key',style='Accent.TButton',command=self._generate_key).pack(side='left')
+        PremiumButton(row,text='Show public recipient',command=self._public_key).pack(side='left',padx=12)
+        PremiumButton(row,text='Select existing key',command=lambda:self.identity.set(filedialog.askopenfilename())).pack(side='left')
         self.key_info=tk.Text(page,height=8,wrap='word',background='white',relief='flat')
         self.key_info.pack(fill='x',pady=12)
         ttk.Label(page,text='Save private identities on encrypted storage, back them up separately and avoid sharing them.',
@@ -287,8 +327,8 @@ class BackupGUI(tk.Tk):
         ttk.Label(row,text='Release channel').pack(side='left',padx=(0,12))
         combo=ttk.Combobox(row,textvariable=self.update_channel,values=('stable','early-release'),width=22,state='readonly')
         combo.pack(side='left');combo.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
-        ttk.Button(page,text='Check for updates',style='Accent.TButton',command=self._check_updates).pack(anchor='w',pady=12)
-        ttk.Button(page,text='Download verified update',command=self._download_update).pack(anchor='w')
+        PremiumButton(page,text='Check for updates',style='Accent.TButton',command=self._check_updates).pack(anchor='w',pady=12)
+        PremiumButton(page,text='Download verified update',command=self._download_update).pack(anchor='w')
         ttk.Label(page,textvariable=self.update_status,wraplength=720).pack(anchor='w',pady=20)
         ttk.Label(page,text='After download, the operating system installer opens only with your approval.\n'
                   'Unattended installation is disabled until code signing and notarization are configured.',
@@ -302,7 +342,7 @@ class BackupGUI(tk.Tk):
         c=ttk.Combobox(page,textvariable=self.update_channel,values=('stable','early-release'),state='readonly')
         c.pack(anchor='w');c.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
         ttk.Label(page,text='Keep CI artifacts only when cleanup is explicitly selected.',style='Sub.TLabel').pack(anchor='w',pady=20)
-        ttk.Button(page,text='Save all preferences',command=self._save_preferences).pack(anchor='w')
+        PremiumButton(page,text='Save all preferences',command=self._save_preferences).pack(anchor='w')
 
     def _save_preferences(self):
         try:
