@@ -12,7 +12,12 @@ def bundle_self_test():
     import backends.dropbox_backend
     from gui import asset
     from runtime_bootstrap import configure_path
+    from updater import _verified_https_context
+    import certifi
     configure_path()
+    assert Path(certifi.where()).is_file(), 'Missing frozen CA certificate bundle'
+    tls=_verified_https_context()
+    assert tls.check_hostname, 'TLS verification must be enabled'
     for filename in ('hero.jpg', 'multi-backup.png', 'icon-64.png'):
         path=Path(asset(filename))
         if not path.is_file():
