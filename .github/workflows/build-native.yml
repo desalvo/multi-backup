@@ -84,7 +84,7 @@ jobs:
         run: |
           brew install age gh git-lfs
           for helper in age age-keygen gh git-lfs; do command -v "$helper" >/dev/null || exit 1; done
-          python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=10,<13'
+          python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=13.0.0,<14'
       - name: Build CLI and application bundle
         shell: bash
         run: |
@@ -146,7 +146,7 @@ jobs:
         with: {python-version: '3.12'}
       - name: Python tools
         shell: pwsh
-        run: python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=10,<13'
+        run: python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=13.0.0,<14'
       - name: Windows binary and executable dependencies
         shell: pwsh
         run: |
@@ -206,7 +206,7 @@ jobs:
             dnf install -y python3.11 python3.11-pip python3.11-tkinter
             PYTHON=python3.11
           fi
-          $PYTHON -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=10,<13'
+          $PYTHON -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=13.0.0,<14'
           $PYTHON -m PyInstaller --onefile --clean --noconfirm --name multi-backup \
             --add-data assets:assets multi_backup.py
           $PYTHON -m PyInstaller --onefile --windowed --clean --noconfirm --name multi-backup-gui \

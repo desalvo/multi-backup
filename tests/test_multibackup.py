@@ -106,6 +106,20 @@ class PluginTests(unittest.TestCase):
         self.assertIn('bandit -q -r .',text)
         self.assertIn('python -m pip_audit -r requirements.txt',text)
 
+    def test_security_audit_dependency_policy_covers_all_native_builds(self):
+        """Pillow <13 has 42 upstream advisories; never ship a vulnerable pinned binary."""
+        root = Path(__file__).resolve().parents[1]
+        requirements = (root/'requirements.txt').read_text('utf-8')
+        documentation_requirements = (root/'requirements-docs.txt').read_text('utf-8')
+        native = (root/'.github/workflows/build-native.yml').read_text('utf-8')
+        security = (root/'.github/workflows/ci.yml').read_text('utf-8')
+        self.assertIn('Pillow>=13.0.0,<14', requirements)
+        self.assertIn('Pillow>=13.0.0,<14', documentation_requirements)
+        self.assertEqual(native.count("'Pillow>=13.0.0,<14'"), 3)
+        self.assertNotIn('Pillow>=10', native)
+        self.assertNotIn('Pillow>=10', requirements)
+        self.assertIn('python -m pip_audit -r requirements.txt', security)
+
     def test_ci_workflow_uses_installable_windows_encryption_package(self):
         workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')
         self.assertIn('choco install age.portable', workflow)
