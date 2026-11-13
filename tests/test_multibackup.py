@@ -245,6 +245,32 @@ class PluginTests(unittest.TestCase):
             with self.assertRaises(VaultError):
                 create_identity('strong-passphrase-12345',file)
 
+    def test_encrypted_recovery_preserves_previous_vault_and_checks_recipient(self):
+        from secure_vault import (seal_identity,_write_vault,unlock,
+                                  recover_existing_vault,VaultError)
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d)
+            target=base/'default.agevault'
+            rescue=base/'rescue.agevault'
+            secret=b'AGE-SECRET-KEY-'+b'A'*24+b'\n'
+            pub='age1'+'q'*50
+            _write_vault(target,seal_identity(secret,'old-vault-password-123',pub))
+            _write_vault(rescue,seal_identity(secret,'recovery-password-456',pub))
+            self.assertEqual(recover_existing_vault(
+                rescue,'recovery-password-456','new-vault-password-789',target),(secret,pub))
+            self.assertEqual(unlock('new-vault-password-789',target),(secret,pub))
+            self.assertEqual(unlock('old-vault-password-123',
+                             target.with_name(target.name+'.previous')),(secret,pub))
+            with self.assertRaises(VaultError):
+                recover_existing_vault(rescue,'recovery-password-456',
+                                       'another-password-987',target)
+            wrong=base/'wrong.agevault'
+            _write_vault(wrong,seal_identity(secret,'other-vault-password-456',
+                                              'age1'+'p'*50))
+            with self.assertRaises(VaultError):
+                recover_existing_vault(wrong,'other-vault-password-456',
+                                       'new-password-987654',target)
+
     def test_restores_are_strictly_bound_to_original_plugin(self):
         from restore_ops import restore_provider,validate_plugin,RestoreError,restore_local
         with tempfile.TemporaryDirectory() as directory:
