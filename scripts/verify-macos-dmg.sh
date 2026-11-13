@@ -36,6 +36,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 xcrun stapler validate "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 "$APP/Contents/MacOS/Multi Backup" --self-test
+"$APP/Contents/MacOS/Multi Backup" --gui-smoke
 "$APP/Contents/MacOS/multi-backup" --version
 "$APP/Contents/Resources/bin/age" --version
 printf 'Signed, notarized, installable app verified after extracting DMG (%s)\n' "$MAC_ARCH"
