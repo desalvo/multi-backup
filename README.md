@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r010-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r011-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -117,3 +117,7 @@ To test the native app before general distribution, download `TEST-ONLY-macos-ar
 
 **Testing only:** the Mac app is ad-hoc signed, **not** Apple Developer ID signed or notarized. Gatekeeper can block its first launch. First attempt to open the app, then choose **System Settings → Privacy & Security → Open Anyway** if you trust the GitHub Actions build (labels vary by macOS release). Never disable Gatekeeper globally or use a command to strip quarantine. Do not use the preview as a generally trusted software distribution; `stable` still requires developer signing/notarization and all the other platform acceptance tests.
 
+
+### Native navigation refresh (r011)
+
+The desktop sidebar uses a high-contrast dark-navy design with clean rounded navigation surfaces, vector-drawn icons and explicit white text. This avoids the macOS Aqua Tk button foreground-colour override that could make sidebar labels unreadable. The active page has a vivid blue accent, hover and keyboard-focus feedback. Buttons are operable with mouse or Tab + Return/Space, and the same sidebar renders across macOS, Windows and Linux.

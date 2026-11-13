@@ -61,6 +61,25 @@ class PluginTests(unittest.TestCase):
     def test_sane_public_version(self):
         self.assertRegex(VERSION,r'^\d+\.\d+\.\d+-r\d+-rc\d+$')
 
+    def test_sidebar_navigation_uses_explicit_high_contrast_canvas_text(self):
+        from sidebar_nav import (NAV_ITEMS,NAV_TEXT,NAV_NORMAL,NAV_HOVER,
+                                 NAV_ACTIVE,SidebarNavItem,contrast_ratio)
+        self.assertEqual([name for name,_ in NAV_ITEMS],
+                         ['Dashboard','Backup','Archives','Plugins',
+                          'Encryption','Updates','Settings'])
+        for background in (NAV_NORMAL,NAV_HOVER,NAV_ACTIVE):
+            self.assertGreaterEqual(contrast_ratio(NAV_TEXT,background),7.0)
+        self.assertTrue(issubclass(SidebarNavItem,__import__('tkinter').Canvas))
+        root=Path(__file__).resolve().parents[1]
+        gui=(root/'gui.py').read_text('utf-8')
+        sidebar=(root/'sidebar_nav.py').read_text('utf-8')
+        self.assertIn('SidebarNavItem(self.sidebar,name,icon',gui)
+        self.assertIn('self.nav[key].set_active(key==name)',gui)
+        self.assertIn("fill=NAV_TEXT",sidebar)
+        self.assertIn("self.bind('<Return>'",sidebar)
+        self.assertIn("self.bind('<space>'",sidebar)
+        self.assertIn("self.bind('<Button-1>'",sidebar)
+
     def test_dropbox_keys_are_stable_and_revision_sensitive(self):
         a={'.tag':'file','id':'id:aaa','rev':'ab12'}
         self.assertEqual(object_key(a),object_key(a))
