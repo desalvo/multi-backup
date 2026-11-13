@@ -16,13 +16,21 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+from contextlib import contextmanager
 from pathlib import Path
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
 from ui_widgets import PremiumButton, GradientProgress
-from key_management import ensure_default_identity, private_key_path, recipient_for_identity
+from key_management import private_key_path
+from secure_vault import (vault_path,load_vault,unlock,create_identity,migrate_legacy,
+                          export_recovery_copy,change_password,import_recovery_copy,
+                          temporary_identity,VaultError)
+import biometric
+from restore_ops import (RestoreError,restore_provider,validate_plugin,
+                         restore_local,restore_github_new_repository,
+                         restore_dropbox_new_file)
 from backup_paths import prepare_destination
 from settings import settings_path
 from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
@@ -43,11 +51,14 @@ class BackupGUI(tk.Tk):
         except Exception:pass
         self.cfg=load_settings()
         self.events=queue.Queue();self.proc=None;self.selected_archive=None;self.archive_index=[]
+        self._session_secret=None
+        self._locked=True
+        self._startup_completed=False
         self.root_dir=tk.StringVar(value=self.cfg['output_directory'])
         self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar()
         self.github_user=tk.StringVar(value=self.cfg.get('github_username',''))
         self.github_status=tk.StringVar(value='Checking your GitHub connection…')
-        self.key_location=tk.StringVar(value='Recovery key: '+str(private_key_path()))
+        self.key_location=tk.StringVar(value='Password-protected recovery vault: '+str(vault_path()))
         self.backup_ci_runs=tk.StringVar(value=str(self.cfg.get('backup_ci_runs',5)))
         self.ci_hint=tk.StringVar()
         self.backup_ci_runs.trace_add('write',lambda *_:self._update_ci_hint())
@@ -62,14 +73,18 @@ class BackupGUI(tk.Tk):
         self.update_channel=tk.StringVar(value=self.cfg['update_channel'])
         self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
         self.update_status=tk.StringVar(value='Not checked yet')
-        self._make_styles();self._make_shell();self._show('Dashboard')
-        self._load_existing_identity()
-        self.after(350,self._discover_github_account)
+        self._make_styles();self._make_shell()
+        self.protocol('WM_DELETE_WINDOW',self._quit_securely)
         self.bind('<Control-b>',lambda _event:self._toggle_sidebar())
+        for index,(name,_) in enumerate(NAV_ITEMS,1):
+            self.bind('<Control-Key-'+str(index)+'>',
+                      lambda _event,n=name:self._show(n))
+        self.bind_all('<MouseWheel>',self._scroll_pages)
+        self.bind_all('<Button-4>',self._scroll_pages)
+        self.bind_all('<Button-5>',self._scroll_pages)
         self.after(120,self._poll)
-        if self.cfg['auto_update_check']:
-            self.after(1250,self._check_updates)
-            self.after(self.cfg['update_interval_hours']*3600*1000,self._periodic_update)
+        # No network requests, page actions or background jobs before key unlock.
+        self.after(35,self._startup_security)
 
     def _make_styles(self):
         style=ttk.Style(self)
@@ -136,19 +151,32 @@ class BackupGUI(tk.Tk):
                   style='Sub.TLabel').pack(side='right')
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
         self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
-        body=tk.Frame(self.content,bg='#f5f8fc');body.pack(fill='both',expand=True)
+        body=tk.Frame(self.content,bg='#f5f8fc')
+        body.pack(fill='both',expand=True)
+        self.page_canvas=tk.Canvas(body,bg='#f5f8fc',highlightthickness=0,borderwidth=0)
+        page_scroll=ttk.Scrollbar(body,orient='vertical',command=self.page_canvas.yview)
+        self.page_canvas.configure(yscrollcommand=page_scroll.set)
+        page_scroll.pack(side='right',fill='y')
+        self.page_canvas.pack(side='left',fill='both',expand=True)
+        self.page_host=ttk.Frame(self.page_canvas)
+        self.page_window=self.page_canvas.create_window((0,0),window=self.page_host,anchor='nw')
+        self.page_host.bind('<Configure>',lambda _ev:self._sync_page_scroll())
+        self.page_canvas.bind('<Configure>',self._resize_page_host)
         self.pages={}
         for name in self.nav:
-            page=ttk.Frame(body);self.pages[name]=page
+            page=ttk.Frame(self.page_host)
+            self.pages[name]=page
         self._build_dashboard(self.pages['Dashboard'])
         self._build_backup(self.pages['Backup'])
         self._build_archives(self.pages['Archives'])
+        self._build_restore(self.pages['Restore'])
         self._build_plugins(self.pages['Plugins'])
         self._build_encryption(self.pages['Encryption'])
         self._build_updates(self.pages['Updates'])
         self._build_settings(self.pages['Settings'])
 
     def _toggle_sidebar(self):
+        if self._locked:return
         self.sidebar_visible=not self.sidebar_visible
         if self.sidebar_visible:
             self.sidebar.pack(side='left',fill='y',before=self.content)
@@ -156,6 +184,32 @@ class BackupGUI(tk.Tk):
             self.sidebar.pack_forget()
         self.menu_button.set_text('Hide navigation' if self.sidebar_visible
                                   else 'Show navigation')
+
+    def _resize_page_host(self,event):
+        self.page_canvas.itemconfigure(self.page_window,width=event.width)
+        self._sync_page_scroll()
+
+    def _sync_page_scroll(self):
+        bounds=self.page_canvas.bbox('all')
+        if bounds:self.page_canvas.configure(scrollregion=bounds)
+
+    def _scroll_pages(self,event):
+        if self._locked or not hasattr(self,'page_canvas'):
+            return
+        if isinstance(event.widget,(tk.Text,tk.Listbox,ttk.Combobox)):
+            return
+        if getattr(event,'num',None)==4:direction=-1
+        elif getattr(event,'num',None)==5:direction=1
+        elif getattr(event,'delta',0):direction=-1 if event.delta>0 else 1
+        else:return
+        self.page_canvas.yview_scroll(direction*2,'units')
+
+    def _quit_securely(self):
+        if isinstance(self._session_secret,bytearray):
+            for index in range(len(self._session_secret)):
+                self._session_secret[index]=0
+        self._session_secret=None
+        self.destroy()
 
     def _update_ci_hint(self):
         count=self.backup_ci_runs.get().strip() or '?'
@@ -177,11 +231,16 @@ class BackupGUI(tk.Tk):
                            font=('Helvetica',10),fill='#dbeeff',anchor='w')
 
     def _show(self,name):
+        if self._locked or name not in self.pages:
+            return
         for key,page in self.pages.items():
             page.pack_forget()
             self.nav[key].set_active(key==name)
         self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
+        self.page_canvas.yview_moveto(0)
+        self._sync_page_scroll()
         if name=='Archives':self._refresh()
+        if name=='Restore':self._refresh_restore()
 
     def _heading(self,parent,title,sub=''):
         ttk.Label(parent,text=title,style='Title.TLabel').pack(anchor='w',pady=(0,5))
