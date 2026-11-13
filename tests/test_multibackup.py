@@ -179,7 +179,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn('self.sidebar.pack_forget()',gui)
         self.assertIn("self.progress.set_percent(",gui)
         self.assertIn('self._prepare_identity()',gui)
-        self.assertIn('self._startup_security()',gui)
+        self.assertIn('self.after(35,self._startup_security)',gui)
         self.assertIn('self._export_recovery',gui)
         self.assertIn('self._enable_biometrics',gui)
         self.assertIn('self._build_restore',gui)
