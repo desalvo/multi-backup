@@ -504,7 +504,7 @@ class PluginTests(unittest.TestCase):
                      'ruff check','bandit','unittest discover'):
             self.assertIn(step,ci)
 
-    def test_mac_disk_image_contains_only_application_and_nothing_unsigned(self):
+    def test_mac_disk_image_has_drag_to_applications_link_and_nothing_unsigned(self):
         root=Path(__file__).resolve().parents[1]
         build=(root/'scripts/build-macos-app.sh').read_text('utf-8')
         notarize=(root/'scripts/notarize-macos.sh').read_text('utf-8')
@@ -520,6 +520,9 @@ class PluginTests(unittest.TestCase):
         self.assertIn('multi-backup-biometric',build)
         packager=(root/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
         self.assertIn('Signature=adhoc',packager)
+        self.assertIn('ln -s /Applications',packager)
+        self.assertIn('ln -s /Applications',notarize)
+        self.assertIn('readlink "$MOUNT/Applications"',verify)
         self.assertIn('hdiutil attach',packager)
         self.assertIn('ditto "$MOUNT/Multi Backup.app"',packager)
         self.assertIn('checksums-macos-',packager)
@@ -530,6 +533,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn('ditto "$APP" "$TMP/dmg-root/Multi Backup.app"',notarize)
         self.assertNotIn('cp dist/multi-backup-cli dmg-root',workflow)
         self.assertIn('hdiutil attach',verify)
+        self.assertIn('Applications -> /Applications',verify)
         self.assertIn('spctl --assess',verify)
         self.assertIn('"$APP/Contents/MacOS/Multi Backup" --self-test',verify)
         self.assertIn('APPLE_SIGN_P12_B64',workflow)

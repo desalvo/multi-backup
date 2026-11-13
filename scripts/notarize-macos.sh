@@ -30,11 +30,15 @@ xcrun stapler validate "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
-# One and only one visible item in DMG: the signed and notarized Multi Backup.app.
+# Standard macOS two-item drag-and-drop: app + Applications folder link.
 mkdir "$TMP/dmg-root"
 ditto "$APP" "$TMP/dmg-root/Multi Backup.app"
-[[ "$(find "$TMP/dmg-root" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 1 ]] || {
-  echo 'DMG staging has extra user-visible items' >&2; exit 1;
+ln -s /Applications "$TMP/dmg-root/Applications"
+[[ -L "$TMP/dmg-root/Applications" &&
+   "$(readlink "$TMP/dmg-root/Applications")" == /Applications &&
+   "$(find "$TMP/dmg-root" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 2 ]] || {
+  echo 'DMG staging must contain only the notarized app and Applications symlink' >&2
+  exit 1
 }
 hdiutil create -volname 'Multi Backup' -srcfolder "$TMP/dmg-root" \
   -ov -format UDZO "$DMG"

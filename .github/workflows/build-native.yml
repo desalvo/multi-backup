@@ -100,7 +100,7 @@ jobs:
           MAC_UNSIGNED_SMOKE: ${{ needs.qualify.outputs.channel == 'early-release' && '1' || '0' }}
           MAC_ARCH: ${{ matrix.arch }}
         run: bash scripts/build-macos-app.sh
-      - name: Notarize app, create single-item DMG and notarize DMG
+      - name: Notarize app, create drag-to-Applications DMG and notarize DMG
         if: needs.qualify.outputs.channel == 'stable'
         shell: bash
         env:
@@ -238,9 +238,44 @@ jobs:
           name: native-linux-${{ matrix.distro }}-el${{ matrix.el }}
           path: packages/*
           retention-days: 14
+  publications:
+    name: Generate manuals and brochure from current native GUI
+    needs: [qualify]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install GUI screenshot and PDF build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xauth python3-tk fonts-dejavu-core poppler-utils
+          python -m pip install -r requirements.txt -r requirements-docs.txt
+      - name: Capture current GUI and generate bilingual publications
+        shell: bash
+        run: |
+          set -euo pipefail
+          xvfb-run -a -s "-screen 0 1680x1200x24" python scripts/capture-ui.py
+          python scripts/build-publications.py
+          for item in docs/manuals/*.pdf docs/brochures/*.pdf; do
+            test -s "$item"
+            pdftotext "$item" - | grep -qi 'Multi Backup'
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-publications
+          path: |
+            docs/manuals/*.pdf
+            docs/brochures/*.pdf
+            docs/screenshots/*.png
+          retention-days: 30
+
   publish:
     name: Publish ${{ needs.qualify.outputs.channel }} releases
-    needs: [qualify, macos, windows, linux-rpm]
+    needs: [qualify, macos, windows, linux-rpm, publications]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -255,7 +290,8 @@ jobs:
         run: |
           mkdir release
           find collected -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.rpm' -o -name '*.zip' \) -exec cp '{}' release/ \;
-          cp docs/manuals/*.pdf docs/brochures/*.pdf release/
+          cp collected/native-publications/manuals/*.pdf collected/native-publications/brochures/*.pdf release/
+          test $(find release -name '*.pdf' | wc -l) -eq 4
           test $(find release -name '*.dmg' | wc -l) -ge 2
           test $(find release -name '*.rpm' | wc -l) -ge 6
           test $(find release -name '*.exe' | wc -l) -ge 1

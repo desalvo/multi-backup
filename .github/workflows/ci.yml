@@ -64,6 +64,10 @@ jobs:
         run: |
           python -m pip_audit -r requirements.txt
           python -m pip_audit -r requirements-docs.txt
+      - name: Rust core migration compatibility tests
+        run: |
+          cargo --version
+          cargo test --manifest-path rust/Cargo.toml
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
 

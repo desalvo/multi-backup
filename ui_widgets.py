@@ -124,52 +124,43 @@ class PremiumButton(tk.Canvas):
         return 'break'
 
     def _draw(self) -> None:
-        from PIL import Image, ImageDraw, ImageTk
+        """Render at four times widget resolution, then Lanczos-downsample."""
+        from PIL import Image, ImageTk
+        from render_quality import glossy_patch
+
         width = max(5, self.winfo_width() if self.winfo_width() > 1 else self._width)
         height = max(5, self.winfo_height() if self.winfo_height() > 1 else self._height)
-        image = Image.new('RGBA', (width, height),
-                          (*_rgb('#0D1A3D' if self.dark else SURFACE), 255))
-        d = ImageDraw.Draw(image, 'RGBA')
-        radius = min(13, height // 3)
-        d.rounded_rectangle((3, 4, width - 3, height - 1), radius=radius,
-                            fill=(20, 43, 76, 42))
+        bg = '#0D1A3D' if self.dark else SURFACE
         if self.state == 'disabled':
-            top, bottom, border, foreground = ('#E1E8F0', '#CED7E3',
-                                               '#C6D2DE', '#8292A6')
+            top, bottom, border, foreground = (
+                '#E1E8F0', '#CED7E3', '#C6D2DE', '#8292A6')
         elif self.accent:
             top, bottom, border, foreground = (
-                ('#3D96E8' if self.hover else '#2786D8'),
-                ('#1162A6' if self.hover else '#134F91'), '#1F5F9D', '#FFFFFF')
+                '#3D96E8' if self.hover else '#2786D8',
+                '#1162A6' if self.hover else '#134F91',
+                '#1F5F9D', '#FFFFFF')
         elif self.dark:
             top, bottom, border, foreground = (
-                ('#6471C9' if self.hover else '#4559A5'),
-                ('#30478D' if self.hover else '#263B77'), '#8A95DB', '#FFFFFF')
+                '#6471C9' if self.hover else '#4559A5',
+                '#30478D' if self.hover else '#263B77',
+                '#8A95DB', '#FFFFFF')
         else:
             top, bottom, border, foreground = (
-                ('#FFFFFF' if self.hover else '#F7FAFF'),
-                ('#DFEDFB' if self.hover else '#E8F1FC'), '#B2C8E1', NAVY)
+                '#FFFFFF' if self.hover else '#F7FAFF',
+                '#DFEDFB' if self.hover else '#E8F1FC',
+                '#B2C8E1', NAVY)
         if self.pressed:
             top, bottom = bottom, top
-        d.rounded_rectangle((2, 2, width - 3, height - 4), radius=radius,
-                            fill=(*_rgb(bottom), 255), outline=(*_rgb(border), 255),
-                            width=1)
-        interior = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        idraw = ImageDraw.Draw(interior)
-        for y in range(3, height - 4):
-            tint = _blend(_rgb(top), _rgb(bottom), (y - 3) / max(1, height - 7))
-            idraw.line((3, y, width - 4, y), fill=(*tint, 255), width=1)
-        mask = Image.new('L', (width, height), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((3, 3, width - 4, height - 5),
-                                                radius=max(1, radius - 1), fill=255)
-        image.paste(interior, (0, 0), mask)
-        d = ImageDraw.Draw(image, 'RGBA')
-        d.arc((5, 4, width - 6, height - 8), 190, 345, fill=(255, 255, 255, 50), width=1)
-        if self.focused and self.state == 'normal':
-            d.rounded_rectangle((1, 1, width - 2, height - 2),
-                                radius=radius + 1, outline=(66, 174, 241, 255), width=2)
-        self._photo = ImageTk.PhotoImage(image)
+        img = Image.new('RGBA', (width, height), (*_rgb(bg), 255))
+        img.alpha_composite(glossy_patch(
+            width, height, top=top, bottom=bottom, border=border,
+            radius=min(13, height / 3),
+            focused=self.focused and self.state == 'normal'))
+        self._photo = ImageTk.PhotoImage(img)
         self.delete('all')
         self.create_image(0, 0, image=self._photo, anchor='nw')
+        # Native Tk text remains vector/sharp; only the rounded surfaces are
+        # rasterized and downsampled.
         self.create_text(width // 2, (height - 3) // 2, text=self.caption,
                          font=self._font, fill=foreground, anchor='center')
 
@@ -193,43 +184,15 @@ class GradientProgress(tk.Canvas):
         self._draw()
 
     def _draw(self) -> None:
-        from PIL import Image, ImageDraw, ImageTk
+        from PIL import ImageTk
+        from render_quality import progress_patch
+
         width = max(80, self.winfo_width())
         height = 43
-        img = Image.new('RGBA', (width, height), (*_rgb(SURFACE), 255))
-        draw = ImageDraw.Draw(img, 'RGBA')
-        x1, y1, x2, y2 = 3, 6, width - 4, 35
-        draw.rounded_rectangle((x1, y1 + 3, x2, y2 + 3), radius=13,
-                               fill=(19, 44, 74, 53))
-        draw.rounded_rectangle((x1, y1, x2, y2), radius=13,
-                               fill=(24, 48, 76, 255), outline=(109, 139, 167, 255),
-                               width=2)
-        full = max(1, x2 - x1 - 4)
-        # The small red cap makes the 0%-colour visible even for an empty bar.
-        fill_width = max(10, round(full * self.percent / 100))
-        gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        gd = ImageDraw.Draw(gradient)
-        for px in range(x1 + 2, min(x2 - 1, x1 + 2 + fill_width)):
-            position = (px - (x1 + 2)) / full * 100
-            colour = _rgb(progress_color(position))
-            gd.line((px, y1 + 2, px, y2 - 2), fill=(*colour, 255))
-            gd.line((px, y1 + 3, px, y1 + 10), fill=(
-                *_blend(colour, (255, 255, 255), .35), 255))
-            gd.line((px, y2 - 8, px, y2 - 2), fill=(
-                *_blend(colour, (15, 35, 47), .25), 255))
-        mask = Image.new('L', (width, height), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((x1 + 2, y1 + 2,
-                                                min(x2 - 2, x1 + 2 + fill_width), y2 - 2),
-                                                radius=10, fill=255)
-        img.paste(gradient, (0, 0), mask)
-        draw = ImageDraw.Draw(img, 'RGBA')
-        draw.arc((x1 + 2, y1 + 1, x2 - 2, y2 - 4), 195, 345,
-                 fill=(255, 255, 255, 130), width=1)
-        # High-contrast percent pill at right, readable over any gradient colour.
-        draw.rounded_rectangle((max(x1 + 8, x2 - 61), 10, x2 - 7, 31),
-                               radius=10, fill=(15, 33, 55, 229))
+        img = progress_patch(width, height, self.percent, SURFACE,
+                             progress_color)
         self._photo = ImageTk.PhotoImage(img)
         self.delete('all')
         self.create_image(0, 0, anchor='nw', image=self._photo)
-        self.create_text(x2 - 34, 20, text=f'{round(self.percent):d}%',
+        self.create_text(width - 38, 20, text=f'{round(self.percent):d}%',
                          fill='#FFFFFF', font=('Helvetica Neue', 10, 'bold'))

@@ -39,7 +39,8 @@ class Journal:
         self.lock = threading.RLock()
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         digest = hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest()
-        if self.path.exists() and not restart:
+        self.resumed = self.path.exists() and not restart
+        if self.resumed:
             state = json.loads(self.path.read_text('utf-8'))
             if state.get('schema') != 1:
                 raise RuntimeError('Unsupported checkpoint format: use --restart to create a new cycle')

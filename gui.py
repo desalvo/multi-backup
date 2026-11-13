@@ -70,6 +70,8 @@ class BackupGUI(tk.Tk):
         self.keep=tk.StringVar(value=str(self.cfg['keep_ci_runs']))
         self.workers=tk.StringVar(value=str(self.cfg['metadata_workers']))
         self.cleanup=tk.BooleanVar(value=self.cfg['cleanup_ci_artifacts']);self.dryrun=tk.BooleanVar(value=True)
+        self.ignore_ci_artifact_errors=tk.BooleanVar(value=self.cfg.get('ignore_ci_artifact_errors',False))
+        self._backup_had_omissions=False
         self.restart=tk.BooleanVar(value=False);self.skiplogs=tk.BooleanVar(value=False)
         self.update_channel=tk.StringVar(value=self.cfg['update_channel'])
         self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
@@ -588,6 +590,7 @@ class BackupGUI(tk.Tk):
             ('Simulate cleanup only',self.dryrun),
             ('Start a fresh cycle',self.restart),
             ('Skip CI logs',self.skiplogs),
+            ('Ignora errori di download degli artifact CI (salva il report delle omissioni)',self.ignore_ci_artifact_errors),
         ]:
             ttk.Checkbutton(options,text=label,variable=var).pack(anchor='w',pady=2)
 
@@ -988,6 +991,7 @@ class BackupGUI(tk.Tk):
                 'metadata_workers':int(self.workers.get()),
                 'keep_ci_runs':int(self.keep.get()),
                 'cleanup_ci_artifacts':self.cleanup.get(),
+                'ignore_ci_artifact_errors':self.ignore_ci_artifact_errors.get(),
                 'default_recipient':self.recipient.get(),
             })
             save_settings(self.cfg)
@@ -1048,6 +1052,8 @@ class BackupGUI(tk.Tk):
         # the CLI a persistent plaintext private identity path.
         if backend=='github':
             args+=['--github-user',chosen]
+            if self.ignore_ci_artifact_errors.get():
+                args+=['--ignore-ci-artifact-errors']
             if self.cleanup.get():
                 if not messagebox.askyesno(
                         'Confirm optional CI cleanup',
@@ -1065,6 +1071,8 @@ class BackupGUI(tk.Tk):
         elif self.dropbox_path.get():
             args+=['--dropbox-path',self.dropbox_path.get()]
         self.progress.set_percent(0)
+        self._backup_had_omissions=False
+        self._log('Avvio del backup: verifica checkpoint e ricerca CI complete fino al limite configurato.')
         self.start_button['state']='disabled'
         self.stop_button['state']='normal'
         self.status.set('Starting encrypted backup…')
@@ -1077,11 +1085,20 @@ class BackupGUI(tk.Tk):
             self.stop_button['state']='disabled'
             messagebox.showerror('Start failed',str(exc))
             return
+        readers=[]
         for kind,stream in [('out',self.proc.stdout),('err',self.proc.stderr)]:
-            threading.Thread(target=self._read,args=(kind,stream),daemon=True).start()
+            worker=threading.Thread(target=self._read,args=(kind,stream),daemon=True)
+            worker.start()
+            readers.append(worker)
         proc=self.proc
-        threading.Thread(target=lambda:self.events.put(('finished',proc.wait())),
-                         daemon=True).start()
+        def finish_after_logs():
+            code=proc.wait()
+            # Deliver all streamed progress and omission warnings before the
+            # final UI status. Worker threads exit when both pipes close.
+            for worker in readers:
+                worker.join(timeout=10)
+            self.events.put(('finished',code))
+        threading.Thread(target=finish_after_logs,daemon=True).start()
 
     def _read(self,kind,stream):
         for line in iter(stream.readline,''):self.events.put((kind,line.rstrip()))
@@ -1098,7 +1115,16 @@ class BackupGUI(tk.Tk):
                 kind,payload=self.events.get_nowait()
                 if kind=='finished':
                     self.start_button['state']='normal';self.stop_button['state']='disabled'
-                    self.status.set(f'Backup finished: exit {payload}')
+                    if payload==0 and self._backup_had_omissions:
+                        result='Backup concluso CON OMISSIONI: consultare il report delle CI non recuperate.'
+                    elif payload==0:
+                        result='Backup completato correttamente.'
+                    elif payload==2:
+                        result='Backup parziale: riprendi con gli stessi parametri; checkpoint conservato.'
+                    else:
+                        result=f'Backup interrotto (codice {payload}); verifica il log.'
+                    self.status.set(result)
+                    self._log(result)
                     self._refresh()
                     self.dashboard.refresh(force=True)
                 elif kind=='err':
@@ -1107,6 +1133,15 @@ class BackupGUI(tk.Tk):
                         if obj.get('type')=='progress':
                             self.progress.set_percent(obj.get('percent',0))
                             self.status.set(obj.get('message',''))
+                            if obj.get('stage') in (
+                                    'resume-start','resume-summary','resume','ci-retry',
+                                    'ci-warning','ci-summary','ci-shortfall','ci-ignored',
+                                    'complete-with-warnings','incomplete','complete'):
+                                if obj.get('stage') in ('ci-ignored','complete-with-warnings'):
+                                    self._backup_had_omissions=True
+                                self._log(
+                                    f"[{obj.get('stage')}] {obj.get('message','')} "
+                                    f"({obj.get('percent',0)}%)")
                         else:self._log(payload)
                     except ValueError:self._log(payload)
                 elif kind=='github-login':

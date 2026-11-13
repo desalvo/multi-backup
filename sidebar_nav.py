@@ -106,14 +106,24 @@ class SidebarNavItem(tk.Canvas):
     def _round_rect(self, x1: float, y1: float, x2: float, y2: float,
                     radius: int, *, fill: str, outline: str = '',
                     width: int = 1) -> None:
-        r = radius
-        self.create_polygon(
-            x1+r, y1, x2-r, y1, x2, y1, x2, y1+r,
-            x2, y2-r, x2, y2, x2-r, y2, x1+r, y2,
-            x1, y2, x1, y2-r, x1, y1+r, x1, y1,
-            smooth=True, splinesteps=24,
-            fill=fill, outline=outline, width=width,
-        )
+        # Tk Canvas polygons draw jagged single-pixel corners on Retina too.
+        # Render only the local patch at 4x with Pillow, then downsample.
+        import math
+        from PIL import ImageTk
+        from render_quality import rounded_patch
+
+        left = max(0, math.floor(x1) - 2)
+        top = max(0, math.floor(y1) - 2)
+        right = math.ceil(x2) + 3
+        bottom = math.ceil(y2) + 3
+        patch = rounded_patch(
+            right - left, bottom - top,
+            (x1 - left, y1 - top, x2 - left, y2 - top),
+            radius, fill=fill or None, outline=outline or None,
+            line_width=width)
+        photo = ImageTk.PhotoImage(patch)
+        self._shape_images.append(photo)  # Tk must retain the PhotoImage.
+        self.create_image(left, top, image=photo, anchor='nw')
 
     def _draw_icon(self, x: int, y: int, colour: str) -> None:
         def line(*points: int, **kwargs: object) -> None:
@@ -167,6 +177,7 @@ class SidebarNavItem(tk.Canvas):
 
     def _redraw(self) -> None:
         self.delete('all')
+        self._shape_images = []
         w = max(self.winfo_width(), 222)
         background = (NAV_ACTIVE if self.selected else
                       NAV_HOVER if self.hovered else NAV_NORMAL)
