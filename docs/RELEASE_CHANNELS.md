@@ -34,7 +34,7 @@ GUI and CLI check the configured channel (default **stable**) at app startup and
 
 Helper CLI dependencies (`gh`, `git-lfs`, `age`) must be found on PATH or bundled by the native installer; `git` is a system prerequisite. The CI aborts Windows packaging if `age.exe` is unavailable. Linux RPM currently depends on external helpers which must be installed separately. Satisfying the build matrix is not equivalent to validating notarization or app execution on each target OS.
 
-## 0.1.0-r007-rc1: single Production Gate and functioning macOS app (required)
+## 0.1.0-r008-rc1: single Production Gate and functioning macOS app (required)
 
 `ci.yml` is the **only event-triggered CI**. Every push and pull request first executes one job, `Production Gate - tests, security and release policy`, covering Python 3.11/3.12/3.13, CLI smoke, Ruff, Bandit, vulnerability scans of **both** runtime and documentation dependencies, release assets and workflow invariants. The `build-native.yml` workflow is **reusable only** and is called **after the gate succeeds** for `[full-ci]`, ordinary version tags or an explicit manual dispatch. Publication depends on *all* native builds being successful, and RPM indexes cannot be published before the Windows and macOS build checks are also green.
 

@@ -1,6 +1,6 @@
 Name:           multi-backup
 Version:        0.1.0
-Release:        7.rc1%{?dist}
+Release:        8.rc1%{?dist}
 Summary:        Multi-backend encrypted backup manager with native GUI
 License:        EUPL-1.2
 URL:            https://github.com/desalvo/multi-backup

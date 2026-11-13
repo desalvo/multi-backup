@@ -73,7 +73,7 @@ Inspect CI logs after `[full-ci]` bootstrap commit, fix failed package jobs, ena
 - Add `SourceDir=..\..` under `[Setup]` so the script resolves `LICENSE`, dist binaries, README and icon relative to repository root; Inno Setup also resolves `OutputDir=installers` under SourceDir. Add regression test verifying all critical paths.
 - Await full GitHub build and release publish checks before declaring the native pipeline green.
 
-## r007 RC1 — production gate and macOS packaging (2026-11-13)
+## r008 RC1 — production gate and macOS packaging (2026-11-13)
 
 - Unified trigger: `.github/workflows/ci.yml` now contains the sole Production Gate; `.github/workflows/build-native.yml` is callable only as a reusable workflow after gate success. Ruff, Bandit, pip-audit for runtime and documentation requirements, test suite 3.11/3.12/3.13 and release asset policy are mandatory.
 - macOS: PyInstaller onedir `.app` containing its CLI and helper tools; no naked Python or other top-level DMG files. Signed Developer ID, app notarization/stapling, DMG notarization/stapling and mounted-DMG copied-app acceptance tests are required for publication.
