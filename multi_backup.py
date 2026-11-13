@@ -48,11 +48,12 @@ class ResumableBackup:
                 raise RuntimeError('Private output/staging directories must have mode 0700')
         self.progress = progress or Progress(args.progress, args.json_progress)
         cfg = {k: getattr(args, k) for k in (
-            'recipient', 'github_user', 'max_copies_per_repo', 'max_runs_per_repo',
+            'recipient', 'max_copies_per_repo', 'max_runs_per_repo',
             'cleanup_ci_artifacts', 'cleanup_ci_dry_run', 'keep_ci_runs',
             'skip_gists', 'skip_ci_logs', 'skip_ci_artifacts', 'skip_release_assets',
             'skip_issue_details', 'skip_issue_events', 'skip_org_settings',
             'include_gh_token', 'metadata_workers', 'purge_obsolete_metadata')}
+        cfg['github_user'] = getattr(args,'github_user',None)
         cfg['credentials_dir'] = str(args.credentials_dir or '')
         self.journal = Journal(self.output / '.state',cfg,restart=args.restart)
         self.cycle_dir = self.output / 'metadata' / 'cycles' / self.journal.cycle
