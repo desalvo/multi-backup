@@ -894,7 +894,7 @@ class BackupGUI(tk.Tk):
                                 'The connected account must match the GitHub username.')
 
     def _build_updates(self,page):
-        self._heading(page,'Native application updates','Discover signed release channels; download only when SHA-256 is available.')
+        self._heading(page,'Application updates','Check stable and early-release packages using trusted TLS and SHA-256.')
         row=ttk.Frame(page);row.pack(anchor='w',pady=16)
         ttk.Label(row,text='Release channel').pack(side='left',padx=(0,12))
         combo=ttk.Combobox(row,textvariable=self.update_channel,values=('stable','early-release'),width=22,state='readonly')
