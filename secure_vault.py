@@ -223,6 +223,22 @@ def change_password(password,new_password,path=None):
     return recipient
 
 
+def import_recovery_copy(source, backup_password, new_password, destination=None):
+    """Import an encrypted recovery copy only if no local protected vault exists."""
+    destination=Path(destination) if destination else vault_path()
+    if destination.is_symlink() or destination.exists() or (
+            private_key_path(root=destination.parent).exists()):
+        raise VaultError('An existing encryption identity must never be overwritten')
+    if len(new_password)<12:
+        raise VaultError('The local password must have at least 12 characters')
+    clear,recipient=unlock(backup_password,source)
+    _write_vault(destination,seal_identity(clear,new_password,recipient))
+    if unlock(new_password,destination)!=(clear,recipient):
+        raise VaultError('Imported recovery key failed verification')
+    return clear,recipient
+
+
+
 @contextlib.contextmanager
 def temporary_identity(private_bytes):
     """Private identity on disk only while an age subprocess needs a filename."""
