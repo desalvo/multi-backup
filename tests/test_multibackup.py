@@ -136,6 +136,31 @@ class PluginTests(unittest.TestCase):
             self.assertEqual(data['public_recipient'],'age1existing')
             existing.assert_called_once_with(dest)
 
+    def test_private_backup_destination_requires_no_manual_chmod(self):
+        from backup_paths import prepare_destination
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            chosen=root/'selected'
+            chosen.mkdir()
+            if os.name!='nt':
+                chosen.chmod(0o755)
+                actual=prepare_destination(chosen)
+                self.assertEqual(actual,chosen/'Multi-Backup')
+                self.assertEqual(actual.stat().st_mode & 0o077,0)
+                self.assertEqual(prepare_destination(actual),actual)
+                existing=root/'old-backup'
+                existing.mkdir(mode=0o755)
+                existing.chmod(0o755)
+                (existing/'.state').mkdir()
+                with self.assertRaises(PermissionError):
+                    prepare_destination(existing)
+            else:
+                self.assertEqual(prepare_destination(chosen),chosen)
+            shortcut=root/'alias'
+            shortcut.symlink_to(chosen,target_is_directory=True)
+            with self.assertRaises(ValueError):
+                prepare_destination(shortcut)
+
     def test_native_buttons_progress_and_sidebar_are_not_aqua_dependent(self):
         from ui_widgets import PremiumButton,GradientProgress,progress_color
         import tkinter
