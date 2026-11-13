@@ -18,6 +18,7 @@ from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
+from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
 
 ROOT=Path(__file__).resolve().parent
 
@@ -67,23 +68,45 @@ class BackupGUI(tk.Tk):
         style.configure('Horizontal.TProgressbar',troughcolor='#dbe6f3',background='#1267c9',thickness=16)
 
     def _make_shell(self):
-        self.sidebar=tk.Frame(self,bg='#101f36',width=220);self.sidebar.pack(side='left',fill='y');self.sidebar.pack_propagate(False)
-        brand=tk.Frame(self.sidebar,bg='#101f36');brand.pack(fill='x',pady=(28,22))
+        # Canvas navigation ensures explicitly readable text on macOS Aqua:
+        # native Tk buttons can ignore fg/activeforeground in dark appearance.
+        self.sidebar=tk.Frame(self,bg=SIDEBAR_BG,width=252)
+        self.sidebar.pack(side='left',fill='y')
+        self.sidebar.pack_propagate(False)
+        brand=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
+        brand.pack(fill='x',padx=20,pady=(24,16))
         try:
             from PIL import Image,ImageTk
-            icon=Image.open(asset('multi-backup.png')).resize((65,65),Image.Resampling.LANCZOS)
+            icon=Image.open(asset('multi-backup.png')).resize((54,54),Image.Resampling.LANCZOS)
             self.icon_image=ImageTk.PhotoImage(icon)
-            tk.Label(brand,image=self.icon_image,bg='#101f36').pack()
-        except Exception:pass
-        tk.Label(brand,text='MULTI BACKUP',font=('Helvetica',16,'bold'),fg='#f1f7ff',bg='#101f36').pack(pady=(7,0))
-        tk.Label(brand,text='SECURE  ·  MODULAR  ·  PRIVATE',font=('Helvetica',8),fg='#8ba8ca',bg='#101f36').pack(pady=3)
+            tk.Label(brand,image=self.icon_image,bg=SIDEBAR_BG,bd=0).pack(side='left',padx=(0,10))
+        except Exception:
+            pass
+        brand_copy=tk.Frame(brand,bg=SIDEBAR_BG)
+        brand_copy.pack(side='left',fill='x',expand=True)
+        tk.Label(brand_copy,text='MULTI BACKUP',font=('Helvetica Neue',14,'bold'),
+                 fg='#FFFFFF',bg=SIDEBAR_BG,anchor='w').pack(fill='x')
+        tk.Label(brand_copy,text='YOUR PRIVATE VAULT',font=('Helvetica Neue',9),
+                 fg='#C0D4ED',bg=SIDEBAR_BG,anchor='w').pack(fill='x',pady=(5,0))
+        tk.Frame(self.sidebar,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',padx=18,pady=(0,12))
+
         self.nav={}
-        for name,symbol in [('Dashboard','▣'),('Backup','↻'),('Archives','▤'),('Plugins','⬡'),('Encryption','◇'),('Updates','↓'),('Settings','⚙')]:
-            btn=tk.Button(self.sidebar,text='   '+symbol+'   '+name,anchor='w',font=('Helvetica',11),relief='flat',bd=0,
-                         bg='#101f36',fg='#c6d7ef',activebackground='#213956',activeforeground='white',
-                         padx=15,pady=13,command=lambda n=name:self._show(n))
-            btn.pack(fill='x',padx=10,pady=2);self.nav[name]=btn
-        tk.Label(self.sidebar,text=VERSION+'  ·  EUPL-1.2',font=('Helvetica',9),fg='#7f9cbb',bg='#101f36').pack(side='bottom',pady=20)
+        for name,icon in NAV_ITEMS:
+            if name in ('Dashboard','Encryption'):
+                section='WORKSPACE' if name=='Dashboard' else 'PREFERENCES'
+                tk.Label(self.sidebar,text=section,font=('Helvetica Neue',9,'bold'),
+                         fg=SIDEBAR_HEADING,bg=SIDEBAR_BG,
+                         anchor='w').pack(fill='x',padx=25,
+                                          pady=(10 if name=='Dashboard' else 19,6))
+            btn=SidebarNavItem(self.sidebar,name,icon,lambda n=name:self._show(n))
+            btn.pack(fill='x',padx=13,pady=2)
+            self.nav[name]=btn
+        foot=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
+        foot.pack(side='bottom',fill='x',padx=18,pady=(6,17))
+        tk.Frame(foot,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',pady=(0,13))
+        tk.Label(foot,text=VERSION+'   ·   EUPL-1.2',
+                 font=('Helvetica Neue',9),fg='#B4CAE4',
+                 bg=SIDEBAR_BG).pack(anchor='w')
         self.content=tk.Frame(self,bg='#f5f8fc');self.content.pack(fill='both',expand=True)
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
         self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
@@ -116,7 +139,7 @@ class BackupGUI(tk.Tk):
     def _show(self,name):
         for key,page in self.pages.items():
             page.pack_forget()
-            self.nav[key].config(bg='#1b3859' if key==name else '#101f36',fg='white' if key==name else '#c6d7ef')
+            self.nav[key].set_active(key==name)
         self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
         if name=='Archives':self._refresh()
 
