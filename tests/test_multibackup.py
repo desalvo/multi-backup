@@ -196,6 +196,88 @@ class PluginTests(unittest.TestCase):
         self.assertIn("gh release edit",native)
         self.assertIn("--prerelease --title 'Multi Backup - Early Release'",native)
 
+    def test_age_vault_encrypts_identity_and_produces_independent_recovery(self):
+        from secure_vault import (seal_identity,open_identity,export_recovery_copy,
+                                  load_vault,_write_vault,change_password,VaultError)
+        private=b'# test identity\nAGE-SECRET-KEY-'+b'A'*24+b'\n'
+        public='age1'+'q'*50
+        encoded=seal_identity(private,'super-secret-password-123',public)
+        self.assertNotIn(private,repr(encoded).encode())
+        self.assertEqual(open_identity(encoded,'super-secret-password-123'),(private,public))
+        with self.assertRaises(VaultError):
+            open_identity(encoded,'wrong-password')
+        with tempfile.TemporaryDirectory() as directory:
+            primary=Path(directory)/'default.agevault'
+            recovery=Path(directory)/'recovery.agevault'
+            _write_vault(primary,encoded)
+            if os.name!='nt':self.assertEqual(primary.stat().st_mode&0o077,0)
+            self.assertEqual(export_recovery_copy('super-secret-password-123',
+                'backup-password-987654',recovery,primary),recovery)
+            self.assertEqual(open_identity(load_vault(recovery),'backup-password-987654'),
+                             (private,public))
+            with self.assertRaises(FileExistsError):
+                export_recovery_copy('super-secret-password-123',
+                    'backup-password-987654',recovery,primary)
+            change_password('super-secret-password-123','changed-password-12345',primary)
+            with self.assertRaises(VaultError):
+                open_identity(load_vault(primary),'super-secret-password-123')
+            self.assertEqual(open_identity(load_vault(primary),'changed-password-12345'),
+                             (private,public))
+
+    def test_age_vault_creates_identity_without_plaintext_key_file(self):
+        from secure_vault import create_identity,VaultError,unlock
+        private=b'# age-keygen fixture\nAGE-SECRET-KEY-'+b'A'*24+b'\n'
+        public='age1'+'q'*50
+        def fake_keygen(argv,**kwargs):
+            if argv==['age-keygen']:
+                return mock.Mock(returncode=0,stdout=private)
+            if argv==['age-keygen','-y']:
+                self.assertEqual(kwargs['input'],private)
+                return mock.Mock(returncode=0,stdout=(public+'\n').encode())
+            raise AssertionError(argv)
+        with tempfile.TemporaryDirectory() as directory:
+            file=Path(directory)/'keys'/'default.agevault'
+            with mock.patch('secure_vault.subprocess.run',side_effect=fake_keygen):
+                self.assertEqual(create_identity('strong-passphrase-12345',file),
+                                 (private,public))
+            self.assertEqual(unlock('strong-passphrase-12345',file),(private,public))
+            self.assertFalse((file.parent/'default.txt').exists())
+            with self.assertRaises(VaultError):
+                create_identity('strong-passphrase-12345',file)
+
+    def test_restores_are_strictly_bound_to_original_plugin(self):
+        from restore_ops import restore_provider,validate_plugin,RestoreError,restore_local
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            gh=root/'repositories'/'a'/'b'/'git'/'backup.tar.gz.age'
+            db=root/'dropbox'/'objects'/'ab'/'object.tar.gz.age'
+            gh.parent.mkdir(parents=True);db.parent.mkdir(parents=True)
+            gh.write_bytes(b'ciphertext');db.write_bytes(b'ciphertext')
+            self.assertEqual(restore_provider(gh,root),'github')
+            self.assertEqual(restore_provider(db,root),'dropbox')
+            for file,wrong in ((gh,'dropbox'),(db,'github')):
+                with self.assertRaises(RestoreError):
+                    validate_plugin(file,root,wrong)
+            old=root/'existing';old.mkdir()
+            with self.assertRaises(RestoreError):
+                restore_local(gh,root,'github',root/'identity',old)
+
+    def test_https_update_uses_verified_embedded_certificates(self):
+        import ssl
+        from updater import _get_json,_verified_https_context
+        ctx=_verified_https_context()
+        self.assertTrue(ctx.check_hostname)
+        self.assertEqual(ctx.verify_mode,ssl.CERT_REQUIRED)
+        class Response:
+            def __enter__(self):return self
+            def __exit__(self,*a):return False
+            def read(self,n):return b'{"tag_name":"early-release","assets":[]}'
+        with mock.patch('updater.urllib.request.urlopen',return_value=Response()) as opened:
+            self.assertEqual(_get_json(release_endpoint('early-release'))['tag_name'],
+                             'early-release')
+        assert opened.call_args.kwargs['context'].check_hostname
+        self.assertEqual(opened.call_args.kwargs['context'].verify_mode,ssl.CERT_REQUIRED)
+
     def test_dropbox_keys_are_stable_and_revision_sensitive(self):
         a={'.tag':'file','id':'id:aaa','rev':'ab12'}
         self.assertEqual(object_key(a),object_key(a))
