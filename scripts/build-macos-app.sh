@@ -15,7 +15,7 @@ fi
 [[ "$(uname -m)" == "$MAC_ARCH" ]] || { echo "Runner architecture $(uname -m) != $MAC_ARCH" >&2; exit 1; }
 APP='dist/Multi Backup.app'
 python -m pip install -r requirements.txt 'pyinstaller>=6.11,<7'
-for command_name in brew iconutil otool codesign git age age-keygen gh git-lfs; do
+for command_name in brew iconutil otool codesign swiftc git age age-keygen gh git-lfs; do
   command -v "$command_name" >/dev/null || { echo "Missing helper: $command_name" >&2; exit 1; }
 done
 rm -rf assets/MultiBackup.iconset
@@ -44,8 +44,11 @@ python -m PyInstaller --windowed --onedir --clean --noconfirm \
 plutil -replace LSMinimumSystemVersion -string '13.0' "$APP/Contents/Info.plist"
 plutil -replace LSApplicationCategoryType -string 'public.app-category.productivity' "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string '0.1.0' "$APP/Contents/Info.plist"
-plutil -replace CFBundleVersion -string '12' "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string '13' "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/bin"
+# Keychain-protected Touch ID adapter, device-only; never stores keys in app bundle.
+swiftc -O -framework Security -framework LocalAuthentication \
+  packaging/macos/biometric.swift -o "$APP/Contents/Resources/bin/multi-backup-biometric"
 install -m 644 LICENSE "$APP/Contents/Resources/LICENSE"
 install -m 644 README.md "$APP/Contents/Resources/README.md"
 install -m 755 dist/multi-backup "$APP/Contents/MacOS/multi-backup"
@@ -85,3 +88,4 @@ plutil -lint "$APP/Contents/Info.plist"
 "$APP/Contents/Resources/bin/age-keygen" --version
 "$APP/Contents/Resources/bin/gh" --version
 "$APP/Contents/Resources/bin/git-lfs" version
+"$APP/Contents/Resources/bin/multi-backup-biometric" status >/dev/null 2>&1 || test $? -eq 2

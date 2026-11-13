@@ -10,13 +10,21 @@ import json
 import os
 import platform
 import re
+import ssl
 import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from version import VERSION, REPOSITORY
+import certifi
 
 API = 'https://api.github.com/repos/'+REPOSITORY+'/releases'
+
+
+def _verified_https_context():
+    # Explicit Mozilla CA roots work inside frozen apps where OpenSSL's compiled
+    # system trust path may not exist. Never use an unverified context.
+    return ssl.create_default_context(cafile=certifi.where())
 ASSET_LIMIT=2*1024*1024*1024
 
 
@@ -63,7 +71,7 @@ def _get_json(url):
     if url not in (release_endpoint('stable'), release_endpoint('early-release')):
         raise ValueError('Untrusted GitHub Releases endpoint')
     req=urllib.request.Request(url,headers={'Accept':'application/vnd.github+json','User-Agent':'multi-backup/'+VERSION})
-    with urllib.request.urlopen(req,timeout=20) as response:  # nosec B310 - fixed HTTPS GitHub API endpoint
+    with urllib.request.urlopen(req,timeout=20,context=_verified_https_context()) as response:  # nosec B310 - fixed HTTPS GitHub API endpoint
         return json.loads(response.read(2*1024*1024))
 
 
@@ -126,7 +134,7 @@ def download_asset(asset, output_dir, expected_sha256):
         digest=hashlib.sha256();total=0
         with os.fdopen(fd,'wb') as out:
             req=urllib.request.Request(asset['browser_download_url'],headers={'User-Agent':'multi-backup/'+VERSION})
-            with urllib.request.urlopen(req,timeout=90) as inp:  # nosec B310 - HTTPS URL and redirects checked against allowlist
+            with urllib.request.urlopen(req,timeout=90,context=_verified_https_context()) as inp:  # nosec B310 - HTTPS URL and redirects checked against allowlist
                 if not _allowed_asset_uri(inp.geturl()):raise RuntimeError('Untrusted update redirect')
                 for block in iter(lambda:inp.read(1024*1024),b''):
                     total+=len(block)
