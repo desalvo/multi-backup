@@ -126,6 +126,16 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn('choco install age -y', workflow)
         self.assertIn('age.exe --version', workflow)
 
+    def test_inno_setup_resolves_files_from_repository_root(self):
+        root = Path(__file__).resolve().parents[1]
+        text = (root/'packaging/windows/installer.iss').read_text('utf-8')
+        self.assertIn('SourceDir=..\\..', text)
+        self.assertIn('LicenseFile=LICENSE', text)
+        self.assertIn('SetupIconFile=assets\\multi-backup.ico', text)
+        self.assertIn('OutputDir=installers', text)
+        self.assertIn('Source: "dist\\multi-backup.exe"', text)
+        self.assertIn('Source: "dist\\MultiBackupGUI.exe"', text)
+
     def test_native_build_uses_real_age_binary_and_supported_rocky_images(self):
         workflow = (Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')
         self.assertIn("Join-Path $chocoRoot 'lib\\age.portable\\tools'", workflow)

@@ -1,7 +1,7 @@
 # Multi Backup - portable project handoff
 
 **Project:** `desalvo/multi-backup`  
-**Version:** `0.1.0-r005-rc1`  
+**Version:** `0.1.0-r006-rc1`  
 **Origin:** `desalvo/github-backup` 0.1.0-r001 (history remains in that repository; Multi Backup has a new initial repository history).  
 **License:** EUPL-1.2  
 **Languages:** CLI and help in English; README, manuals and brochures in English and Italian.
@@ -45,3 +45,7 @@ The connector successfully retrieved the user-provided failed run `https://githu
 ## r005 native CI - release blockers (2026-11-13)
 
 Remote CI success for security: https://github.com/desalvo/multi-backup/actions/runs/43494324235. Native run https://github.com/desalvo/multi-backup/actions/runs/43494324431 completed 9 build jobs successfully (2 macOS, 5 Linux), failing only Windows (`132123583905`) due to portable Chocolatey `age.exe` shim being copied instead of actual binary, and Rocky EL10 (`132123584088`) due to unmaintained image `rockylinux:10` missing. The fix copies genuine `age.exe`/`age-keygen.exe` from `age.portable/tools` and uses `rockylinux/rockylinux:8/9/10`. Await new native run and verify release assets and signing; do not claim stable or full RC green without remote evidence.
+
+## r006 Windows installer path correction (2026-11-13)
+
+The native r005 Windows log shows age and age-keygen both working, but Inno Setup 6.7.1 rejects `LicenseFile=LICENSE`, looked up under `packaging/windows/` rather than repository root. `OutputDir=installers` would also point under that directory. Add `[Setup] SourceDir=..\..` to `packaging/windows/installer.iss`, which makes source assets and output root-relative, and a regression test for this. New full and native CI required before asserting green.

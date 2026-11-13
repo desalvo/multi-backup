@@ -3,6 +3,8 @@
 #define AppPublisher "Multi Backup contributors"
 #define AppURL "https://github.com/desalvo/multi-backup"
 [Setup]
+; Resolve LICENSE, dist binaries and assets relative to repository root.
+SourceDir=..\..
 AppId={{A17C5D60-3E9C-4BCB-8131-F9BC68FDB2DD}
 AppName={#AppName}
 AppVersion={#AppVersion}
