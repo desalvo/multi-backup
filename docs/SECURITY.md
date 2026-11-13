@@ -32,3 +32,11 @@ python multi_backup.py plugins
 ```
 
 Security-related changes should have regression tests. Vulnerabilities should be privately reported through GitHub security advisories rather than public issues.
+
+## R013: protected identity vault, biometrics, TLS and remote restores
+
+The age private key vault is an authenticated scrypt (N=32768, r=8, p=1)/AES-256-GCM envelope under per-user Application Support, separate from the app bundle. A fresh identity is generated into process memory; older plaintext keys are encrypted, verified and removed without rotation. A strong application password unlocks once per session. The in-memory key is temporarily written to a mode-0600 file only while an age subprocess needs a filename, then removed. Enable OS full-disk encryption to protect deleted legacy disk blocks and live temporary files. A recovery copy uses a separate passphrase-derived salt/key and AES-GCM nonce; export verifies the original application password and refuses overwrites. Application upgrades leave the vault untouched.
+
+On macOS, opt-in Touch ID uses a helper with Security.framework device-only Keychain `SecAccessControlCreateWithFlags(..., .biometryCurrentSet)` protection and LocalAuthentication. Biometric templates and Mac login passwords are never handled by Multi Backup. Biometric enrolment changes may invalidate the item; password fallback always works. Unsupported platforms do not claim biometric support.
+
+Updater HTTPS uses trusted certifi CA roots with server certificate chain and hostname checking enabled. GitHub release downloads require a trusted SHA-256 digest, and HTTP redirects remain allowlisted. No insecure SSL verification bypass is accepted. Restore checks the source archive's plugin, never auto-overwrites an existing remote target, and prompts for the service-specific credential only when required. Dropbox write tokens are not saved. Full live-account and platform biometric review remains outstanding.
