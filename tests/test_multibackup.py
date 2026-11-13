@@ -278,6 +278,68 @@ class PluginTests(unittest.TestCase):
         assert opened.call_args.kwargs['context'].check_hostname
         self.assertEqual(opened.call_args.kwargs['context'].verify_mode,ssl.CERT_REQUIRED)
 
+    def test_age_vault_legacy_migration_and_import_preserve_identity(self):
+        from secure_vault import (migrate_legacy,unlock,export_recovery_copy,
+                                  import_recovery_copy,VaultError)
+        secret=b'# legacy age identity\nAGE-SECRET-KEY-'+b'A'*24+b'\n'
+        recipient='age1'+'q'*50
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)/'keys'
+            root.mkdir(mode=0o700)
+            plaintext=root/'default.txt'
+            plaintext.write_bytes(secret)
+            if os.name!='nt':plaintext.chmod(0o600)
+            vault=root/'default.agevault'
+            with mock.patch('secure_vault.subprocess.run',
+                            return_value=mock.Mock(returncode=0,
+                                stdout=(recipient+'\n').encode())):
+                clear,public=migrate_legacy('strong-migration-password',vault)
+            self.assertEqual((clear,public),(secret,recipient))
+            self.assertFalse(plaintext.exists())
+            self.assertEqual(unlock('strong-migration-password',vault),
+                             (secret,recipient))
+            recovery=Path(directory)/'saved.agevault'
+            export_recovery_copy('strong-migration-password',
+                                 'separate-backup-password',recovery,vault)
+            with self.assertRaises(VaultError):
+                import_recovery_copy(recovery,'separate-backup-password',
+                                     'fresh-local-password',vault)
+            vault.unlink()
+            imported=import_recovery_copy(recovery,'separate-backup-password',
+                                          'fresh-local-password',vault)
+            self.assertEqual(imported,(secret,recipient))
+            self.assertEqual(unlock('fresh-local-password',vault),(secret,recipient))
+
+    def test_large_dropbox_restore_uses_bounded_upload_sessions(self):
+        from restore_ops import restore_dropbox_new_file
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            archive=root/'dropbox'/'objects'/'cc'/'object.tar.gz.age'
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b'ciphertext')
+            endpoints=[]
+            def fake_extract(source,identity,destination):
+                file=destination/'multi-backup'/'dropbox'/'payload'
+                file.parent.mkdir(parents=True)
+                with file.open('wb') as stream:stream.truncate(17*1024*1024)
+                return destination
+            def fake_upload(endpoint,token,argument,bytesdata,*,required='id'):
+                self.assertEqual(token,'temporary-write-token-123')
+                self.assertLessEqual(len(bytesdata),8*1024*1024)
+                endpoints.append(endpoint)
+                return {'session_id':'session-abc'} if endpoint.endswith('start') else (
+                    {'id':'id:restored'} if endpoint.endswith('finish') else {})
+            with mock.patch('restore_ops.extract_archive',side_effect=fake_extract), \
+                 mock.patch('restore_ops._dropbox_upload',side_effect=fake_upload), \
+                 mock.patch('restore_ops.DIRECT_UPLOAD_LIMIT',1024):
+                result=restore_dropbox_new_file(
+                    archive,root,root/'identity','/new/restore.bin',
+                    'temporary-write-token-123')
+            self.assertEqual(result['id'],'id:restored')
+            self.assertEqual(endpoints,['upload_session/start',
+                                        'upload_session/append_v2',
+                                        'upload_session/finish'])
+
     def test_dropbox_keys_are_stable_and_revision_sensitive(self):
         a={'.tag':'file','id':'id:aaa','rev':'ab12'}
         self.assertEqual(object_key(a),object_key(a))
