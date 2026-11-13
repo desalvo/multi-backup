@@ -40,6 +40,7 @@ class PremiumButton(tk.Canvas):
         self.caption = str(text)
         self.command = command
         self.accent = str(style).startswith('Accent')
+        self.dark = str(style).startswith('Dark')
         self.state = state
         self.hover = False
         self.pressed = False
@@ -48,7 +49,8 @@ class PremiumButton(tk.Canvas):
         self._height = int(height)
         self._width = max(96, int(width) if width else self._font.measure(self.caption) + 38)
         super().__init__(parent, width=self._width, height=self._height,
-                         bg=SURFACE, borderwidth=0, highlightthickness=0,
+                         bg='#0D1A3D' if self.dark else SURFACE,
+                         borderwidth=0, highlightthickness=0,
                          takefocus=1, cursor='hand2')
         self._photo = None
         for name, handler in (
@@ -125,7 +127,8 @@ class PremiumButton(tk.Canvas):
         from PIL import Image, ImageDraw, ImageTk
         width = max(5, self.winfo_width() if self.winfo_width() > 1 else self._width)
         height = max(5, self.winfo_height() if self.winfo_height() > 1 else self._height)
-        image = Image.new('RGBA', (width, height), (*_rgb(SURFACE), 255))
+        image = Image.new('RGBA', (width, height),
+                          (*_rgb('#0D1A3D' if self.dark else SURFACE), 255))
         d = ImageDraw.Draw(image, 'RGBA')
         radius = min(13, height // 3)
         d.rounded_rectangle((3, 4, width - 3, height - 1), radius=radius,
@@ -137,6 +140,10 @@ class PremiumButton(tk.Canvas):
             top, bottom, border, foreground = (
                 ('#3D96E8' if self.hover else '#2786D8'),
                 ('#1162A6' if self.hover else '#134F91'), '#1F5F9D', '#FFFFFF')
+        elif self.dark:
+            top, bottom, border, foreground = (
+                ('#6471C9' if self.hover else '#4559A5'),
+                ('#30478D' if self.hover else '#263B77'), '#8A95DB', '#FFFFFF')
         else:
             top, bottom, border, foreground = (
                 ('#FFFFFF' if self.hover else '#F7FAFF'),

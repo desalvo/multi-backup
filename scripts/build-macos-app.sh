@@ -66,7 +66,7 @@ python -m PyInstaller --windowed --onedir --clean --noconfirm \
 plutil -replace LSMinimumSystemVersion -string '13.0' "$APP/Contents/Info.plist"
 plutil -replace LSApplicationCategoryType -string 'public.app-category.productivity' "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string '0.1.0' "$APP/Contents/Info.plist"
-plutil -replace CFBundleVersion -string '13' "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string '14' "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/bin"
 # Keychain-protected Touch ID adapter, device-only; never stores keys in app bundle.
 swiftc -O -framework Security -framework LocalAuthentication \

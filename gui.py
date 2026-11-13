@@ -23,6 +23,7 @@ from archive_ops import catalog,list_members,read_member,extract_archive,checkou
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
 from ui_widgets import PremiumButton, GradientProgress
+from premium_dashboard import DashboardView
 from key_management import private_key_path
 from secure_vault import (vault_path,load_vault,unlock,create_identity,migrate_legacy,
                           export_recovery_copy,change_password,import_recovery_copy,recover_existing_vault,
@@ -45,8 +46,8 @@ class BackupGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title('Multi Backup  ·  '+VERSION)
-        self.geometry('1160x850');self.minsize(960,710)
-        self.configure(background='#eaf0f7')
+        self.geometry('1480x960');self.minsize(1070,760)
+        self.configure(background='#0D1A3D')
         try:self.iconphoto(True,tk.PhotoImage(file=str(asset('icon-64.png'))))
         except Exception:pass
         self.cfg=load_settings()
@@ -108,53 +109,71 @@ class BackupGUI(tk.Tk):
         self.sidebar.pack(side='left',fill='y')
         self.sidebar.pack_propagate(False)
         brand=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
-        brand.pack(fill='x',padx=20,pady=(24,16))
+        brand.pack(fill='x',padx=15,pady=(20,12))
         try:
             from PIL import Image,ImageTk
-            icon=Image.open(asset('multi-backup.png')).resize((54,54),Image.Resampling.LANCZOS)
+            icon=Image.open(asset('multi-backup.png')).convert('RGBA')
+            icon.thumbnail((87,87),Image.Resampling.LANCZOS)
             self.icon_image=ImageTk.PhotoImage(icon)
-            tk.Label(brand,image=self.icon_image,bg=SIDEBAR_BG,bd=0).pack(side='left',padx=(0,10))
-        except Exception:
+            tk.Label(brand,image=self.icon_image,bg=SIDEBAR_BG,bd=0).pack(anchor='center')
+        except (OSError,ValueError):
             pass
-        brand_copy=tk.Frame(brand,bg=SIDEBAR_BG)
-        brand_copy.pack(side='left',fill='x',expand=True)
-        tk.Label(brand_copy,text='MULTI BACKUP',font=('Helvetica Neue',14,'bold'),
-                 fg='#FFFFFF',bg=SIDEBAR_BG,anchor='w').pack(fill='x')
-        tk.Label(brand_copy,text='YOUR PRIVATE VAULT',font=('Helvetica Neue',9),
-                 fg='#C0D4ED',bg=SIDEBAR_BG,anchor='w').pack(fill='x',pady=(5,0))
+        tk.Label(brand,text='Multi Backup',font=('Helvetica Neue',17,'bold'),
+                 fg='#FFFFFF',bg=SIDEBAR_BG).pack(anchor='center',pady=(5,0))
+        tk.Label(brand,text=VERSION,font=('Helvetica Neue',10),
+                 fg='#C6D4F9',bg=SIDEBAR_BG).pack(anchor='center',pady=(2,0))
         tk.Frame(self.sidebar,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',padx=18,pady=(0,12))
 
         self.nav={}
+        translated={'Dashboard':'Dashboard','Backup':'Backup','Archives':'Archivi',
+                    'Restore':'Ripristina','Plugins':'Plugin',
+                    'Encryption':'Vault e chiavi','Updates':'Aggiornamenti',
+                    'Settings':'Impostazioni'}
         for name,icon in NAV_ITEMS:
             if name in ('Dashboard','Encryption'):
-                section='WORKSPACE' if name=='Dashboard' else 'PREFERENCES'
+                section='IL TUO SPAZIO' if name=='Dashboard' else 'PREFERENZE'
                 tk.Label(self.sidebar,text=section,font=('Helvetica Neue',9,'bold'),
                          fg=SIDEBAR_HEADING,bg=SIDEBAR_BG,
                          anchor='w').pack(fill='x',padx=25,
                                           pady=(10 if name=='Dashboard' else 19,6))
-            btn=SidebarNavItem(self.sidebar,name,icon,lambda n=name:self._show(n))
+            btn=SidebarNavItem(self.sidebar,translated[name],icon,lambda n=name:self._show(n))
             btn.pack(fill='x',padx=13,pady=2)
             self.nav[name]=btn
         foot=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
         foot.pack(side='bottom',fill='x',padx=18,pady=(6,17))
         tk.Frame(foot,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',pady=(0,13))
-        tk.Label(foot,text=VERSION+'   ·   EUPL-1.2',
+        tk.Label(foot,text='EUPL-1.2  ·  Backup privati',
                  font=('Helvetica Neue',9),fg='#B4CAE4',
-                 bg=SIDEBAR_BG).pack(anchor='w')
-        self.content=tk.Frame(self,bg='#f5f8fc');self.content.pack(fill='both',expand=True)
-        toolbar=ttk.Frame(self.content)
-        toolbar.pack(fill='x',padx=(16,18),pady=(7,5))
-        self.menu_button=PremiumButton(toolbar,text='Hide navigation',
+                 bg=SIDEBAR_BG).pack(anchor='center')
+        try:
+            from PIL import Image,ImageTk,ImageOps,ImageEnhance,ImageDraw
+            with Image.open(asset('hero.jpg')) as photo:
+                preview=ImageOps.fit(photo.convert('RGB'),(218,130),
+                                     Image.Resampling.LANCZOS,centering=(.6,.5))
+            preview=ImageEnhance.Color(preview).enhance(1.2)
+            mask=Image.new('L',preview.size,0)
+            ImageDraw.Draw(mask).rounded_rectangle((0,0,217,129),radius=16,fill=255)
+            background=Image.new('RGB',preview.size,SIDEBAR_BG)
+            background.paste(preview,(0,0),mask)
+            self.sidebar_picture=ImageTk.PhotoImage(background)
+            tk.Label(self.sidebar,image=self.sidebar_picture,
+                     bg=SIDEBAR_BG,bd=0).pack(side='bottom',padx=14,pady=(0,7))
+        except (OSError,ValueError):
+            pass
+        self.content=tk.Frame(self,bg='#0D1A3D');self.content.pack(fill='both',expand=True)
+        toolbar=tk.Frame(self.content,bg='#0D1A3D')
+        toolbar.pack(fill='x',padx=(16,18),pady=(5,3))
+        self.menu_button=PremiumButton(toolbar,text='Hide navigation',style='Dark.TButton',
                                        command=self._toggle_sidebar)
         self.menu_button.pack(side='left')
-        ttk.Label(toolbar,text='PRIVATE BACKUP WORKSPACE',
-                  style='Sub.TLabel').pack(side='right')
+        tk.Label(toolbar,text='SPAZIO BACKUP PROTETTO',bg='#0D1A3D',
+                 fg='#BDCDF1',font=('Helvetica Neue',10,'bold')).pack(side='right')
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
         self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
-        body=tk.Frame(self.content,bg='#f5f8fc')
-        body.pack(fill='both',expand=True)
-        self.page_canvas=tk.Canvas(body,bg='#f5f8fc',highlightthickness=0,borderwidth=0)
-        page_scroll=ttk.Scrollbar(body,orient='vertical',command=self.page_canvas.yview)
+        self.body=tk.Frame(self.content,bg='#0D1A3D')
+        self.body.pack(fill='both',expand=True)
+        self.page_canvas=tk.Canvas(self.body,bg='#0D1A3D',highlightthickness=0,borderwidth=0)
+        page_scroll=ttk.Scrollbar(self.body,orient='vertical',command=self.page_canvas.yview)
         self.page_canvas.configure(yscrollcommand=page_scroll.set)
         page_scroll.pack(side='right',fill='y')
         self.page_canvas.pack(side='left',fill='both',expand=True)
@@ -164,7 +183,8 @@ class BackupGUI(tk.Tk):
         self.page_canvas.bind('<Configure>',self._resize_page_host)
         self.pages={}
         for name in self.nav:
-            page=ttk.Frame(self.page_host)
+            page=(tk.Frame(self.page_host,bg='#0D1A3D') if name=='Dashboard'
+                  else ttk.Frame(self.page_host))
             self.pages[name]=page
         self._build_dashboard(self.pages['Dashboard'])
         self._build_backup(self.pages['Backup'])
@@ -501,7 +521,15 @@ class BackupGUI(tk.Tk):
         for key,page in self.pages.items():
             page.pack_forget()
             self.nav[key].set_active(key==name)
-        self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
+        if name=='Dashboard':
+            self.hero.pack_forget()
+            self.page_canvas.configure(bg='#0D1A3D')
+            self.pages[name].pack(fill='both',expand=True,padx=0,pady=0)
+            self.dashboard.refresh()
+        else:
+            self.hero.pack(fill='x',before=self.body)
+            self.page_canvas.configure(bg='#f5f8fc')
+            self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
         self.page_canvas.yview_moveto(0)
         self._sync_page_scroll()
         if name=='Archives':self._refresh()
@@ -512,24 +540,9 @@ class BackupGUI(tk.Tk):
         if sub:ttk.Label(parent,text=sub,style='Sub.TLabel').pack(anchor='w',pady=(0,17))
 
     def _build_dashboard(self,page):
-        self._heading(page,'Overview','Your secure multi-backend backup workspace')
-        cards=ttk.Frame(page);cards.pack(fill='x',pady=5)
-        for title,subtitle,symbol in [('BACKENDS','GitHub ready · Dropbox optional','⬡'),
-                                      ('ENCRYPTION','age · user-controlled identities','◇'),
-                                      ('UPDATES','Stable by default','↻')]:
-            frame=tk.Frame(cards,bg='white',highlightbackground='#d9e3f0',highlightthickness=1)
-            frame.pack(side='left',fill='both',expand=True,padx=6,ipady=14)
-            tk.Label(frame,text=symbol,font=('Helvetica',24),fg='#1267c9',bg='white').pack(anchor='w',padx=15)
-            tk.Label(frame,text=title,font=('Helvetica',11,'bold'),fg='#142c4b',bg='white').pack(anchor='w',padx=15)
-            tk.Label(frame,text=subtitle,font=('Helvetica',9),fg='#4e6480',bg='white').pack(anchor='w',padx=15)
-        ttk.Label(page,text='Start with a provider and choose what to protect.',style='Title.TLabel').pack(anchor='w',pady=(35,14))
-        action=ttk.Frame(page);action.pack(anchor='w')
-        PremiumButton(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
-        PremiumButton(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
-        PremiumButton(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
-        PremiumButton(action,text='Restore backup',command=lambda:self._show('Restore')).pack(side='left',padx=12)
-        ttk.Label(page,text='Latest update status',style='Sub.TLabel').pack(anchor='w',pady=(38,8))
-        ttk.Label(page,textvariable=self.update_status,wraplength=650).pack(anchor='w')
+        """Approved photographic dashboard; indicators reflect actual local state."""
+        self.dashboard=DashboardView(page,self,asset)
+        self.dashboard.pack(fill='both',expand=True)
 
     def _line(self,parent,label,var,browse=None):
         row=ttk.Frame(parent);row.pack(fill='x',pady=4)
@@ -1087,6 +1100,7 @@ class BackupGUI(tk.Tk):
                     self.start_button['state']='normal';self.stop_button['state']='disabled'
                     self.status.set(f'Backup finished: exit {payload}')
                     self._refresh()
+                    self.dashboard.refresh(force=True)
                 elif kind=='err':
                     try:
                         obj=json.loads(payload)
@@ -1108,6 +1122,8 @@ class BackupGUI(tk.Tk):
                         self.restore_summary.set(payload)
                 elif kind=='update':
                     self.update_status.set(payload)
+                elif kind=='dashboard-metrics':
+                    self.dashboard.apply_metrics(payload)
                 else:self._log(payload)
         except queue.Empty:pass
         self.after(130,self._poll)

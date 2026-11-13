@@ -11,6 +11,9 @@ def bundle_self_test():
     import backends.github_backend
     import backends.dropbox_backend
     from gui import asset
+    from premium_dashboard import format_size, summarize_catalog
+    assert format_size(0) == '0 B'
+    assert summarize_catalog([], '.', now=0)['count'] == 0
     from runtime_bootstrap import configure_path
     from updater import _verified_https_context
     import certifi
@@ -39,6 +42,10 @@ def gui_smoke():
         application._startup_security()
         assert not application._locked
         assert len(application.nav) == 8
+        application._show('Dashboard')
+        application.dashboard.redraw()
+        assert application.dashboard._hotspots, 'Premium dashboard actions are missing'
+        assert application.dashboard._drawn_height >= 900
         application._show('Backup')
         application._show('Restore')
         application._show('Encryption')
