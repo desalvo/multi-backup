@@ -23,6 +23,7 @@ from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
 from ui_widgets import PremiumButton, GradientProgress
 from key_management import ensure_default_identity, private_key_path, recipient_for_identity
+from backup_paths import prepare_destination
 from settings import settings_path
 from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
 
@@ -451,6 +452,8 @@ class BackupGUI(tk.Tk):
                     raise RuntimeError('Refusing a symlinked application directory')
                 directory.mkdir(parents=True,exist_ok=True,mode=0o700)
                 script=directory/'connect-github.command'
+                if script.is_symlink():
+                    raise RuntimeError('Refusing a symlinked GitHub sign-in launcher')
                 script.write_text('#!/bin/sh\n'+shlex.quote(binary)+
                                   ' auth login --hostname github.com --git-protocol https --web\n'
                                   'echo "Return to Multi Backup and click Detect after login."\n'
@@ -540,6 +543,12 @@ class BackupGUI(tk.Tk):
             return
         if backend=='github' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',chosen):
             messagebox.showerror('Invalid GitHub username','Please enter a valid GitHub login.')
+            return
+        try:
+            safe=prepare_destination(self.root_dir.get())
+            self.root_dir.set(str(safe))
+        except (OSError,ValueError,RuntimeError) as exc:
+            messagebox.showerror('Destination unavailable',str(exc))
             return
         if not self._save_preferences():return
         try:
