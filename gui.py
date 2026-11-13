@@ -479,23 +479,45 @@ class BackupGUI(tk.Tk):
                   style='Sub.TLabel',wraplength=720).pack(anchor='w',pady=12)
 
     def _build_settings(self,page):
-        self._heading(page,'Preferences','Global settings shared with the command-line interface.')
-        ttk.Checkbutton(page,text='Check for updates at startup and periodically',variable=self.autocheck,
-                        command=self._save_preferences).pack(anchor='w',pady=7)
+        self._heading(page,'Preferences','Application updates, CI retention and advanced limits.')
+        ttk.Checkbutton(page,text='Check for updates at startup and periodically',
+                        variable=self.autocheck,command=self._save_preferences).pack(anchor='w',pady=7)
         ttk.Label(page,text='Update channel').pack(anchor='w',pady=6)
-        c=ttk.Combobox(page,textvariable=self.update_channel,values=('stable','early-release'),state='readonly')
-        c.pack(anchor='w');c.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
-        ttk.Label(page,text='Keep CI artifacts only when cleanup is explicitly selected.',style='Sub.TLabel').pack(anchor='w',pady=20)
-        PremiumButton(page,text='Save all preferences',command=self._save_preferences).pack(anchor='w')
+        box=ttk.Combobox(page,textvariable=self.update_channel,
+                         values=('stable','early-release'),state='readonly')
+        box.pack(anchor='w')
+        box.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
+        self._line(page,'CI runs to back up per repo',self.backup_ci_runs)
+        ttk.Label(page,text='Always include this many recent GitHub Actions runs, '
+                  'even if you do not enable cleanup.',style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(1,12))
+        self._line(page,'CI runs to keep if cleaning',self.keep)
+        ttk.Label(page,text='Cleanup is optional, off by default, and happens only '
+                  'after a successful backup.',style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(1,12))
+        self._line(page,'Parallel workers',self.workers)
+        PremiumButton(page,text='Save all preferences',
+                      style='Accent.TButton',command=self._save_preferences).pack(
+                      anchor='w',pady=18)
 
     def _save_preferences(self):
         try:
-            self.cfg.update({'output_directory':self.root_dir.get(), 'update_channel':self.update_channel.get(),
-              'auto_update_check':self.autocheck.get(),'metadata_workers':int(self.workers.get()),
-              'keep_ci_runs':int(self.keep.get()),'cleanup_ci_artifacts':self.cleanup.get(),
-              'default_recipient':self.recipient.get()})
+            self.cfg.update({
+                'output_directory':self.root_dir.get(),
+                'github_username':self.github_user.get().strip(),
+                'backup_ci_runs':int(self.backup_ci_runs.get()),
+                'update_channel':self.update_channel.get(),
+                'auto_update_check':self.autocheck.get(),
+                'metadata_workers':int(self.workers.get()),
+                'keep_ci_runs':int(self.keep.get()),
+                'cleanup_ci_artifacts':self.cleanup.get(),
+                'default_recipient':self.recipient.get(),
+            })
             save_settings(self.cfg)
-        except Exception as exc:messagebox.showerror('Settings error',str(exc))
+            return True
+        except (ValueError,OSError,RuntimeError) as exc:
+            messagebox.showerror('Settings error',str(exc))
+            return False
 
     def _cli(self):
         if getattr(sys,'frozen',False):
@@ -506,36 +528,66 @@ class BackupGUI(tk.Tk):
 
     def _start(self):
         if self.proc is not None and self.proc.poll() is None:return
-        if self.backend.get() not in self.cfg['enabled_backends']:
-            messagebox.showwarning('Backend disabled','Enable this backend on the Plugins page first.');return
-        if self.backend.get()=='dropbox' and not self.recipient.get():
-            messagebox.showwarning('Recipient required','Dropbox incremental backup requires a public age recipient.');return
-        if self.backend.get()=='github' and not self.recipient.get() and not messagebox.askyesno('Interactive encryption',
-                'No age recipient provided. Each archive may request a password. Continue?'):
+        backend=self.backend.get()
+        if backend not in self.cfg['enabled_backends']:
+            messagebox.showwarning('Backend disabled',
+                                   'Enable this backend in Plugins first.')
             return
-        args=self._cli()+['backup','--backend',self.backend.get(),'--output-dir',self.root_dir.get(),
-                          '--keep-ci-runs',self.keep.get(),'--metadata-workers',self.workers.get(),'--json-progress']
-        if self.staging.get():args+=['--staging-dir',self.staging.get()]
+        chosen=self.github_user.get().strip()
+        if backend=='github' and not chosen:
+            messagebox.showwarning('GitHub username required',
+                                   'Enter your GitHub username or click Detect.')
+            return
+        if backend=='github' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',chosen):
+            messagebox.showerror('Invalid GitHub username','Please enter a valid GitHub login.')
+            return
+        if not self._save_preferences():return
+        try:
+            created=self._prepare_identity()
+        except (OSError,ValueError,RuntimeError) as exc:
+            messagebox.showerror('Backup encryption unavailable',str(exc))
+            return
+        if created:
+            messagebox.showwarning(
+                'Protect your recovery key',
+                'Your private age key was generated automatically at:\n\n'+
+                self.identity.get()+'\n\nKeep a separate secure copy. Without this '
+                'file, encrypted backups cannot be restored.')
+        args=self._cli()+['backup','--backend',backend,
+                          '--output-dir',self.root_dir.get(),
+                          '--max-runs-per-repo',self.backup_ci_runs.get(),
+                          '--keep-ci-runs',self.keep.get(),
+                          '--metadata-workers',self.workers.get(),
+                          '--recipient',self.recipient.get(),
+                          '--json-progress']
         if self.identity.get():args+=['--identity',self.identity.get()]
-        if self.recipient.get():args+=['--recipient',self.recipient.get()]
-        if self.backend.get()=='github':
-            if self.cleanup.get():args+=['--cleanup-ci-artifacts']
-            if self.cleanup.get() and self.dryrun.get():args+=['--cleanup-ci-dry-run']
+        if backend=='github':
+            args+=['--github-user',chosen]
+            if self.cleanup.get():
+                args+=['--cleanup-ci-artifacts']
+                if self.dryrun.get():args+=['--cleanup-ci-dry-run']
             if self.skiplogs.get():args+=['--skip-ci-logs']
             if self.restart.get():args+=['--restart']
-        elif self.dropbox_path.get():args+=['--dropbox-path',self.dropbox_path.get()]
-        self._save_preferences();self.progress['value']=0
-        self.start_button['state']='disabled';self.stop_button['state']='normal';self.status.set('Starting backup…')
+        elif self.dropbox_path.get():
+            args+=['--dropbox-path',self.dropbox_path.get()]
+        self.progress.set_percent(0)
+        self.start_button['state']='disabled'
+        self.stop_button['state']='normal'
+        self.status.set('Starting encrypted backup…')
         try:
             kw={'creationflags':subprocess.CREATE_NEW_PROCESS_GROUP} if os.name=='nt' else {}
             self.proc=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                                        text=True,bufsize=1,**kw)
-        except Exception as exc:
-            self.start_button['state']='normal';self.stop_button['state']='disabled'
-            messagebox.showerror('Start failed',str(exc));return
+        except (OSError,RuntimeError) as exc:
+            self.start_button['state']='normal'
+            self.stop_button['state']='disabled'
+            messagebox.showerror('Start failed',str(exc))
+            return
         for kind,stream in [('out',self.proc.stdout),('err',self.proc.stderr)]:
             threading.Thread(target=self._read,args=(kind,stream),daemon=True).start()
-        threading.Thread(target=lambda:self.events.put(('finished',self.proc.wait())),daemon=True).start()
+        proc=self.proc
+        threading.Thread(target=lambda:self.events.put(('finished',proc.wait())),
+                         daemon=True).start()
 
     def _read(self,kind,stream):
         for line in iter(stream.readline,''):self.events.put((kind,line.rstrip()))
@@ -558,10 +610,17 @@ class BackupGUI(tk.Tk):
                     try:
                         obj=json.loads(payload)
                         if obj.get('type')=='progress':
-                            self.progress['value']=obj.get('percent',0)
+                            self.progress.set_percent(obj.get('percent',0))
                             self.status.set(obj.get('message',''))
                         else:self._log(payload)
                     except ValueError:self._log(payload)
+                elif kind=='github-login':
+                    login,force=payload
+                    if force or not self.github_user.get().strip():
+                        self.github_user.set(login)
+                    self.github_status.set('Connected to GitHub as '+login)
+                elif kind=='github-error':
+                    self.github_status.set('GitHub not connected: '+str(payload))
                 elif kind=='update':
                     self.update_status.set(payload)
                 else:self._log(payload)
