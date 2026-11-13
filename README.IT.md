@@ -59,3 +59,9 @@ La CI include job macOS 13+ (Apple Silicon e Intel), Windows 11 x64 e RPM per Ro
 - [Canali di rilascio](docs/RELEASE_CHANNELS.md), [sicurezza](docs/SECURITY.md), [handoff](docs/HANDOFF.md).
 
 **Licenza:** [EUPL-1.2](LICENSE).
+
+### Production Gate unico e installazione macOS
+
+Ogni push avvia un unico **Production Gate**, con test e audit di sicurezza; solo dopo il suo successo si avviano compilazione, verifica e pubblicazione. `[full-ci]` su `main` richiede una early-release; un normale tag di versione richiede una stable (ancora bloccata fino al completamento delle firme). La full CI si può avviare manualmente da **Actions → Multi Backup - Production CI → Run workflow**.
+
+Il DMG corretto contiene un solo elemento visibile, **`Multi Backup.app`**, da trascinare nella cartella **Applicazioni**. Al suo interno si trovano la CLI e gli strumenti di cifratura; macOS deve disporre anche di `git`. Il DMG viene pubblicato **solo dopo** firma Developer ID Application, notarizzazione Apple sia dell'app sia del DMG, verifica Gatekeeper e test dell'app copiata fuori dal volume DMG. I precedenti DMG RC non firmati potrebbero essere rifiutati da Gatekeeper: **non disabilitare Gatekeeper**. Le credenziali necessarie vanno impostate come **GitHub Actions secrets** secondo [la documentazione dei canali](docs/RELEASE_CHANNELS.md).

@@ -100,3 +100,9 @@ python3 -m unittest discover -s tests -v
 ```
 
 **License:** [EUPL-1.2](LICENSE). Contributions: see repository issues and the development handoff.
+
+### Production Gate and macOS drag-and-drop installation (RC)
+
+Every push first runs a single **Production Gate**, including security scanning; native jobs and publication run **only after it passes**. A commit with `[full-ci]` on `main` triggers early-release binaries, while an ordinary version tag targets stable (still blocked pending platform signing policies). You can manually trigger a full release from **Actions → Multi Backup - Production CI → Run workflow**.
+
+The corrected macOS DMG contains only **`Multi Backup.app`**. Drag it into **Applications** and launch from Finder. The application bundle includes the CLI and cryptography helpers; `git` must be available on macOS. The macOS package **will not be published** unless Apple Developer ID signing and both app+DMG notarizations pass, followed by a mounted-DMG relocation and Gatekeeper test. See [Release channels and required GitHub secrets](docs/RELEASE_CHANNELS.md). Previously published, unsigned RC DMGs are not guaranteed to open and should not be installed. Do not bypass Gatekeeper.

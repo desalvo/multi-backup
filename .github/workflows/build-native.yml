@@ -1,15 +1,6 @@
-name: Native release channels
+name: Multi Backup - Native packages (reusable; requires Production Gate)
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      early_release:
-        description: 'Manually build early release (never stable)'
-        type: boolean
-        required: true
-        default: true
+  workflow_call:
 permissions:
   contents: read
   actions: read
@@ -20,52 +11,30 @@ jobs:
   qualify:
     name: Determine distribution channel
     runs-on: ubuntu-24.04
-    if: >-
-      (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[full-ci]')) ||
-      (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-rc')) ||
-      github.event_name == 'workflow_dispatch'
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
       tag: ${{ steps.channel.outputs.tag }}
     steps:
       - id: channel
+        shell: bash
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-        shell: bash
         run: |
+          set -euo pipefail
           if [[ "$REF_TYPE" == tag ]]; then
+            [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo '::error::Stable tags must be vMAJOR.MINOR.PATCH'; exit 1;
+            }
             echo 'channel=stable' >> "$GITHUB_OUTPUT"
             echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           else
             echo 'channel=early-release' >> "$GITHUB_OUTPUT"
             echo 'tag=early-release' >> "$GITHUB_OUTPUT"
           fi
-  tests:
-    name: RC tests and static checks
-    needs: qualify
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: python -m compileall -q .
-      - run: python -m unittest discover -s tests -v
-      - name: Check CLI plugin and version
-        run: |
-          python multi_backup.py --version
-          python multi_backup.py plugins
-          python multi_backup.py updates --help
-      - name: Validate release assets and documentation
-        run: |
-          test -s LICENSE && test -s README.md && test -s README.IT.md
-          test -s docs/manuals/Multi-Backup-User-Manual-EN.pdf
-          test -s docs/manuals/Multi-Backup-Manuale-Utente-IT.pdf
-          test -s docs/brochures/Multi-Backup-Brochure-EN.pdf
-          test -s docs/brochures/Multi-Backup-Brochure-IT.pdf
   macos:
     name: macOS ${{ matrix.arch }} DMG
-    needs: [qualify, tests]
+    needs: [qualify]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -79,56 +48,79 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Install dependencies
+      - name: Import Developer ID certificate and configure notarization (required)
+        shell: bash
+        env:
+          MAC_SIGNING_ID: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+          APPLE_SIGN_P12_B64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_SIGN_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY_B64: ${{ secrets.APPLE_NOTARY_API_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          for variable in MAC_SIGNING_ID APPLE_SIGN_P12_B64 APPLE_SIGN_PASSWORD APPLE_NOTARY_KEY_B64 APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
+            if [[ -z "${!variable}" ]]; then
+              echo "::error::Missing $variable. Configure Apple Developer ID and App Store Connect API secrets; refusing to distribute an untrusted DMG."
+              exit 1
+            fi
+          done
+          [[ "$MAC_SIGNING_ID" == 'Developer ID Application:'* ]] || {
+            echo '::error::Only Developer ID Application identities are accepted for Gatekeeper distribution'
+            exit 1
+          }
+          KEYCHAIN="$RUNNER_TEMP/multi-backup-ci.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$APPLE_SIGN_P12_B64" | base64 -D > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_SIGN_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -F "$MAC_SIGNING_ID"
+          printf '%s' "$APPLE_NOTARY_KEY_B64" | base64 -D > "$RUNNER_TEMP/multi-backup-notary.p8"
+          chmod 600 "$RUNNER_TEMP/multi-backup-notary.p8"
+          echo "MULTI_BACKUP_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "MULTI_BACKUP_NOTARY_KEY=$RUNNER_TEMP/multi-backup-notary.p8" >> "$GITHUB_ENV"
+      - name: Install helper tools
         shell: bash
         run: |
           brew install age gh git-lfs
-          for helper in age age-keygen gh git-lfs; do command -v "$helper" >/dev/null || exit 1; done
-          python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=13.0.0,<14'
-      - name: Build CLI and application bundle
+          for helper in age age-keygen gh git-lfs git; do command -v "$helper" >/dev/null || exit 1; done
+      - name: Build and sign relocatable Multi Backup.app
         shell: bash
-        run: |
-          python -m PyInstaller --onefile --clean --noconfirm --name multi-backup \
-            --add-data assets:assets multi_backup.py
-          cp dist/multi-backup dist/multi-backup-cli
-          mkdir -p assets/MultiBackup.iconset
-          for size in 16 32 64 128 256 512; do
-            cp assets/icon-${size}.png "assets/MultiBackup.iconset/icon_${size}x${size}.png"
-          done
-          cp assets/icon-32.png assets/MultiBackup.iconset/icon_16x16@2x.png
-          cp assets/icon-64.png assets/MultiBackup.iconset/icon_32x32@2x.png
-          cp assets/icon-256.png assets/MultiBackup.iconset/icon_128x128@2x.png
-          cp assets/icon-512.png assets/MultiBackup.iconset/icon_256x256@2x.png
-          cp assets/icon-1024.png assets/MultiBackup.iconset/icon_512x512@2x.png
-          iconutil -c icns assets/MultiBackup.iconset -o assets/multi-backup.icns
-          python -m PyInstaller --windowed --onedir --clean --noconfirm --name 'Multi Backup' \
-            --add-data assets:assets --icon assets/multi-backup.icns gui_launcher.py
-          mkdir -p 'dist/Multi Backup.app/Contents/MacOS/bin'
-          cp dist/multi-backup-cli 'dist/Multi Backup.app/Contents/MacOS/multi-backup'
-          for exe in age age-keygen gh git-lfs; do
-            command -v "$exe" >/dev/null && cp "$(command -v "$exe")" 'dist/Multi Backup.app/Contents/MacOS/bin/' || true
-          done
-      - name: Optional Apple code signing
         env:
-          SIGN_ID: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          MAC_SIGNING_ID: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+          MAC_ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-macos-app.sh
+      - name: Notarize app, create single-item DMG and notarize DMG
+        shell: bash
+        env:
+          MAC_SIGNING_ID: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
+          MAC_ARCH: ${{ matrix.arch }}
+        run: bash scripts/notarize-macos.sh
+      - name: Mount DMG and test relocated, notarized application
+        shell: bash
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: bash scripts/verify-macos-dmg.sh "multi-backup-macos-${MAC_ARCH}.dmg"
+      - name: Remove temporary Apple credentials
+        if: always()
         shell: bash
         run: |
-          if [[ -n "$SIGN_ID" ]]; then
-            codesign --deep --force --options runtime --timestamp -s "$SIGN_ID" 'dist/Multi Backup.app'
-            codesign --verify --deep --strict 'dist/Multi Backup.app'
-          else
-            echo 'No signing identity. RC build is unsigned and not suitable for unattended installation.'
+          if [[ -n "${MULTI_BACKUP_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$MULTI_BACKUP_KEYCHAIN" || true
           fi
-      - name: Make DMG and checksums
-        shell: bash
-        run: |
-          mkdir dmg-root
-          cp -R 'dist/Multi Backup.app' dmg-root/
-          cp dist/multi-backup-cli dmg-root/multi-backup
-          cp LICENSE README.md dmg-root/
-          hdiutil create -volname 'Multi Backup' -srcfolder dmg-root -ov -format UDZO \
-            "multi-backup-macos-${{ matrix.arch }}.dmg"
-          shasum -a 256 *.dmg > "checksums-macos-${{ matrix.arch }}.txt"
+          if [[ -n "${MULTI_BACKUP_NOTARY_KEY:-}" ]]; then
+            rm -f "$MULTI_BACKUP_NOTARY_KEY"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: native-macos-${{ matrix.arch }}
@@ -138,7 +130,7 @@ jobs:
           retention-days: 14
   windows:
     name: Windows 11 x64 installer
-    needs: [qualify, tests]
+    needs: [qualify]
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -187,7 +179,7 @@ jobs:
           retention-days: 14
   linux-rpm:
     name: ${{ matrix.distro }} EL${{ matrix.el }} RPM
-    needs: [qualify, tests]
+    needs: [qualify]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -237,7 +229,7 @@ jobs:
           retention-days: 14
   publish:
     name: Publish ${{ needs.qualify.outputs.channel }} releases
-    needs: [qualify, tests, macos, windows, linux-rpm]
+    needs: [qualify, macos, windows, linux-rpm]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -290,8 +282,9 @@ jobs:
           retention-days: 30
 
   rpm-repositories:
+    if: needs.qualify.outputs.channel == 'early-release'
     name: Publish RPM indexes for ${{ needs.qualify.outputs.channel }}
-    needs: [qualify, tests, linux-rpm]
+    needs: [qualify, macos, windows, linux-rpm]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

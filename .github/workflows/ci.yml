@@ -1,55 +1,78 @@
-name: Full CI - tests and security
+name: Multi Backup - Production CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: multi-backup-ci-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  tests:
-    name: Python ${{ matrix.python-version }}
+  production-gate:
+    name: Production Gate - tests, security and release policy
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Compile modules
-        run: python -m compileall -q .
-      - name: Run test suite
-        run: python -m unittest discover -s tests -v
-      - name: Validate command help
+      - name: Test Python 3.11
+        uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Python 3.11 tests
         run: |
+          python -m compileall -q .
+          python -m unittest discover -s tests -v
+      - name: Test Python 3.12
+        uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Python 3.12 tests and CLI smoke
+        run: |
+          python -m compileall -q .
+          python -m unittest discover -s tests -v
           python multi_backup.py --version
           python multi_backup.py --help
           python multi_backup.py backup --help
-  security:
-    name: Security checks
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3'
-      - name: Check parse correctness and undefined names
+          python multi_backup.py plugins
+      - name: Test Python 3.13
+        uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Python 3.13 tests
         run: |
-          # E701/E702 are a formatting-only backlog in the compact legacy engine.
-          # Keep syntax, imports, control-flow, undefined names and bare-except checks enforced.
+          python -m compileall -q .
+          python -m unittest discover -s tests -v
+      - name: Activate security auditing environment
+        uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install static-analysis and dependency-audit tools
+        run: python -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3' 'PyYAML>=6,<7'
+      - name: Static correctness gate
+        run: |
+          # Compact legacy lines (E701/E702) are a documented formatting backlog.
+          # Syntax errors, broken imports, undefined names, bare excepts remain blocking.
           ruff check --select E4,E9,F63,F7,F82 --extend-select E722 .
-      - name: Analyze risky code paths
+      - name: Security code audit
         run: bandit -q -r . -x ./tests,./.git -ll
-      - name: Audit runtime Python dependencies
+      - name: Runtime and documentation dependency vulnerability audit
         run: |
           python -m pip_audit -r requirements.txt
-      - name: Validate packaging metadata
-        run: |
-          test -s LICENSE
-          test -s README.md
-          test -s README.IT.md
-          test -s docs/SECURITY.md
+          python -m pip_audit -r requirements-docs.txt
+      - name: Packaging, documentation and trust-policy gate
+        run: python scripts/check-production-gate.py
+
+  native-release:
+    name: Native packages and publication (after Production Gate)
+    needs: [production-gate]
+    if: >-
+      github.event_name != 'pull_request' &&
+      ((github.ref == 'refs/heads/main' &&
+        (github.event_name == 'workflow_dispatch' ||
+         contains(github.event.head_commit.message, '[full-ci]'))) ||
+       (startsWith(github.ref, 'refs/tags/v') &&
+        !contains(github.ref_name, '-rc')))
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/build-native.yml
+    secrets: inherit

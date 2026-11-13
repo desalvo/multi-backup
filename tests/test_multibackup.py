@@ -115,10 +115,49 @@ class PluginTests(unittest.TestCase):
         security = (root/'.github/workflows/ci.yml').read_text('utf-8')
         self.assertIn('Pillow>=13.0.0,<14', requirements)
         self.assertIn('Pillow>=13.0.0,<14', documentation_requirements)
-        self.assertEqual(native.count("'Pillow>=13.0.0,<14'"), 3)
+        self.assertEqual(native.count("'Pillow>=13.0.0,<14'"), 2)
+        self.assertIn('python -m pip install -r requirements.txt', (root/'scripts/build-macos-app.sh').read_text('utf-8'))
         self.assertNotIn('Pillow>=10', native)
         self.assertNotIn('Pillow>=10', requirements)
         self.assertIn('python -m pip_audit -r requirements.txt', security)
+
+    def test_single_production_gate_and_release_dependency(self):
+        import yaml
+        root=Path(__file__).resolve().parents[1]
+        ci=yaml.load((root/'.github/workflows/ci.yml').read_text('utf-8'),Loader=yaml.BaseLoader)
+        native=yaml.load((root/'.github/workflows/build-native.yml').read_text('utf-8'),Loader=yaml.BaseLoader)
+        self.assertEqual(set(ci['jobs']),{'production-gate','native-release'})
+        self.assertEqual(ci['jobs']['native-release']['needs'],['production-gate'])
+        self.assertEqual(set(native['on']),{'workflow_call'})
+        for step in ('pip_audit -r requirements.txt','pip_audit -r requirements-docs.txt',
+                     'ruff check','bandit','unittest discover'):
+            self.assertIn(step,(root/'.github/workflows/ci.yml').read_text('utf-8'))
+
+    def test_mac_disk_image_contains_only_application_and_nothing_unsigned(self):
+        root=Path(__file__).resolve().parents[1]
+        build=(root/'scripts/build-macos-app.sh').read_text('utf-8')
+        notarize=(root/'scripts/notarize-macos.sh').read_text('utf-8')
+        verify=(root/'scripts/verify-macos-dmg.sh').read_text('utf-8')
+        workflow=(root/'.github/workflows/build-native.yml').read_text('utf-8')
+        self.assertIn('--windowed --onedir',build)
+        self.assertIn('--osx-bundle-identifier',build)
+        self.assertIn('Contents/MacOS/multi-backup',build)
+        self.assertIn('Contents/Resources/bin',build)
+        self.assertIn('codesign --verify --deep --strict',build)
+        self.assertIn('notarytool submit',notarize)
+        self.assertIn('stapler staple "$APP"',notarize)
+        self.assertIn('stapler staple "$DMG"',notarize)
+        self.assertIn('ditto "$APP" "$TMP/dmg-root/Multi Backup.app"',notarize)
+        self.assertNotIn('cp dist/multi-backup-cli dmg-root',workflow)
+        self.assertIn('hdiutil attach',verify)
+        self.assertIn('spctl --assess',verify)
+        self.assertIn('"$APP/Contents/MacOS/Multi Backup" --self-test',verify)
+        self.assertIn('APPLE_SIGN_P12_B64',workflow)
+
+    def test_gui_bundle_entrypoint_has_explicit_self_test(self):
+        content=(Path(__file__).resolve().parents[1]/'gui_launcher.py').read_text('utf-8')
+        self.assertIn('def bundle_self_test',content)
+        self.assertIn("'--self-test'",content)
 
     def test_ci_workflow_uses_installable_windows_encryption_package(self):
         workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')

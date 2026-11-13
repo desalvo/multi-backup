@@ -33,3 +33,28 @@ GUI and CLI check the configured channel (default **stable**) at app startup and
 ## Known packaging risks
 
 Helper CLI dependencies (`gh`, `git-lfs`, `age`) must be found on PATH or bundled by the native installer; `git` is a system prerequisite. The CI aborts Windows packaging if `age.exe` is unavailable. Linux RPM currently depends on external helpers which must be installed separately. Satisfying the build matrix is not equivalent to validating notarization or app execution on each target OS.
+
+## 0.1.0-r007-rc1: single Production Gate and functioning macOS app (required)
+
+`ci.yml` is the **only event-triggered CI**. Every push and pull request first executes one job, `Production Gate - tests, security and release policy`, covering Python 3.11/3.12/3.13, CLI smoke, Ruff, Bandit, vulnerability scans of **both** runtime and documentation dependencies, release assets and workflow invariants. The `build-native.yml` workflow is **reusable only** and is called **after the gate succeeds** for `[full-ci]`, ordinary version tags or an explicit manual dispatch. Publication depends on *all* native builds being successful, and RPM indexes cannot be published before the Windows and macOS build checks are also green.
+
+The macOS installer is a drag-and-drop disk image with **exactly one visible item**: `Multi Backup.app` (copy it into `/Applications`). The CLI and `age`, `age-keygen`, `gh`, `git-lfs` are embedded *inside* the `.app` rather than shown as separate download items. The GUI `--self-test` validates its bundled assets; the CLI is available at `/Applications/Multi Backup.app/Contents/MacOS/multi-backup`. macOS must have functional `git` installed (Apple Command Line Tools if absent). No naked Python script or binary is placed at DMG top level.
+
+**Release security is fail-closed.** An unsigned, unnotarized macOS app can appear as “damaged” under Gatekeeper. Both macOS runners now import an ephemeral **Developer ID Application** certificate, sign the assembled app and nested executables, notarize and staple the app itself, create a one-item DMG, notarize/staple the DMG, mount it, copy the app to a temporary `Applications` directory and verify its architecture, signature, Gatekeeper acceptance, CLI and GUI bundle self-test. If any step fails or Apple credentials are unavailable, the workflow **must not update the public release**. Do not instruct users to remove quarantine, disable Gatekeeper, or use ad-hoc signatures as a substitute.
+
+### Required GitHub Actions secrets for macOS releases
+
+Configure these under **Settings → Secrets and variables → Actions → Repository secrets**, without inserting private material in the repository or chat:
+
+| Secret | Description |
+|---|---|
+| `APPLE_DEVELOPER_ID_P12_BASE64` | Base64-encoded **Developer ID Application** certificate export (`.p12`) and private key |
+| `APPLE_DEVELOPER_ID_P12_PASSWORD` | The `.p12` export password |
+| `APPLE_DEVELOPER_IDENTITY` | The exact `Developer ID Application: ... (TEAMID)` code-signing identity |
+| `APPLE_NOTARY_API_KEY_BASE64` | Base64 encoding of the App Store Connect `.p8` API key |
+| `APPLE_NOTARY_API_KEY_ID` | Notarization API key ID |
+| `APPLE_NOTARY_API_ISSUER_ID` | App Store Connect API key issuer UUID |
+
+After adding them, run **Multi Backup - Production CI** with `workflow_dispatch` on `main`, or push a commit containing `[full-ci]`. GitHub Actions will import the signing key only into a temporary keychain and delete it after the run. Apple notarization uses `xcrun notarytool` and two independently verified tickets. You must have a valid Apple Developer Program account to obtain these credentials. Without these secrets, the old public DMGs are **not** validated for a normal Gatekeeper install.
+
+**Important distinction:** The static Production Gate can be green even when a notarization credential is missing; actual code signing and running the app on macOS are separate native *release acceptance checks*, and release publication requires both. Windows Authenticode and RPM GPG signing are still required for the future stable channel.
