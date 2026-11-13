@@ -1,0 +1,453 @@
+"""Multi Backup native desktop shell: backend plugins, backups, archive viewer, keys, updates.
+
+Built with standard Tk/ttk and packaged photographic assets. The core engine is
+also accessible via CLI. GUI never performs destructive backup operations by
+implicit default; GitHub CI cleanup is explicit and starts as a simulation.
+"""
+from __future__ import annotations
+import json
+import os
+import queue
+import signal
+import subprocess
+import sys
+import threading
+import tkinter as tk
+from pathlib import Path
+from tkinter import ttk,filedialog,messagebox,simpledialog
+from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
+from settings import load_settings,save_settings,set_backend_enabled
+from version import VERSION
+
+ROOT=Path(__file__).resolve().parent
+
+def asset(name):
+    if getattr(sys,'_MEIPASS',None):return Path(sys._MEIPASS)/'assets'/name
+    return ROOT/'assets'/name
+
+class BackupGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title('Multi Backup  ·  '+VERSION)
+        self.geometry('1160x850');self.minsize(960,710)
+        self.configure(background='#eaf0f7')
+        try:self.iconphoto(True,tk.PhotoImage(file=str(asset('icon-64.png'))))
+        except Exception:pass
+        self.cfg=load_settings()
+        self.events=queue.Queue();self.proc=None;self.selected_archive=None;self.archive_index=[]
+        self.root_dir=tk.StringVar(value=self.cfg['output_directory'])
+        self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar(value=self.cfg.get('default_recipient',''))
+        self.backend=tk.StringVar(value='github');self.dropbox_path=tk.StringVar()
+        self.keep=tk.StringVar(value=str(self.cfg['keep_ci_runs']))
+        self.workers=tk.StringVar(value=str(self.cfg['metadata_workers']))
+        self.cleanup=tk.BooleanVar(value=self.cfg['cleanup_ci_artifacts']);self.dryrun=tk.BooleanVar(value=True)
+        self.restart=tk.BooleanVar(value=False);self.skiplogs=tk.BooleanVar(value=False)
+        self.update_channel=tk.StringVar(value=self.cfg['update_channel'])
+        self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
+        self.update_status=tk.StringVar(value='Not checked yet')
+        self._make_styles();self._make_shell();self._show('Dashboard')
+        self.after(120,self._poll)
+        if self.cfg['auto_update_check']:
+            self.after(1250,self._check_updates)
+            self.after(self.cfg['update_interval_hours']*3600*1000,self._periodic_update)
+
+    def _make_styles(self):
+        style=ttk.Style(self)
+        try:style.theme_use('clam')
+        except tk.TclError:pass
+        style.configure('TFrame',background='#f5f8fc');style.configure('TLabel',background='#f5f8fc',foreground='#24334a',font=('Helvetica',11))
+        style.configure('TButton',padding=(12,9),font=('Helvetica',10,'bold'))
+        style.configure('Accent.TButton',background='#1267c9',foreground='white',borderwidth=0)
+        style.map('Accent.TButton',background=[('active','#0d54a9'),('disabled','#aebdcc')])
+        style.configure('TEntry',padding=7);style.configure('TCombobox',padding=6)
+        style.configure('Title.TLabel',font=('Helvetica',18,'bold'),foreground='#13223e')
+        style.configure('Sub.TLabel',font=('Helvetica',10),foreground='#52647c')
+        style.configure('TLabelframe',background='#f5f8fc',borderwidth=1)
+        style.configure('TLabelframe.Label',font=('Helvetica',11,'bold'),foreground='#19345a')
+        style.configure('Horizontal.TProgressbar',troughcolor='#dbe6f3',background='#1267c9',thickness=16)
+
+    def _make_shell(self):
+        self.sidebar=tk.Frame(self,bg='#101f36',width=220);self.sidebar.pack(side='left',fill='y');self.sidebar.pack_propagate(False)
+        brand=tk.Frame(self.sidebar,bg='#101f36');brand.pack(fill='x',pady=(28,22))
+        try:
+            from PIL import Image,ImageTk
+            icon=Image.open(asset('multi-backup.png')).resize((65,65),Image.Resampling.LANCZOS)
+            self.icon_image=ImageTk.PhotoImage(icon)
+            tk.Label(brand,image=self.icon_image,bg='#101f36').pack()
+        except Exception:pass
+        tk.Label(brand,text='MULTI BACKUP',font=('Helvetica',16,'bold'),fg='#f1f7ff',bg='#101f36').pack(pady=(7,0))
+        tk.Label(brand,text='SECURE  ·  MODULAR  ·  PRIVATE',font=('Helvetica',8),fg='#8ba8ca',bg='#101f36').pack(pady=3)
+        self.nav={}
+        for name,symbol in [('Dashboard','▣'),('Backup','↻'),('Archives','▤'),('Plugins','⬡'),('Encryption','◇'),('Updates','↓'),('Settings','⚙')]:
+            btn=tk.Button(self.sidebar,text='   '+symbol+'   '+name,anchor='w',font=('Helvetica',11),relief='flat',bd=0,
+                         bg='#101f36',fg='#c6d7ef',activebackground='#213956',activeforeground='white',
+                         padx=15,pady=13,command=lambda n=name:self._show(n))
+            btn.pack(fill='x',padx=10,pady=2);self.nav[name]=btn
+        tk.Label(self.sidebar,text=VERSION+'  ·  EUPL-1.2',font=('Helvetica',9),fg='#7f9cbb',bg='#101f36').pack(side='bottom',pady=20)
+        self.content=tk.Frame(self,bg='#f5f8fc');self.content.pack(fill='both',expand=True)
+        self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
+        self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
+        body=tk.Frame(self.content,bg='#f5f8fc');body.pack(fill='both',expand=True)
+        self.pages={}
+        for name in self.nav:
+            page=ttk.Frame(body);self.pages[name]=page
+        self._build_dashboard(self.pages['Dashboard'])
+        self._build_backup(self.pages['Backup'])
+        self._build_archives(self.pages['Archives'])
+        self._build_plugins(self.pages['Plugins'])
+        self._build_encryption(self.pages['Encryption'])
+        self._build_updates(self.pages['Updates'])
+        self._build_settings(self.pages['Settings'])
+
+    def _draw_hero(self,event):
+        canvas=self.hero;canvas.delete('all');w=max(1,event.width);h=185
+        try:
+            from PIL import Image,ImageTk,ImageEnhance
+            img=Image.open(asset('hero.jpg')).convert('RGB').resize((w,h),Image.Resampling.LANCZOS)
+            img=ImageEnhance.Brightness(img).enhance(.69)
+            self.hero_image=ImageTk.PhotoImage(img)
+            canvas.create_image(0,0,anchor='nw',image=self.hero_image)
+        except Exception: pass
+        canvas.create_text(35,57,text='Multi Backup',font=('Helvetica',28,'bold'),fill='white',anchor='w')
+        canvas.create_text(35,92,text='Your data, protected across platforms',font=('Helvetica',13),fill='#eaf5ff',anchor='w')
+        canvas.create_text(35,133,text='Encrypted backups   /   GitHub + Dropbox plugins   /   Resumable snapshots',
+                           font=('Helvetica',10),fill='#dbeeff',anchor='w')
+
+    def _show(self,name):
+        for key,page in self.pages.items():
+            page.pack_forget()
+            self.nav[key].config(bg='#1b3859' if key==name else '#101f36',fg='white' if key==name else '#c6d7ef')
+        self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
+        if name=='Archives':self._refresh()
+
+    def _heading(self,parent,title,sub=''):
+        ttk.Label(parent,text=title,style='Title.TLabel').pack(anchor='w',pady=(0,5))
+        if sub:ttk.Label(parent,text=sub,style='Sub.TLabel').pack(anchor='w',pady=(0,17))
+
+    def _build_dashboard(self,page):
+        self._heading(page,'Overview','Your secure multi-backend backup workspace')
+        cards=ttk.Frame(page);cards.pack(fill='x',pady=5)
+        for title,subtitle,symbol in [('BACKENDS','GitHub ready · Dropbox optional','⬡'),
+                                      ('ENCRYPTION','age · user-controlled identities','◇'),
+                                      ('UPDATES','Stable by default','↻')]:
+            frame=tk.Frame(cards,bg='white',highlightbackground='#d9e3f0',highlightthickness=1)
+            frame.pack(side='left',fill='both',expand=True,padx=6,ipady=14)
+            tk.Label(frame,text=symbol,font=('Helvetica',24),fg='#1267c9',bg='white').pack(anchor='w',padx=15)
+            tk.Label(frame,text=title,font=('Helvetica',11,'bold'),fg='#142c4b',bg='white').pack(anchor='w',padx=15)
+            tk.Label(frame,text=subtitle,font=('Helvetica',9),fg='#4e6480',bg='white').pack(anchor='w',padx=15)
+        ttk.Label(page,text='Start with a provider and choose what to protect.',style='Title.TLabel').pack(anchor='w',pady=(35,14))
+        action=ttk.Frame(page);action.pack(anchor='w')
+        ttk.Button(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
+        ttk.Button(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
+        ttk.Button(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
+        ttk.Label(page,text='Latest update status',style='Sub.TLabel').pack(anchor='w',pady=(38,8))
+        ttk.Label(page,textvariable=self.update_status,wraplength=650).pack(anchor='w')
+
+    def _line(self,parent,label,var,browse=None):
+        row=ttk.Frame(parent);row.pack(fill='x',pady=4)
+        ttk.Label(row,text=label,width=20).pack(side='left')
+        ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
+        if browse:
+            ttk.Button(row,text='Browse',command=lambda:var.set(
+                filedialog.askopenfilename() if browse=='file' else filedialog.askdirectory())).pack(side='left',padx=(6,0))
+
+    def _build_backup(self,page):
+        self._heading(page,'New backup','Runs in a separate process. Interrupt and resume safely from verified checkpoints.')
+        self._line(page,'Output directory',self.root_dir,'directory');self._line(page,'Staging directory',self.staging,'directory')
+        self._line(page,'Age recipient',self.recipient)
+        self._line(page,'Age private key',self.identity,'file')
+        row=ttk.Frame(page);row.pack(fill='x',pady=(6,12))
+        ttk.Label(row,text='Backend',width=20).pack(side='left')
+        combo=ttk.Combobox(row,textvariable=self.backend,values=('github','dropbox'),state='readonly',width=18)
+        combo.pack(side='left');combo.bind('<<ComboboxSelected>>',lambda _:self._update_backend_fields())
+        ttk.Label(row,text='CI runs to retain',width=19).pack(side='left',padx=(30,3))
+        ttk.Entry(row,textvariable=self.keep,width=6).pack(side='left')
+        ttk.Label(row,text='Workers').pack(side='left',padx=(15,3))
+        ttk.Entry(row,textvariable=self.workers,width=5).pack(side='left')
+        self.dropbox_row=ttk.Frame(page);self.dropbox_row.pack(fill='x',pady=(0,8))
+        ttk.Label(self.dropbox_row,text='Dropbox folder',width=20).pack(side='left')
+        ttk.Entry(self.dropbox_row,textvariable=self.dropbox_path).pack(side='left',fill='x',expand=True)
+        options=ttk.Frame(page);options.pack(anchor='w',pady=10)
+        for label,var in [('Cleanup CI artifacts',self.cleanup),('Cleanup dry-run',self.dryrun),
+                          ('Force fresh cycle',self.restart),('Skip CI logs',self.skiplogs)]:
+            ttk.Checkbutton(options,text=label,variable=var).pack(side='left',padx=(0,20))
+        commands=ttk.Frame(page);commands.pack(fill='x',pady=10)
+        self.start_button=ttk.Button(commands,text='Run or resume',style='Accent.TButton',command=self._start)
+        self.start_button.pack(side='left')
+        self.stop_button=ttk.Button(commands,text='Interrupt safely',command=self._stop,state='disabled')
+        self.stop_button.pack(side='left',padx=12)
+        self.status=tk.StringVar(value='Ready')
+        ttk.Label(page,textvariable=self.status).pack(anchor='w',pady=5)
+        self.progress=ttk.Progressbar(page,orient='horizontal',mode='determinate',maximum=100)
+        self.progress.pack(fill='x',pady=(0,8))
+        logs=ttk.Frame(page);logs.pack(fill='both',expand=True,pady=7)
+        self.text=tk.Text(logs,height=10,wrap='word',background='#182a40',foreground='#d8eaff',
+                          insertbackground='white',relief='flat',font=('Courier',10),state='disabled')
+        bar=ttk.Scrollbar(logs,command=self.text.yview);self.text.configure(yscrollcommand=bar.set)
+        self.text.pack(side='left',fill='both',expand=True);bar.pack(side='right',fill='y')
+        self._update_backend_fields()
+
+    def _update_backend_fields(self):
+        if self.backend.get()=='dropbox':
+            self.dropbox_row.pack(fill='x',before=self.start_button.master,pady=4)
+        else:self.dropbox_row.pack_forget()
+
+    def _build_archives(self,page):
+        self._heading(page,'Archive library','Inspect, extract, checkout or mount encrypted repository snapshots.')
+        row=ttk.Frame(page);row.pack(fill='x')
+        for name,fn in [('Refresh',self._refresh),('List contents',self._view),('Show file',self._show_member),
+                        ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount)]:
+            ttk.Button(row,text=name,command=fn).pack(side='left',padx=(0,7))
+        self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
+        self.archives.pack(fill='both',expand=True,pady=(12,5))
+        ttk.Label(page,text='Encrypted archive members').pack(anchor='w')
+        self.members=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
+        self.members.pack(fill='both',expand=True,pady=7)
+
+    def _build_plugins(self,page):
+        self._heading(page,'Backup engines','Each provider is an independent plugin with its own capabilities.')
+        self.plugin_vars={}
+        for backend,detail in [('github','Git repositories, releases, CI metadata and artifacts; optional cleanup'),
+                                ('dropbox','Incremental file revisions; read-only remote operations; no purge')]:
+            frame=tk.Frame(page,bg='white',highlightbackground='#dae4f1',highlightthickness=1)
+            frame.pack(fill='x',pady=10,ipady=18)
+            tk.Label(frame,text=backend.upper(),font=('Helvetica',14,'bold'),fg='#123459',bg='white').pack(anchor='w',padx=16)
+            tk.Label(frame,text=detail,font=('Helvetica',10),fg='#4d6986',bg='white').pack(anchor='w',padx=16)
+            var=tk.BooleanVar(value=backend in self.cfg['enabled_backends']);self.plugin_vars[backend]=var
+            check=ttk.Checkbutton(frame,text='Enabled',variable=var,
+                                  command=lambda b=backend,v=var:self._set_backend(b,v.get()))
+            check.pack(anchor='e',padx=16)
+        ttk.Label(page,text='Dropbox uses MULTI_BACKUP_DROPBOX_TOKEN or the operating-system keyring. Credentials are never stored in plain settings.',
+                  wraplength=700).pack(anchor='w',pady=10)
+
+    def _set_backend(self,name,value):
+        try:
+            self.cfg=set_backend_enabled(name,value)
+        except Exception as exc:messagebox.showerror('Plugin error',str(exc))
+
+    def _build_encryption(self,page):
+        self._heading(page,'Encryption identities','Create age X25519 keys locally, or use an existing identity file.')
+        ttk.Label(page,text='Private keys stay on your computer. Backups are encrypted before publication.',
+                  style='Sub.TLabel').pack(anchor='w')
+        row=ttk.Frame(page);row.pack(fill='x',pady=20)
+        ttk.Button(row,text='Generate new age key',style='Accent.TButton',command=self._generate_key).pack(side='left')
+        ttk.Button(row,text='Show public recipient',command=self._public_key).pack(side='left',padx=12)
+        ttk.Button(row,text='Select existing key',command=lambda:self.identity.set(filedialog.askopenfilename())).pack(side='left')
+        self.key_info=tk.Text(page,height=8,wrap='word',background='white',relief='flat')
+        self.key_info.pack(fill='x',pady=12)
+        ttk.Label(page,text='Save private identities on encrypted storage, back them up separately and avoid sharing them.',
+                  wraplength=690).pack(anchor='w',pady=10)
+
+    def _generate_key(self):
+        name=simpledialog.askstring('Key name','New key name (letters, digits, hyphen):',parent=self)
+        if not name:return
+        try:
+            from key_management import generate_key
+            data=generate_key(name)
+            self.identity.set(data['private_key_file']);self.recipient.set(data['public_recipient'])
+            self.key_info.insert('end',f"Generated {name}\nIdentity: {data['private_key_file']}\nRecipient: {data['public_recipient']}\n")
+        except Exception as exc:messagebox.showerror('Key generation failed',str(exc))
+
+    def _public_key(self):
+        try:
+            from key_management import public_recipient
+            p=Path(self.identity.get())
+            cmd=subprocess.run(['age-keygen','-y',str(p)],text=True,capture_output=True,check=False)
+            if cmd.returncode:raise RuntimeError('Cannot read age identity')
+            self.recipient.set(cmd.stdout.strip())
+            self.key_info.insert('end','Public recipient: '+cmd.stdout.strip()+'\n')
+        except Exception as exc:messagebox.showerror('Identity error',str(exc))
+
+    def _build_updates(self,page):
+        self._heading(page,'Native application updates','Discover signed release channels; download only when SHA-256 is available.')
+        row=ttk.Frame(page);row.pack(anchor='w',pady=16)
+        ttk.Label(row,text='Release channel').pack(side='left',padx=(0,12))
+        combo=ttk.Combobox(row,textvariable=self.update_channel,values=('stable','early-release'),width=22,state='readonly')
+        combo.pack(side='left');combo.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
+        ttk.Button(page,text='Check for updates',style='Accent.TButton',command=self._check_updates).pack(anchor='w',pady=12)
+        ttk.Button(page,text='Download verified update',command=self._download_update).pack(anchor='w')
+        ttk.Label(page,textvariable=self.update_status,wraplength=720).pack(anchor='w',pady=20)
+        ttk.Label(page,text='After download, the operating system installer opens only with your approval.\n'
+                  'Unattended installation is disabled until code signing and notarization are configured.',
+                  style='Sub.TLabel',wraplength=720).pack(anchor='w',pady=12)
+
+    def _build_settings(self,page):
+        self._heading(page,'Preferences','Global settings shared with the command-line interface.')
+        ttk.Checkbutton(page,text='Check for updates at startup and periodically',variable=self.autocheck,
+                        command=self._save_preferences).pack(anchor='w',pady=7)
+        ttk.Label(page,text='Update channel').pack(anchor='w',pady=6)
+        c=ttk.Combobox(page,textvariable=self.update_channel,values=('stable','early-release'),state='readonly')
+        c.pack(anchor='w');c.bind('<<ComboboxSelected>>',lambda _:self._save_preferences())
+        ttk.Label(page,text='Keep CI artifacts only when cleanup is explicitly selected.',style='Sub.TLabel').pack(anchor='w',pady=20)
+        ttk.Button(page,text='Save all preferences',command=self._save_preferences).pack(anchor='w')
+
+    def _save_preferences(self):
+        try:
+            self.cfg.update({'output_directory':self.root_dir.get(), 'update_channel':self.update_channel.get(),
+              'auto_update_check':self.autocheck.get(),'metadata_workers':int(self.workers.get()),
+              'keep_ci_runs':int(self.keep.get()),'cleanup_ci_artifacts':self.cleanup.get(),
+              'default_recipient':self.recipient.get()})
+            save_settings(self.cfg)
+        except Exception as exc:messagebox.showerror('Settings error',str(exc))
+
+    def _cli(self):
+        if getattr(sys,'frozen',False):
+            path=Path(sys.executable).with_name('multi-backup.exe' if os.name=='nt' else 'multi-backup')
+            if not path.is_file():raise RuntimeError('Bundled CLI executable not found')
+            return [str(path)]
+        return [sys.executable,str(ROOT/'multi_backup.py')]
+
+    def _start(self):
+        if self.proc is not None and self.proc.poll() is None:return
+        if self.backend.get() not in self.cfg['enabled_backends']:
+            messagebox.showwarning('Backend disabled','Enable this backend on the Plugins page first.');return
+        if self.backend.get()=='dropbox' and not self.recipient.get():
+            messagebox.showwarning('Recipient required','Dropbox incremental backup requires a public age recipient.');return
+        if self.backend.get()=='github' and not self.recipient.get() and not messagebox.askyesno('Interactive encryption',
+                'No age recipient provided. Each archive may request a password. Continue?'):
+            return
+        args=self._cli()+['backup','--backend',self.backend.get(),'--output-dir',self.root_dir.get(),
+                          '--keep-ci-runs',self.keep.get(),'--metadata-workers',self.workers.get(),'--json-progress']
+        if self.staging.get():args+=['--staging-dir',self.staging.get()]
+        if self.identity.get():args+=['--identity',self.identity.get()]
+        if self.recipient.get():args+=['--recipient',self.recipient.get()]
+        if self.backend.get()=='github':
+            if self.cleanup.get():args+=['--cleanup-ci-artifacts']
+            if self.cleanup.get() and self.dryrun.get():args+=['--cleanup-ci-dry-run']
+            if self.skiplogs.get():args+=['--skip-ci-logs']
+            if self.restart.get():args+=['--restart']
+        elif self.dropbox_path.get():args+=['--dropbox-path',self.dropbox_path.get()]
+        self._save_preferences();self.progress['value']=0
+        self.start_button['state']='disabled';self.stop_button['state']='normal';self.status.set('Starting backup…')
+        try:
+            kw={'creationflags':subprocess.CREATE_NEW_PROCESS_GROUP} if os.name=='nt' else {}
+            self.proc=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                       text=True,bufsize=1,**kw)
+        except Exception as exc:
+            self.start_button['state']='normal';self.stop_button['state']='disabled'
+            messagebox.showerror('Start failed',str(exc));return
+        for kind,stream in [('out',self.proc.stdout),('err',self.proc.stderr)]:
+            threading.Thread(target=self._read,args=(kind,stream),daemon=True).start()
+        threading.Thread(target=lambda:self.events.put(('finished',self.proc.wait())),daemon=True).start()
+
+    def _read(self,kind,stream):
+        for line in iter(stream.readline,''):self.events.put((kind,line.rstrip()))
+
+    def _stop(self):
+        if self.proc and self.proc.poll() is None:
+            try:self.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name=='nt' else signal.SIGINT)
+            except Exception:self.proc.terminate()
+            self.status.set('Stopping safely; checkpoints remain available…')
+
+    def _poll(self):
+        try:
+            for _ in range(100):
+                kind,payload=self.events.get_nowait()
+                if kind=='finished':
+                    self.start_button['state']='normal';self.stop_button['state']='disabled'
+                    self.status.set(f'Backup finished: exit {payload}')
+                    self._refresh()
+                elif kind=='err':
+                    try:
+                        obj=json.loads(payload)
+                        if obj.get('type')=='progress':
+                            self.progress['value']=obj.get('percent',0)
+                            self.status.set(obj.get('message',''))
+                        else:self._log(payload)
+                    except ValueError:self._log(payload)
+                elif kind=='update':
+                    self.update_status.set(payload)
+                else:self._log(payload)
+        except queue.Empty:pass
+        self.after(130,self._poll)
+
+    def _log(self,line):
+        self.text['state']='normal';self.text.insert('end',line+'\n');self.text.see('end');self.text['state']='disabled'
+
+    def _refresh(self):
+        self.archive_index=catalog(Path(self.root_dir.get()))
+        self.archives.delete(0,'end');self.members.delete(0,'end')
+        for item in self.archive_index:self.archives.insert('end',f'[{item["kind"]}] {item["relative"]}')
+
+    def _selected(self):
+        sel=self.archives.curselection()
+        if not sel:messagebox.showinfo('Select archive','Choose an archive first.');return None
+        if not self.identity.get():messagebox.showwarning('Key required','Select the age private identity in the Backup page.');return None
+        return Path(self.archive_index[sel[0]]['path'])
+
+    def _background(self,fn):
+        def work():
+            try:self.events.put(('out',str(fn())))
+            except Exception as exc:self.events.put(('out','ERROR: '+str(exc)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def _view(self):
+        a=self._selected()
+        if a:
+            try:
+                values=list_members(a,Path(self.identity.get()))
+                self.members.delete(0,'end')
+                for item in values:self.members.insert('end',item['path'])
+                self.selected_archive=a
+            except Exception as exc:messagebox.showerror('Archive error',str(exc))
+
+    def _show_member(self):
+        if not self.selected_archive or not self.members.curselection():
+            messagebox.showinfo('Select file','Select an archive member first');return
+        name=self.members.get(self.members.curselection()[0])
+        try:content=read_member(self.selected_archive,Path(self.identity.get()),name)
+        except Exception as exc:messagebox.showerror('Archive error',str(exc));return
+        view=tk.Toplevel(self);view.title(name);view.geometry('900x600')
+        body=tk.Text(view,wrap='none');body.pack(fill='both',expand=True)
+        body.insert('1.0',content);body['state']='disabled'
+
+    def _extract(self):
+        a=self._selected()
+        if a:
+            dst=filedialog.askdirectory(title='Extract into private directory')
+            if dst:self._background(lambda:extract_archive(a,Path(self.identity.get()),Path(dst)))
+
+    def _checkout(self):
+        a=self._selected()
+        if a:
+            dst=filedialog.asksaveasfilename(title='Create new Git checkout directory')
+            if dst:self._background(lambda:checkout_git(a,Path(self.identity.get()),Path(dst)))
+
+    def _mount(self):
+        a=self._selected()
+        if not a:return
+        point=simpledialog.askstring('Mount archive','Select mountpoint (Windows: unused drive letter such as X:)',parent=self)
+        if point:self._background(lambda:mount_archive(a,Path(self.identity.get()),point,Path(self.root_dir.get())/'.state'))
+
+    def _check_updates(self):
+        def work():
+            try:
+                from updater import update_info
+                info=update_info(self.update_channel.get())
+                msg=f"{self.update_channel.get()}: {info['tag']}; " + (f"{info['asset']['name']} available" if info['asset'] else 'no package yet')
+            except Exception as exc:msg='Update check unavailable: '+str(exc)
+            self.events.put(('update',msg))
+        threading.Thread(target=work,daemon=True).start()
+
+    def _periodic_update(self):
+        if self.autocheck.get():self._check_updates()
+        self.after(self.cfg['update_interval_hours']*3600*1000,self._periodic_update)
+
+    def _download_update(self):
+        target=filedialog.askdirectory(title='Download verified installer')
+        if not target:return
+        def work():
+            try:
+                from updater import update_info,verified_asset_from_release,download_asset
+                asset,digest=verified_asset_from_release(update_info(self.update_channel.get()))
+                path=download_asset(asset,Path(target),digest)
+                msg=f'Installer verified at {path}. Review platform signature before opening.'
+            except Exception as exc:msg='Update download failed: '+str(exc)
+            self.events.put(('update',msg))
+        threading.Thread(target=work,daemon=True).start()
+
+
+def run_gui():
+    app=BackupGUI();app.mainloop();return 0
+
+if __name__=='__main__':run_gui()

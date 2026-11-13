@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Multi Backup
+GenericName=Encrypted multi-source backup manager
+Comment=Manage encrypted GitHub and Dropbox backups
+Exec=/usr/bin/multi-backup-gui
+Icon=multi-backup
+Terminal=false
+Categories=Utility;Archiving;
+StartupNotify=true

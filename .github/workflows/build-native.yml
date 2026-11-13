@@ -1,0 +1,334 @@
+name: Native release channels
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      early_release:
+        description: 'Manually build early release (never stable)'
+        type: boolean
+        required: true
+        default: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: multi-backup-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualify:
+    name: Determine distribution channel
+    runs-on: ubuntu-24.04
+    if: >-
+      (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[full-ci]')) ||
+      (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-rc')) ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
+      tag: ${{ steps.channel.outputs.tag }}
+    steps:
+      - id: channel
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if [[ "$REF_TYPE" == tag ]]; then
+            echo 'channel=stable' >> "$GITHUB_OUTPUT"
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo 'channel=early-release' >> "$GITHUB_OUTPUT"
+            echo 'tag=early-release' >> "$GITHUB_OUTPUT"
+          fi
+  tests:
+    name: RC tests and static checks
+    needs: qualify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m compileall -q .
+      - run: python -m unittest discover -s tests -v
+      - name: Check CLI plugin and version
+        run: |
+          python multi_backup.py --version
+          python multi_backup.py plugins
+          python multi_backup.py updates --help
+      - name: Validate release assets and documentation
+        run: |
+          test -s LICENSE && test -s README.md && test -s README.IT.md
+          test -s docs/manuals/Multi-Backup-User-Manual-EN.pdf
+          test -s docs/manuals/Multi-Backup-Manuale-Utente-IT.pdf
+          test -s docs/brochures/Multi-Backup-Brochure-EN.pdf
+          test -s docs/brochures/Multi-Backup-Brochure-IT.pdf
+  macos:
+    name: macOS ${{ matrix.arch }} DMG
+    needs: [qualify, tests]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install dependencies
+        shell: bash
+        run: |
+          brew install age gh git-lfs
+          for helper in age age-keygen gh git-lfs; do command -v "$helper" >/dev/null || exit 1; done
+          python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=10,<13'
+      - name: Build CLI and application bundle
+        shell: bash
+        run: |
+          python -m PyInstaller --onefile --clean --noconfirm --name multi-backup \
+            --add-data assets:assets multi_backup.py
+          cp dist/multi-backup dist/multi-backup-cli
+          mkdir -p assets/MultiBackup.iconset
+          for size in 16 32 64 128 256 512; do
+            cp assets/icon-${size}.png "assets/MultiBackup.iconset/icon_${size}x${size}.png"
+          done
+          cp assets/icon-32.png assets/MultiBackup.iconset/icon_16x16@2x.png
+          cp assets/icon-64.png assets/MultiBackup.iconset/icon_32x32@2x.png
+          cp assets/icon-256.png assets/MultiBackup.iconset/icon_128x128@2x.png
+          cp assets/icon-512.png assets/MultiBackup.iconset/icon_256x256@2x.png
+          cp assets/icon-1024.png assets/MultiBackup.iconset/icon_512x512@2x.png
+          iconutil -c icns assets/MultiBackup.iconset -o assets/multi-backup.icns
+          python -m PyInstaller --windowed --onedir --clean --noconfirm --name 'Multi Backup' \
+            --add-data assets:assets --icon assets/multi-backup.icns gui_launcher.py
+          mkdir -p 'dist/Multi Backup.app/Contents/MacOS/bin'
+          cp dist/multi-backup-cli 'dist/Multi Backup.app/Contents/MacOS/multi-backup'
+          for exe in age age-keygen gh git-lfs; do
+            command -v "$exe" >/dev/null && cp "$(command -v "$exe")" 'dist/Multi Backup.app/Contents/MacOS/bin/' || true
+          done
+      - name: Optional Apple code signing
+        env:
+          SIGN_ID: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        shell: bash
+        run: |
+          if [[ -n "$SIGN_ID" ]]; then
+            codesign --deep --force --options runtime --timestamp -s "$SIGN_ID" 'dist/Multi Backup.app'
+            codesign --verify --deep --strict 'dist/Multi Backup.app'
+          else
+            echo 'No signing identity. RC build is unsigned and not suitable for unattended installation.'
+          fi
+      - name: Make DMG and checksums
+        shell: bash
+        run: |
+          mkdir dmg-root
+          cp -R 'dist/Multi Backup.app' dmg-root/
+          cp dist/multi-backup-cli dmg-root/multi-backup
+          cp LICENSE README.md dmg-root/
+          hdiutil create -volname 'Multi Backup' -srcfolder dmg-root -ov -format UDZO \
+            "multi-backup-macos-${{ matrix.arch }}.dmg"
+          shasum -a 256 *.dmg > "checksums-macos-${{ matrix.arch }}.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-macos-${{ matrix.arch }}
+          path: |
+            *.dmg
+            checksums-macos-*.txt
+          retention-days: 14
+  windows:
+    name: Windows 11 x64 installer
+    needs: [qualify, tests]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Python tools
+        shell: pwsh
+        run: python -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=10,<13'
+      - name: Windows binary and executable dependencies
+        shell: pwsh
+        run: |
+          python -m PyInstaller --onefile --clean --noconfirm --name multi-backup --icon assets/multi-backup.ico --add-data "assets;assets" multi_backup.py
+          python -m PyInstaller --onefile --windowed --clean --noconfirm --name MultiBackupGUI --icon assets/multi-backup.ico --add-data "assets;assets" gui_launcher.py
+          New-Item -ItemType Directory -Force -Path dist/bin
+          choco install age -y --no-progress
+          foreach ($exe in @('age.exe','age-keygen.exe','gh.exe','git-lfs.exe')) {
+            $tool = (Get-Command $exe -ErrorAction SilentlyContinue).Source
+            if ($tool) { Copy-Item $tool dist/bin/ }
+          }
+          if (!(Test-Path dist/bin/age.exe)) { throw 'age.exe is not available; aborting native build' }
+          Compress-Archive -Path dist/multi-backup.exe,dist/MultiBackupGUI.exe,dist/bin,LICENSE,README.md -DestinationPath multi-backup-windows11-x64.zip
+      - name: Windows installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' packaging/windows/installer.iss
+          Get-FileHash installers/*.exe -Algorithm SHA256 | Out-File checksums-windows.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-x64
+          path: |
+            multi-backup-windows11-x64.zip
+            installers/*.exe
+            checksums-windows.txt
+          retention-days: 14
+  linux-rpm:
+    name: ${{ matrix.distro }} EL${{ matrix.el }} RPM
+    needs: [qualify, tests]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rocky, el: 8, image: 'rockylinux:8'}
+          - {distro: rocky, el: 9, image: 'rockylinux:9'}
+          - {distro: rocky, el: 10, image: 'rockylinux:10'}
+          - {distro: alma, el: 8, image: 'almalinux:8'}
+          - {distro: alma, el: 9, image: 'almalinux:9'}
+          - {distro: alma, el: 10, image: 'almalinux:10'}
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RPM on target runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y rpm-build gcc binutils make findutils tar gzip git
+          if [[ '${{ matrix.el }}' == 10 ]]; then
+            dnf install -y python3 python3-pip python3-tkinter
+            PYTHON=python3
+          else
+            dnf install -y python3.11 python3.11-pip python3.11-tkinter
+            PYTHON=python3.11
+          fi
+          $PYTHON -m pip install 'pyinstaller>=6.11,<7' 'Pillow>=10,<13'
+          $PYTHON -m PyInstaller --onefile --clean --noconfirm --name multi-backup \
+            --add-data assets:assets multi_backup.py
+          $PYTHON -m PyInstaller --onefile --windowed --clean --noconfirm --name multi-backup-gui \
+            --add-data assets:assets gui_launcher.py
+          mkdir -p "$HOME/rpmbuild/"{BUILD,RPMS,SOURCES,SPECS,SRPMS} packages
+          cp dist/multi-backup dist/multi-backup-gui "$HOME/rpmbuild/SOURCES/"
+          cp LICENSE packaging/linux/multi-backup.desktop "$HOME/rpmbuild/SOURCES/"
+          cp assets/icon-256.png "$HOME/rpmbuild/SOURCES/multi-backup.png"
+          rpmbuild -bb packaging/linux/multi-backup.spec --define "_topdir $HOME/rpmbuild"
+          for rpm in $(find "$HOME/rpmbuild/RPMS" -type f -name '*.rpm' | sort); do
+            cp "$rpm" "packages/multi-backup-${{ matrix.distro }}-el${{ matrix.el }}-$(basename "$rpm")"
+          done
+          test -n "$(find packages -name '*.rpm' -print -quit)"
+          sha256sum packages/*.rpm > packages/checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-${{ matrix.distro }}-el${{ matrix.el }}
+          path: packages/*
+          retention-days: 14
+  publish:
+    name: Publish ${{ needs.qualify.outputs.channel }} releases
+    needs: [qualify, tests, macos, windows, linux-rpm]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: collected
+      - name: Prepare release assets and manifest
+        shell: bash
+        run: |
+          mkdir release
+          find collected -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.rpm' -o -name '*.zip' \) -exec cp '{}' release/ \;
+          cp docs/manuals/*.pdf docs/brochures/*.pdf release/
+          test $(find release -name '*.dmg' | wc -l) -ge 2
+          test $(find release -name '*.rpm' | wc -l) -ge 6
+          test $(find release -name '*.exe' | wc -l) -ge 1
+          sha256sum release/* > release/SHA256SUMS
+          python scripts/make-release-manifest.py release "${{ needs.qualify.outputs.channel }}" "${{ github.sha }}"
+      - name: Stable promotion requires production signing pipeline
+        if: needs.qualify.outputs.channel == 'stable'
+        shell: bash
+        run: |
+          echo 'Stable release is intentionally blocked for RC1 until notarization, Authenticode and signed RPM repositories are implemented and verified.' >&2
+          exit 1
+      - name: Publish immutable stable or rolling early release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ needs.qualify.outputs.tag }}
+          CHANNEL: ${{ needs.qualify.outputs.channel }}
+        shell: bash
+        run: |
+          if [[ "$CHANNEL" == early-release ]]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag --force early-release "$GITHUB_SHA"
+            git push --force origin refs/tags/early-release
+            gh release view "$TARGET" >/dev/null 2>&1 || gh release create "$TARGET" --target "$GITHUB_SHA" \
+              --title 'Multi Backup - Early Release' --prerelease --notes 'Rolling builds from [full-ci] on main.'
+          else
+            gh release view "$TARGET" >/dev/null 2>&1 || gh release create "$TARGET" --title "Multi Backup $TARGET" \
+              --latest --notes 'Stable release. Install only signed and verified packages.'
+          fi
+          gh release upload "$TARGET" release/* --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-catalog-${{ needs.qualify.outputs.channel }}
+          path: release/*
+          retention-days: 30
+
+  rpm-repositories:
+    name: Publish RPM indexes for ${{ needs.qualify.outputs.channel }}
+    needs: [qualify, tests, linux-rpm]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-linux-*
+          path: downloaded
+      - name: Build per-distro RPM repositories
+        shell: bash
+        env:
+          CHANNEL: ${{ needs.qualify.outputs.channel }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y createrepo-c rpm
+          mkdir -p website
+          for distro in rocky alma; do
+            for el in 8 9 10; do
+              folder="website/$distro/el$el/x86_64"
+              mkdir -p "$folder"
+              find "downloaded/native-linux-$distro-el$el" -name '*.rpm' -exec cp '{}' "$folder/" \;
+              test -n "$(find "$folder" -maxdepth 1 -name '*.rpm' -print -quit)"
+              createrepo_c "$folder"
+              cat > "website/multi-backup-$distro-el$el.repo" <<EOF
+          [multi-backup-$CHANNEL]
+          name=Multi Backup $CHANNEL - $distro EL$el
+          baseurl=https://desalvo.github.io/multi-backup/$CHANNEL/$distro/el$el/x86_64
+          enabled=0
+          gpgcheck=1
+          repo_gpgcheck=1
+          metadata_expire=6h
+          EOF
+            done
+          done
+          echo '# Multi Backup RPM repositories' > website/index.md
+          echo 'Repository definitions are disabled until RPM and repodata signing are configured.' >> website/index.md
+      - name: Store static RPM indexes on gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./website
+          destination_dir: ${{ needs.qualify.outputs.channel }}
+          keep_files: true
+          enable_jekyll: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-repositories-${{ needs.qualify.outputs.channel }}
+          path: website
+          retention-days: 30

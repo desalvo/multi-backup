@@ -1,0 +1,3 @@
+# Optional GUI / operating-system credential helpers.
+Pillow>=10.4,<13
+keyring>=25,<26
