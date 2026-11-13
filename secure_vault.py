@@ -239,6 +239,43 @@ def import_recovery_copy(source, backup_password, new_password, destination=None
 
 
 
+def recover_existing_vault(recovery_path,recovery_password,new_password,
+                           destination=None):
+    """Recover access from a separate encrypted backup without discarding old vault.
+
+    The existing vault is renamed to a nonoverwritten .previous file. If its
+    metadata is readable, recipient matching prevents replacing the wrong key.
+    """
+    target=Path(destination) if destination else vault_path()
+    if not target.exists() or target.is_symlink():
+        raise VaultError('A protected local vault must exist for recovery')
+    clear,recipient=unlock(recovery_password,recovery_path)
+    if len(new_password)<12:
+        raise VaultError('New password must contain at least 12 characters')
+    try:
+        previous=load_vault(target)
+        known=previous.get('recipient')
+        if known and known!=recipient:
+            raise VaultError('Recovery copy belongs to a different age identity')
+    except VaultError as exc:
+        if 'different age identity' in str(exc):
+            raise
+        # Corrupted metadata can be recovered using a known-good encrypted copy.
+    preserved=target.with_name(target.name+'.previous')
+    if preserved.exists() or preserved.is_symlink():
+        raise VaultError('A previous protected vault already exists; refusing overwrite')
+    os.replace(target,preserved)
+    try:
+        _write_vault(target,seal_identity(clear,new_password,recipient))
+        if unlock(new_password,target)!=(clear,recipient):
+            raise VaultError('Restored vault did not decrypt correctly')
+    except Exception:
+        target.unlink(missing_ok=True)
+        os.replace(preserved,target)
+        raise
+    return clear,recipient
+
+
 @contextlib.contextmanager
 def temporary_identity(private_bytes):
     """Private identity on disk only while an age subprocess needs a filename."""
