@@ -9,8 +9,6 @@ import colorsys
 import tkinter as tk
 from tkinter import font as tkfont
 
-from PIL import Image, ImageDraw, ImageTk
-
 SURFACE = '#F5F8FC'
 NAVY = '#163451'
 PALE = '#EDF5FF'
@@ -124,6 +122,7 @@ class PremiumButton(tk.Canvas):
         return 'break'
 
     def _draw(self) -> None:
+        from PIL import Image, ImageDraw, ImageTk
         width = max(5, self.winfo_width() if self.winfo_width() > 1 else self._width)
         height = max(5, self.winfo_height() if self.winfo_height() > 1 else self._height)
         image = Image.new('RGBA', (width, height), (*_rgb(SURFACE), 255))
@@ -187,6 +186,7 @@ class GradientProgress(tk.Canvas):
         self._draw()
 
     def _draw(self) -> None:
+        from PIL import Image, ImageDraw, ImageTk
         width = max(80, self.winfo_width())
         height = 43
         img = Image.new('RGBA', (width, height), (*_rgb(SURFACE), 255))
