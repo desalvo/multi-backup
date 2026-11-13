@@ -25,7 +25,7 @@ from version import VERSION
 from ui_widgets import PremiumButton, GradientProgress
 from key_management import private_key_path
 from secure_vault import (vault_path,load_vault,unlock,create_identity,migrate_legacy,
-                          export_recovery_copy,change_password,import_recovery_copy,
+                          export_recovery_copy,change_password,import_recovery_copy,recover_existing_vault,
                           temporary_identity,VaultError)
 import biometric
 from restore_ops import (RestoreError,restore_provider,validate_plugin,
@@ -273,7 +273,14 @@ class BackupGUI(tk.Tk):
                     except (VaultError,OSError,ValueError) as exc:
                         messagebox.showerror('Cannot unlock encryption key',str(exc))
             if not unlocked:
-                messagebox.showerror('Access denied','Too many incorrect password attempts.')
+                if messagebox.askyesno('Recover encryption key?',
+                    'The vault could not be unlocked.\n\n'
+                    'Do you have a separately password-protected recovery copy? '
+                    'Choose Yes to import it without discarding the previous vault.'):
+                    unlocked=self._recover_at_startup()
+            if not unlocked:
+                messagebox.showerror('Access denied',
+                                     'Encryption key remains locked. No data was changed.')
                 self._quit_securely()
                 return
         elif legacy.exists():
@@ -304,6 +311,31 @@ class BackupGUI(tk.Tk):
             self.after(1400,self._check_updates)
             self.after(self.cfg['update_interval_hours']*3600*1000,
                        self._periodic_update)
+
+    def _recover_at_startup(self):
+        source=filedialog.askopenfilename(title='Encrypted age recovery copy',
+                                          filetypes=[('Age vault','*.agevault'),
+                                                     ('All files','*')])
+        if not source:return False
+        password=simpledialog.askstring('Recovery copy password',
+                'Enter the separate password of this recovery file:',
+                parent=self,show='*')
+        if password is None:return False
+        new_password=self._ask_new_password('Set new local vault password')
+        if new_password is None:return False
+        try:
+            clear,recipient=recover_existing_vault(
+                source,password,new_password)
+            self._session_secret=bytearray(clear)
+            self.recipient.set(recipient)
+            self.key_location.set('Password-protected age vault: '+str(vault_path()))
+            messagebox.showinfo('Recovery successful',
+                'Your age identity is restored. The previous vault was preserved '
+                'as a .previous file. You can decrypt your existing backups.')
+            return True
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Recovery failed',str(exc))
+            return False
 
     def _prepare_identity(self):
         if self._session_secret is not None:
