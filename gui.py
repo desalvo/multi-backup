@@ -833,10 +833,11 @@ class BackupGUI(tk.Tk):
             return
         if created:
             messagebox.showwarning(
-                'Protect your recovery key',
-                'Your private age key was generated automatically at:\n\n'+
-                self.identity.get()+'\n\nKeep a separate secure copy. Without this '
-                'file, encrypted backups cannot be restored.')
+                'Make an encrypted recovery copy',
+                'Your protected age identity is saved at:\n\n'+str(vault_path())+
+                '\n\nOpen Encryption → Save encrypted recovery copy and store it '
+                'in a separate location. Without this vault or its recovery copy '
+                'you cannot decrypt your backups.')
         args=self._cli()+['backup','--backend',backend,
                           '--output-dir',self.root_dir.get(),
                           '--max-runs-per-repo',self.backup_ci_runs.get(),
@@ -844,12 +845,21 @@ class BackupGUI(tk.Tk):
                           '--metadata-workers',self.workers.get(),
                           '--recipient',self.recipient.get(),
                           '--json-progress']
-        if self.identity.get():args+=['--identity',self.identity.get()]
+        # The public recipient is enough to encrypt new backups. Never give
+        # the CLI a persistent plaintext private identity path.
         if backend=='github':
             args+=['--github-user',chosen]
             if self.cleanup.get():
-                args+=['--cleanup-ci-artifacts']
-                if self.dryrun.get():args+=['--cleanup-ci-dry-run']
+                if not messagebox.askyesno(
+                        'Confirm optional CI cleanup',
+                        'Run the optional GitHub Actions artifact cleanup AFTER '
+                        'the backup succeeds?\n\nThis may permanently delete '
+                        'eligible artifacts from GitHub. Select No to back up '
+                        'without cleanup.'):
+                    self.cleanup.set(False)
+                else:
+                    args+=['--cleanup-ci-artifacts']
+                    if self.dryrun.get():args+=['--cleanup-ci-dry-run']
             if self.skiplogs.get():args+=['--skip-ci-logs']
             if self.restart.get():args+=['--restart']
         elif self.dropbox_path.get():
@@ -922,7 +932,9 @@ class BackupGUI(tk.Tk):
     def _selected(self):
         sel=self.archives.curselection()
         if not sel:messagebox.showinfo('Select archive','Choose an archive first.');return None
-        if not self.identity.get():messagebox.showwarning('Key required','Select the age private identity in the Backup page.');return None
+        if self._session_secret is None:
+            messagebox.showwarning('Key required','Create or unlock your password-protected age identity.')
+            return None
         return Path(self.archive_index[sel[0]]['path'])
 
     def _background(self,fn):
@@ -935,7 +947,8 @@ class BackupGUI(tk.Tk):
         a=self._selected()
         if a:
             try:
-                values=list_members(a,Path(self.identity.get()))
+                with self._identity_file() as identity:
+                    values=list_members(a,identity)
                 self.members.delete(0,'end')
                 for item in values:self.members.insert('end',item['path'])
                 self.selected_archive=a
@@ -945,7 +958,9 @@ class BackupGUI(tk.Tk):
         if not self.selected_archive or not self.members.curselection():
             messagebox.showinfo('Select file','Select an archive member first');return
         name=self.members.get(self.members.curselection()[0])
-        try:content=read_member(self.selected_archive,Path(self.identity.get()),name)
+        try:
+            with self._identity_file() as identity:
+                content=read_member(self.selected_archive,identity,name)
         except Exception as exc:messagebox.showerror('Archive error',str(exc));return
         view=tk.Toplevel(self);view.title(name);view.geometry('900x600')
         body=tk.Text(view,wrap='none');body.pack(fill='both',expand=True)
@@ -955,19 +970,31 @@ class BackupGUI(tk.Tk):
         a=self._selected()
         if a:
             dst=filedialog.askdirectory(title='Extract into private directory')
-            if dst:self._background(lambda:extract_archive(a,Path(self.identity.get()),Path(dst)))
+            if dst:
+                def work():
+                    with self._identity_file() as identity:
+                        return extract_archive(a,identity,Path(dst))
+                self._background(work)
 
     def _checkout(self):
         a=self._selected()
         if a:
             dst=filedialog.asksaveasfilename(title='Create new Git checkout directory')
-            if dst:self._background(lambda:checkout_git(a,Path(self.identity.get()),Path(dst)))
+            if dst:
+                def work():
+                    with self._identity_file() as identity:
+                        return checkout_git(a,identity,Path(dst))
+                self._background(work)
 
     def _mount(self):
         a=self._selected()
         if not a:return
         point=simpledialog.askstring('Mount archive','Select mountpoint (Windows: unused drive letter such as X:)',parent=self)
-        if point:self._background(lambda:mount_archive(a,Path(self.identity.get()),point,Path(self.root_dir.get())/'.state'))
+        if point:
+            def work():
+                with self._identity_file() as identity:
+                    return mount_archive(a,identity,point,Path(self.root_dir.get())/'.state')
+            self._background(work)
 
     def _check_updates(self):
         def work():
