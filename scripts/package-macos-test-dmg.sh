@@ -45,6 +45,7 @@ file "$INSTALLED/Contents/MacOS/Multi Backup" | grep -q "$MAC_ARCH" || {
   echo 'Wrong GUI architecture in TEST app' >&2; exit 1
 }
 "$INSTALLED/Contents/MacOS/Multi Backup" --self-test
+"$INSTALLED/Contents/MacOS/Multi Backup" --gui-smoke
 "$INSTALLED/Contents/MacOS/multi-backup" --version
 "$INSTALLED/Contents/Resources/bin/age" --version
 "$INSTALLED/Contents/Resources/bin/age-keygen" --version
