@@ -2,7 +2,9 @@
 # Build one relocatable macOS GUI application, including its CLI and helper tools.
 set -euo pipefail
 # CI-only unsigned builds verify the real .app starts; they are never distributed.
-SIGN_ARGS=()
+# macOS ships Bash 3.2, where an empty array expansion fails under set -u.
+# Always retain a harmless PyInstaller option in this argument array.
+SIGN_ARGS=(--log-level WARN)
 if [[ "${MAC_UNSIGNED_SMOKE:-0}" != 1 ]]; then
   : "${MAC_SIGNING_ID:?Set MAC_SIGNING_ID to a Developer ID Application identity}"
   : "${MULTI_BACKUP_KEYCHAIN:?Set MULTI_BACKUP_KEYCHAIN to the temporary CI keychain}"
