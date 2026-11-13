@@ -14,7 +14,29 @@ fi
 [[ "$MAC_ARCH" == arm64 || "$MAC_ARCH" == x86_64 ]] || { echo 'Unsupported CPU architecture' >&2; exit 1; }
 [[ "$(uname -m)" == "$MAC_ARCH" ]] || { echo "Runner architecture $(uname -m) != $MAC_ARCH" >&2; exit 1; }
 APP='dist/Multi Backup.app'
+# cryptography >=50 builds from source for some macOS Intel/Python versions.
+# By default its Rust extension may link to Homebrew OpenSSL whereas
+# PyInstaller bundles the older Python/OpenSSL libssl.3.dylib. Force static
+# OpenSSL linking on Intel so the frozen app never resolves the wrong symbols.
+if [[ "$MAC_ARCH" == x86_64 ]]; then
+  brew install openssl@3 rust
+  export OPENSSL_DIR="$(brew --prefix openssl@3)"
+  export OPENSSL_STATIC=1
+  export PIP_NO_BINARY=cryptography
+fi
 python -m pip install -r requirements.txt 'pyinstaller>=6.11,<7'
+if [[ "$MAC_ARCH" == x86_64 ]]; then
+  RUST_BINDING="$(python - <<'PY'
+import cryptography.hazmat.bindings._rust as binding
+print(binding.__file__)
+PY
+)"
+  if otool -L "$RUST_BINDING" | grep -E 'lib(ssl|crypto)\\.3\\.dylib'; then
+    echo 'OpenSSL is dynamically linked into cryptography on Intel: refusing unsafe application' >&2
+    exit 1
+  fi
+  echo 'macOS Intel: cryptography Rust binding uses statically linked OpenSSL.'
+fi
 for command_name in brew iconutil otool codesign swiftc git age age-keygen gh git-lfs; do
   command -v "$command_name" >/dev/null || { echo "Missing helper: $command_name" >&2; exit 1; }
 done
