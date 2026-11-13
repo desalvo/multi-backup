@@ -124,10 +124,17 @@ def _dropbox_upload(endpoint,token,argument,data,*,required='id'):
                  'Content-Type':'application/octet-stream',
                  'Dropbox-API-Arg':json.dumps(argument,separators=(',',':'))},
         method='POST')
+    class RefuseRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self,req,fp,code,msg,headers,newurl):
+            raise RestoreError('Dropbox upload redirect blocked to protect the write token')
+
     try:
-        with urllib.request.urlopen(
-                request,timeout=180,
-                context=ssl.create_default_context(cafile=certifi.where())) as response:  # nosec B310 - fixed HTTPS Dropbox endpoint; CA and hostname verified
+        # Strictly prevent cross-origin redirects with the temporary write token.
+        opener=urllib.request.build_opener(
+            urllib.request.HTTPSHandler(
+                context=ssl.create_default_context(cafile=certifi.where())),
+            RefuseRedirect())
+        with opener.open(request,timeout=180) as response:
             payload=response.read(1024*1024)
             result=json.loads(payload) if payload else {}
     except urllib.error.HTTPError as exc:
