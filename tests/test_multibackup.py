@@ -332,6 +332,10 @@ class PluginTests(unittest.TestCase):
         content=(Path(__file__).resolve().parents[1]/'gui_launcher.py').read_text('utf-8')
         self.assertIn('def bundle_self_test',content)
         self.assertIn("'--self-test'",content)
+        self.assertIn("def gui_smoke()",content)
+        self.assertIn("'--gui-smoke'",content)
+        pkg=(Path(__file__).resolve().parents[1]/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
+        self.assertIn(' --gui-smoke',pkg)
 
     def test_ci_workflow_uses_installable_windows_encryption_package(self):
         workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')
