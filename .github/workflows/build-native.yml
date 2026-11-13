@@ -48,7 +48,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Import Developer ID certificate and configure notarization (required)
+      - name: Import Developer ID certificate and configure notarization (stable required)
+        if: needs.qualify.outputs.channel == 'stable'
         shell: bash
         env:
           MAC_SIGNING_ID: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
@@ -92,13 +93,15 @@ jobs:
         run: |
           brew install age gh git-lfs
           for helper in age age-keygen gh git-lfs git; do command -v "$helper" >/dev/null || exit 1; done
-      - name: Build and sign relocatable Multi Backup.app
+      - name: Build native Multi Backup.app (early ad-hoc / stable Developer ID)
         shell: bash
         env:
           MAC_SIGNING_ID: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+          MAC_UNSIGNED_SMOKE: ${{ needs.qualify.outputs.channel == 'early-release' && '1' || '0' }}
           MAC_ARCH: ${{ matrix.arch }}
         run: bash scripts/build-macos-app.sh
       - name: Notarize app, create single-item DMG and notarize DMG
+        if: needs.qualify.outputs.channel == 'stable'
         shell: bash
         env:
           MAC_SIGNING_ID: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
@@ -106,7 +109,14 @@ jobs:
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
           MAC_ARCH: ${{ matrix.arch }}
         run: bash scripts/notarize-macos.sh
+      - name: Create and verify early-release TEST DMG
+        if: needs.qualify.outputs.channel == 'early-release'
+        shell: bash
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: bash scripts/package-macos-test-dmg.sh
       - name: Mount DMG and test relocated, notarized application
+        if: needs.qualify.outputs.channel == 'stable'
         shell: bash
         env:
           MAC_ARCH: ${{ matrix.arch }}
@@ -127,6 +137,7 @@ jobs:
           path: |
             *.dmg
             checksums-macos-*.txt
+          if-no-files-found: error
           retention-days: 14
   windows:
     name: Windows 11 x64 installer
@@ -273,6 +284,17 @@ jobs:
           else
             gh release view "$TARGET" >/dev/null 2>&1 || gh release create "$TARGET" --title "Multi Backup $TARGET" \
               --latest --notes 'Stable release. Install only signed and verified packages.'
+          fi
+          if [[ "$CHANNEL" == early-release ]]; then
+            # Discard legacy, untested DMG names so testers cannot accidentally
+            # download a nonworking package from the previous release.
+            for obsolete in multi-backup-macos-arm64.dmg multi-backup-macos-x86_64.dmg; do
+              if gh release view "$TARGET" --json assets -q '.assets[].name' | grep -Fxq "$obsolete"; then
+                gh release delete-asset "$TARGET" "$obsolete" --yes
+              fi
+            done
+            gh release edit "$TARGET" --prerelease --title 'Multi Backup - Early Release (TEST ONLY)' \
+              --notes 'TEST ONLY: macOS DMGs are ad-hoc signed, NOT Apple Developer ID signed or notarized. After verifying SHA-256, drag the sole Multi Backup.app into Applications; first launch may require explicit Open Anyway approval via macOS Privacy & Security. Never disable Gatekeeper globally. Stable distribution is not yet available.'
           fi
           gh release upload "$TARGET" release/* --clobber
       - uses: actions/upload-artifact@v4

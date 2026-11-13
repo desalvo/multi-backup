@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build one relocatable macOS GUI application, including its CLI and helper tools.
 set -euo pipefail
-# CI-only unsigned builds verify the real .app starts; they are never distributed.
+# Ad-hoc signed test builds can be tried locally, but are NOT notarized or trusted releases.
 # macOS ships Bash 3.2, where an empty array expansion fails under set -u.
 # Always retain a harmless PyInstaller option in this argument array.
 SIGN_ARGS=(--log-level WARN)
@@ -44,7 +44,7 @@ python -m PyInstaller --windowed --onedir --clean --noconfirm \
 plutil -replace LSMinimumSystemVersion -string '13.0' "$APP/Contents/Info.plist"
 plutil -replace LSApplicationCategoryType -string 'public.app-category.productivity' "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string '0.1.0' "$APP/Contents/Info.plist"
-plutil -replace CFBundleVersion -string '8' "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string '10' "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/bin"
 install -m 644 LICENSE "$APP/Contents/Resources/LICENSE"
 install -m 644 README.md "$APP/Contents/Resources/README.md"
@@ -62,6 +62,8 @@ for tool in "$APP/Contents/MacOS/multi-backup" "$APP"/Contents/Resources/bin/*; 
   if [[ "${MAC_UNSIGNED_SMOKE:-0}" != 1 ]]; then
     codesign --force --options runtime --timestamp --keychain "$MULTI_BACKUP_KEYCHAIN" \
       --entitlements packaging/macos/entitlements.plist --sign "$MAC_SIGNING_ID" "$tool"
+  else
+    codesign --force --sign - "$tool"
   fi
 done
 # Only sign *after* all embedded executables and resources are in place.
@@ -70,7 +72,9 @@ if [[ "${MAC_UNSIGNED_SMOKE:-0}" != 1 ]]; then
     --entitlements packaging/macos/entitlements.plist --sign "$MAC_SIGNING_ID" "$APP"
   codesign --verify --deep --strict --verbose=2 "$APP"
 else
-  echo 'Unsigned CI-only .app startup test: no DMG will be created or published.'
+  codesign --deep --force --sign - "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
+  echo 'Ad-hoc signed TEST build only: no Developer ID, no notarization.'
 fi
 plutil -lint "$APP/Contents/Info.plist"
 

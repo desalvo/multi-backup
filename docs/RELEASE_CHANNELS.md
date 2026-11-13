@@ -1,6 +1,6 @@
 # Native releases, channels, and trust
 
-**Version:** `0.1.0-r009-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
+**Version:** `0.1.0-r010-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
 
 ## Trigger contract
 
@@ -62,3 +62,8 @@ After adding them, run **Multi Backup - Production CI** with `workflow_dispatch`
 ## r009 unsigned macOS startup qualification
 
 After the sole Production Gate, both macOS architectures build and exercise the real unsigned application (GUI self-test and bundled CLI). These builds are intentionally never uploaded or released; a distinct Developer ID signed and notarized build plus mounted-DMG Gatekeeper acceptance is still required for publication.
+
+## r010 macOS experimental delivery (no Apple Developer membership needed)
+
+After the sole Production Gate the macOS Apple Silicon and Intel smoke jobs produce an ad-hoc signed single-app DMG, validate it mounted and relocated into a disposable Applications directory, and upload the packages as GitHub Actions artifacts `TEST-ONLY-macos-arm64` and `TEST-ONLY-macos-x86_64`. On `[full-ci]` on main, early-release additionally publishes these packages as `multi-backup-macos-<arch>-test.dmg`. Publication removes legacy broken, ambiguous macOS DMG filenames and clearly marks the rolling release as TEST ONLY. These are not notarized; macOS may need an explicit Open Anyway approval. Never globally disable Gatekeeper. Full Apple Developer ID signing, app/DMG notarization and Gatekeeper testing still apply to the separate stable channel. Stable is also blocked pending Windows and RPM signing.
+

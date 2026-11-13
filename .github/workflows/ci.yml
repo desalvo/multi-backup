@@ -83,6 +83,18 @@ jobs:
           MAC_ARCH: ${{ matrix.arch }}
           MACOSX_DEPLOYMENT_TARGET: '13.0'
         run: bash scripts/build-macos-app.sh
+      - name: Build and install-check one-app ad-hoc signed TEST DMG
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: bash scripts/package-macos-test-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TEST-ONLY-macos-${{ matrix.arch }}
+          path: |
+            multi-backup-macos-${{ matrix.arch }}-test.dmg
+            checksums-macos-${{ matrix.arch }}-test.txt
+          if-no-files-found: error
+          retention-days: 14
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)

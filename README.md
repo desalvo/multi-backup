@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r009-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r010-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -110,3 +110,10 @@ The corrected macOS DMG contains only **`Multi Backup.app`**. Drag it into **App
 ### Dropbox integrity verification (r009)
 
 Each newly downloaded Dropbox revision must match its listing file ID, revision, byte count and official Dropbox content hash before encrypted archive creation. A damaged pre-existing ciphertext is preserved and reported, never silently replaced. Dropbox objects without a valid content hash are not accepted.
+
+### Try the macOS app without an Apple Developer account (r010)
+
+To test the native app before general distribution, download `TEST-ONLY-macos-arm64` (Apple Silicon) or `TEST-ONLY-macos-x86_64` (Intel) from the successful **Multi Backup - Production CI** Actions run's Artifacts, or `multi-backup-macos-<arch>-test.dmg` from the `early-release` prerelease after a completed full CI on main. Verify the SHA-256 checksum included alongside the DMG; open the image and drag its **only visible item, `Multi Backup.app`**, into `/Applications`. No Python installation is required.
+
+**Testing only:** the Mac app is ad-hoc signed, **not** Apple Developer ID signed or notarized. Gatekeeper can block its first launch. First attempt to open the app, then choose **System Settings → Privacy & Security → Open Anyway** if you trust the GitHub Actions build (labels vary by macOS release). Never disable Gatekeeper globally or use a command to strip quarantine. Do not use the preview as a generally trusted software distribution; `stable` still requires developer signing/notarization and all the other platform acceptance tests.
+
