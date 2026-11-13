@@ -215,45 +215,86 @@ class BackupGUI(tk.Tk):
         return row
 
     def _build_backup(self,page):
-        self._heading(page,'New backup','Runs in a separate process. Interrupt and resume safely from verified checkpoints.')
-        self._line(page,'Output directory',self.root_dir,'directory');self._line(page,'Staging directory',self.staging,'directory')
-        self._line(page,'Age recipient',self.recipient)
-        self._line(page,'Age private key',self.identity,'file')
-        row=ttk.Frame(page);row.pack(fill='x',pady=(6,12))
-        ttk.Label(row,text='Backend',width=20).pack(side='left')
-        combo=ttk.Combobox(row,textvariable=self.backend,values=('github','dropbox'),state='readonly',width=18)
-        combo.pack(side='left');combo.bind('<<ComboboxSelected>>',lambda _:self._update_backend_fields())
-        ttk.Label(row,text='CI runs to retain',width=19).pack(side='left',padx=(30,3))
-        ttk.Entry(row,textvariable=self.keep,width=6).pack(side='left')
-        ttk.Label(row,text='Workers').pack(side='left',padx=(15,3))
-        ttk.Entry(row,textvariable=self.workers,width=5).pack(side='left')
-        self.dropbox_row=ttk.Frame(page);self.dropbox_row.pack(fill='x',pady=(0,8))
-        ttk.Label(self.dropbox_row,text='Dropbox folder',width=20).pack(side='left')
-        ttk.Entry(self.dropbox_row,textvariable=self.dropbox_path).pack(side='left',fill='x',expand=True)
-        options=ttk.Frame(page);options.pack(anchor='w',pady=10)
-        for label,var in [('Cleanup CI artifacts',self.cleanup),('Cleanup dry-run',self.dryrun),
-                          ('Force fresh cycle',self.restart),('Skip CI logs',self.skiplogs)]:
-            ttk.Checkbutton(options,text=label,variable=var).pack(side='left',padx=(0,20))
-        commands=ttk.Frame(page);commands.pack(fill='x',pady=10)
-        self.start_button=PremiumButton(commands,text='Run or resume',style='Accent.TButton',command=self._start)
+        self._heading(page,'GitHub backup',
+                      'Choose where to store backups and which GitHub account to protect.')
+        self._line(page,'Backup destination',self.root_dir,'directory')
+        self.source_fields=ttk.Frame(page)
+        self.source_fields.pack(fill='x')
+        self.github_row=self._line(self.source_fields,'GitHub username',self.github_user)
+        PremiumButton(self.github_row,text='Detect',
+                      command=lambda:self._discover_github_account(True)).pack(side='left',padx=(8,0))
+        self.dropbox_row=self._line(self.source_fields,'Dropbox folder',self.dropbox_path)
+        self.auth_status_label=ttk.Label(page,textvariable=self.github_status,style='Sub.TLabel')
+        self.auth_status_label.pack(anchor='w',pady=(3,0))
+        self.connect_button=PremiumButton(page,text='Connect GitHub account',
+                                          command=self._connect_github)
+        self.connect_button.pack(anchor='w',pady=(5,9))
+        ttk.Label(page,textvariable=self.ci_hint,style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(2,8))
+        self.advanced_button=PremiumButton(page,text='Advanced options ▾',
+                                            command=self._toggle_advanced)
+        self.advanced_button.pack(anchor='w',pady=(4,6))
+        self.advanced_frame=ttk.Frame(page)
+        backend_row=ttk.Frame(self.advanced_frame)
+        backend_row.pack(anchor='w',fill='x',pady=6)
+        ttk.Label(backend_row,text='Backup provider').pack(side='left',padx=(0,12))
+        combo=ttk.Combobox(backend_row,textvariable=self.backend,
+                           values=('github','dropbox'),state='readonly',width=18)
+        combo.pack(side='left')
+        combo.bind('<<ComboboxSelected>>',lambda _:self._update_backend_fields())
+        options=ttk.Frame(self.advanced_frame)
+        options.pack(fill='x',pady=5)
+        for label,var in [
+            ('Cleanup CI artifacts only after verified backup',self.cleanup),
+            ('Simulate cleanup only',self.dryrun),
+            ('Start a fresh cycle',self.restart),
+            ('Skip CI logs',self.skiplogs),
+        ]:
+            ttk.Checkbutton(options,text=label,variable=var).pack(anchor='w',pady=2)
+
+        self.commands_frame=ttk.Frame(page)
+        self.commands_frame.pack(fill='x',pady=(8,6))
+        self.start_button=PremiumButton(self.commands_frame,text='Start / resume backup',
+                                        style='Accent.TButton',command=self._start)
         self.start_button.pack(side='left')
-        self.stop_button=PremiumButton(commands,text='Interrupt safely',command=self._stop,state='disabled')
+        self.stop_button=PremiumButton(self.commands_frame,text='Interrupt safely',
+                                       command=self._stop,state='disabled')
         self.stop_button.pack(side='left',padx=12)
-        self.status=tk.StringVar(value='Ready')
-        ttk.Label(page,textvariable=self.status).pack(anchor='w',pady=5)
-        self.progress=ttk.Progressbar(page,orient='horizontal',mode='determinate',maximum=100)
-        self.progress.pack(fill='x',pady=(0,8))
-        logs=ttk.Frame(page);logs.pack(fill='both',expand=True,pady=7)
-        self.text=tk.Text(logs,height=10,wrap='word',background='#182a40',foreground='#d8eaff',
-                          insertbackground='white',relief='flat',font=('Courier',10),state='disabled')
-        bar=ttk.Scrollbar(logs,command=self.text.yview);self.text.configure(yscrollcommand=bar.set)
-        self.text.pack(side='left',fill='both',expand=True);bar.pack(side='right',fill='y')
+        self.status=tk.StringVar(value='Ready to protect your account')
+        ttk.Label(page,textvariable=self.status,wraplength=710).pack(anchor='w',pady=5)
+        self.progress=GradientProgress(page)
+        self.progress.pack(fill='x',pady=(1,8))
+        logs=ttk.Frame(page)
+        logs.pack(fill='both',expand=True,pady=5)
+        self.text=tk.Text(logs,height=8,wrap='word',background='#182a40',
+                          foreground='#E5F3FF',insertbackground='white',
+                          relief='flat',font=('Courier',10),state='disabled')
+        bar=ttk.Scrollbar(logs,command=self.text.yview)
+        self.text.configure(yscrollcommand=bar.set)
+        self.text.pack(side='left',fill='both',expand=True)
+        bar.pack(side='right',fill='y')
         self._update_backend_fields()
+
+    def _toggle_advanced(self):
+        self.advanced_visible=not self.advanced_visible
+        if self.advanced_visible:
+            self.advanced_frame.pack(fill='x',before=self.commands_frame,pady=(0,5))
+        else:
+            self.advanced_frame.pack_forget()
+        self.advanced_button.set_text('Advanced options ▴' if self.advanced_visible
+                                      else 'Advanced options ▾')
 
     def _update_backend_fields(self):
         if self.backend.get()=='dropbox':
-            self.dropbox_row.pack(fill='x',before=self.start_button.master,pady=4)
-        else:self.dropbox_row.pack_forget()
+            self.github_row.pack_forget()
+            self.dropbox_row.pack(fill='x')
+            self.auth_status_label.pack_forget()
+            self.connect_button.pack_forget()
+        else:
+            self.dropbox_row.pack_forget()
+            self.github_row.pack(fill='x')
+            self.auth_status_label.pack(anchor='w',pady=(3,0))
+            self.connect_button.pack(anchor='w',pady=(5,9))
 
     def _build_archives(self,page):
         self._heading(page,'Archive library','Inspect, extract, checkout or mount encrypted repository snapshots.')
