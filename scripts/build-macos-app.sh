@@ -89,3 +89,23 @@ plutil -lint "$APP/Contents/Info.plist"
 "$APP/Contents/Resources/bin/gh" --version
 "$APP/Contents/Resources/bin/git-lfs" version
 "$APP/Contents/Resources/bin/multi-backup-biometric" status >/dev/null 2>&1 || test $? -eq 2
+
+# Prove that the REAL bundled age-keygen can generate an age key fully in memory,
+# encrypt it into a password-protected vault, unlock it and export recovery.
+python - <<'PY'
+import tempfile
+from pathlib import Path
+from secure_vault import create_identity,unlock,export_recovery_copy
+with tempfile.TemporaryDirectory() as tmp:
+    vault=Path(tmp)/'keys'/'default.agevault'
+    private,public=create_identity('native-smoke-strong-123456',vault)
+    assert private.startswith(b'#') or b'AGE-SECRET-KEY-' in private
+    assert public.startswith('age1')
+    assert unlock('native-smoke-strong-123456',vault)==(private,public)
+    assert not (vault.parent/'default.txt').exists()
+    recovery=Path(tmp)/'recovery.agevault'
+    export_recovery_copy('native-smoke-strong-123456',
+                         'native-recovery-strong-123456',recovery,vault)
+    assert unlock('native-recovery-strong-123456',recovery)==(private,public)
+print('macOS real age-keygen encrypted vault and recovery smoke OK')
+PY
