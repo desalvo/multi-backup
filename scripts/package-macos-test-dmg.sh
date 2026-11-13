@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Mac TEST DMG: exactly one ad-hoc signed app; never publish to stable.
+# Early-channel macOS DMG: one ad-hoc signed app, never a stable distribution.
 set -euo pipefail
 : "${MAC_ARCH:?Specify arm64 or x86_64}"
 [[ "$MAC_ARCH" == arm64 || "$MAC_ARCH" == x86_64 ]] || exit 1
 [[ "$(uname -m)" == "$MAC_ARCH" ]] || { echo 'Wrong architecture runner' >&2; exit 1; }
 APP='dist/Multi Backup.app'
-DMG="multi-backup-macos-${MAC_ARCH}-test.dmg"
+DMG="multi-backup-macos-${MAC_ARCH}.dmg"
 [[ -d "$APP" && -x "$APP/Contents/MacOS/Multi Backup" &&
    -x "$APP/Contents/MacOS/multi-backup" ]] || {
   echo 'Missing built GUI application or CLI' >&2; exit 1
@@ -50,5 +50,5 @@ file "$INSTALLED/Contents/MacOS/Multi Backup" | grep -q "$MAC_ARCH" || {
 "$INSTALLED/Contents/Resources/bin/age-keygen" --version
 "$INSTALLED/Contents/Resources/bin/gh" --version
 "$INSTALLED/Contents/Resources/bin/git-lfs" version
-shasum -a 256 "$DMG" > "checksums-macos-${MAC_ARCH}-test.txt"
+shasum -a 256 "$DMG" > "checksums-macos-${MAC_ARCH}.txt"
 echo "PASS: ad-hoc signed TEST-ONLY one-app DMG for ${MAC_ARCH}"
