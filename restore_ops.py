@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from archive_ops import ArchiveError, extract_archive
 from checkpoint import sha256
+import certifi
 
 GITHUB_SLUG=re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}/[a-zA-Z0-9_.-]{1,100}$')
 DROPBOX_PATH=re.compile(r'^/(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\\\x00-\x1f]+$')
@@ -117,7 +119,7 @@ def _dropbox_upload(url,token,argument,data):
                  'Dropbox-API-Arg':json.dumps(argument,separators=(',',':'))},
         method='POST')
     try:
-        with urllib.request.urlopen(request,timeout=180) as response:
+        with urllib.request.urlopen(request,timeout=180,context=ssl.create_default_context(cafile=certifi.where())) as response:
             result=json.loads(response.read(1024*1024))
     except urllib.error.HTTPError as exc:
         if exc.code==409:
