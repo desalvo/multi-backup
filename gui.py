@@ -330,37 +330,140 @@ class BackupGUI(tk.Tk):
         except Exception as exc:messagebox.showerror('Plugin error',str(exc))
 
     def _build_encryption(self,page):
-        self._heading(page,'Encryption identities','Create age X25519 keys locally, or use an existing identity file.')
-        ttk.Label(page,text='Private keys stay on your computer. Backups are encrypted before publication.',
-                  style='Sub.TLabel').pack(anchor='w')
-        row=ttk.Frame(page);row.pack(fill='x',pady=20)
-        PremiumButton(row,text='Generate new age key',style='Accent.TButton',command=self._generate_key).pack(side='left')
-        PremiumButton(row,text='Show public recipient',command=self._public_key).pack(side='left',padx=12)
-        PremiumButton(row,text='Select existing key',command=lambda:self.identity.set(filedialog.askopenfilename())).pack(side='left')
-        self.key_info=tk.Text(page,height=8,wrap='word',background='white',relief='flat')
+        self._heading(page,'Local encryption keys',
+                      'Encryption is automatic. Save your private recovery key separately.')
+        ttk.Label(page,text='Your age private key stays on this computer, outside the backup '
+                  'directory. It is needed to restore encrypted files.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(0,8))
+        ttk.Label(page,textvariable=self.key_location,style='Sub.TLabel',
+                  wraplength=710).pack(anchor='w',pady=(3,12))
+        PremiumButton(page,text='Locate private recovery key',
+                      command=self._reveal_key).pack(anchor='w',pady=(0,15))
+        row=ttk.Frame(page)
+        row.pack(fill='x',pady=6)
+        PremiumButton(row,text='Generate another key',style='Accent.TButton',
+                      command=self._generate_key).pack(side='left')
+        PremiumButton(row,text='Show public recipient',
+                      command=self._public_key).pack(side='left',padx=9)
+        PremiumButton(row,text='Choose existing key',
+                      command=self._choose_key).pack(side='left')
+        self.key_info=tk.Text(page,height=8,wrap='word',background='white',
+                              relief='flat',font=('Courier',10))
         self.key_info.pack(fill='x',pady=12)
-        ttk.Label(page,text='Save private identities on encrypted storage, back them up separately and avoid sharing them.',
-                  wraplength=690).pack(anchor='w',pady=10)
+        ttk.Label(page,text='Never share the private identity with a third party or '
+                  'keep its only copy alongside the backup ciphertext.',
+                  style='Sub.TLabel',wraplength=700).pack(anchor='w',pady=8)
+
+    def _load_existing_identity(self):
+        path=private_key_path()
+        self.key_location.set('Private recovery key: '+str(path))
+        if path.is_file() or path.is_symlink():
+            try:
+                public=recipient_for_identity(path)
+                self.identity.set(str(path))
+                self.recipient.set(public)
+            except (OSError,ValueError,RuntimeError) as exc:
+                self.key_location.set('Recovery key unavailable: '+str(exc))
+
+    def _prepare_identity(self):
+        if self.identity.get().strip():
+            path=Path(self.identity.get()).expanduser()
+            self.recipient.set(recipient_for_identity(path))
+            self.key_location.set('Private recovery key: '+str(path))
+            return False
+        info=ensure_default_identity()
+        self.identity.set(info['private_key_file'])
+        self.recipient.set(info['public_recipient'])
+        self.key_location.set('Private recovery key: '+info['private_key_file'])
+        return info['created']
 
     def _generate_key(self):
         name=simpledialog.askstring('Key name','New key name (letters, digits, hyphen):',parent=self)
         if not name:return
         try:
             from key_management import generate_key
-            data=generate_key(name)
-            self.identity.set(data['private_key_file']);self.recipient.set(data['public_recipient'])
-            self.key_info.insert('end',f"Generated {name}\nIdentity: {data['private_key_file']}\nRecipient: {data['public_recipient']}\n")
-        except Exception as exc:messagebox.showerror('Key generation failed',str(exc))
+            info=generate_key(name)
+            self.identity.set(info['private_key_file'])
+            self.recipient.set(info['public_recipient'])
+            self.key_location.set('Private recovery key: '+info['private_key_file'])
+            self.key_info.insert('end','Generated key at '+info['private_key_file']+'\n')
+        except Exception as exc:
+            messagebox.showerror('Key generation failed',str(exc))
+
+    def _choose_key(self):
+        path=filedialog.askopenfilename(title='Choose an existing age private key')
+        if not path:return
+        try:
+            self.recipient.set(recipient_for_identity(Path(path)))
+            self.identity.set(path)
+            self.key_location.set('Private recovery key: '+path)
+        except Exception as exc:
+            messagebox.showerror('Invalid private key',str(exc))
+
+    def _reveal_key(self):
+        path=Path(self.identity.get()) if self.identity.get() else private_key_path()
+        if not path.is_file():
+            messagebox.showinfo('Recovery key',
+                                'The key is generated when you start your first backup.\n'
+                                'Expected location:\n'+str(path))
+            return
+        messagebox.showinfo('Protect your recovery key',
+                            'Private age identity:\n'+str(path)+
+                            '\n\nSave a separate secure/offline copy. '
+                            'Anyone with this file can decrypt your backups.')
+        if sys.platform=='darwin':
+            try:subprocess.Popen(['open','-R',str(path)])
+            except OSError:pass
+        elif os.name=='nt':
+            try:subprocess.Popen(['explorer','/select,',str(path)])
+            except OSError:pass
 
     def _public_key(self):
         try:
-            from key_management import public_recipient
-            p=Path(self.identity.get())
-            cmd=subprocess.run(['age-keygen','-y',str(p)],text=True,capture_output=True,check=False)
-            if cmd.returncode:raise RuntimeError('Cannot read age identity')
-            self.recipient.set(cmd.stdout.strip())
-            self.key_info.insert('end','Public recipient: '+cmd.stdout.strip()+'\n')
-        except Exception as exc:messagebox.showerror('Identity error',str(exc))
+            path=Path(self.identity.get()) if self.identity.get() else private_key_path()
+            public=recipient_for_identity(path)
+            self.recipient.set(public)
+            self.key_info.insert('end','Public recipient: '+public+'\n')
+        except Exception as exc:
+            messagebox.showerror('Identity error',str(exc))
+
+    def _discover_github_account(self,force=False):
+        def work():
+            try:
+                result=subprocess.run(['gh','api','user','--jq','.login'],
+                                      text=True,capture_output=True,timeout=25,check=False)
+                login=result.stdout.strip()
+                if result.returncode or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',login):
+                    raise RuntimeError('Not connected. Choose Connect GitHub account.')
+                self.events.put(('github-login',(login,force)))
+            except (OSError,subprocess.TimeoutExpired,RuntimeError) as exc:
+                self.events.put(('github-error',str(exc)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def _connect_github(self):
+        if sys.platform=='darwin':
+            try:
+                binary=shutil.which('gh')
+                if not binary:
+                    raise RuntimeError('GitHub CLI (gh) is unavailable')
+                directory=settings_path().parent
+                if directory.is_symlink():
+                    raise RuntimeError('Refusing a symlinked application directory')
+                directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+                script=directory/'connect-github.command'
+                script.write_text('#!/bin/sh\n'+shlex.quote(binary)+
+                                  ' auth login --hostname github.com --git-protocol https --web\n'
+                                  'echo "Return to Multi Backup and click Detect after login."\n'
+                                  'read -r _\n',encoding='utf-8')
+                script.chmod(0o700)
+                subprocess.Popen(['open','-a','Terminal',str(script)])
+                self.github_status.set('Complete sign-in in Terminal, then click Detect.')
+            except (OSError,RuntimeError) as exc:
+                messagebox.showerror('GitHub sign-in',str(exc))
+        else:
+            messagebox.showinfo('GitHub authentication',
+                                'Run gh auth login in a terminal once, then click Detect.\n'
+                                'The connected account must match the GitHub username.')
 
     def _build_updates(self,page):
         self._heading(page,'Native application updates','Discover signed release channels; download only when SHA-256 is available.')
