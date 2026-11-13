@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 from pathlib import Path
 from checkpoint import atomic_json
 
@@ -12,6 +13,8 @@ DEFAULTS = {
     'enabled_backends': ['github'],
     'output_directory': str(Path.home() / 'Multi-Backups'),
     'metadata_workers': 4,
+    'github_username': '',
+    'backup_ci_runs': 5,
     'keep_ci_runs': 5,
     'cleanup_ci_artifacts': False,
     'github_cleanup_dry_run': True,
@@ -47,6 +50,12 @@ def load_settings(path: Path | None = None) -> dict:
         raise ValueError('Invalid backends')
     if not isinstance(result['update_interval_hours'], int) or not 1 <= result['update_interval_hours'] <= 168:
         raise ValueError('Invalid update interval')
+    if not isinstance(result['github_username'],str) or (
+            result['github_username'] and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',result['github_username'])):
+        raise ValueError('Invalid GitHub username in preferences')
+    for field in ('backup_ci_runs','keep_ci_runs','metadata_workers'):
+        if type(result[field]) is not int or not 1 <= result[field] <= (16 if field=='metadata_workers' else 1000):
+            raise ValueError('Invalid backup/cleanup limit: '+field)
     return result
 
 
@@ -60,6 +69,14 @@ def save_settings(data: dict, path: Path | None = None) -> None:
     load_settings_check = dict(DEFAULTS, **safe)
     if load_settings_check['update_channel'] not in ('stable','early-release'):
         raise ValueError('Invalid update channel')
+    if not isinstance(load_settings_check['github_username'],str) or (
+            load_settings_check['github_username'] and
+            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',load_settings_check['github_username'])):
+        raise ValueError('Invalid GitHub username')
+    for field in ('backup_ci_runs','keep_ci_runs','metadata_workers'):
+        value=load_settings_check[field]
+        if type(value) is not int or not 1 <= value <= (16 if field=='metadata_workers' else 1000):
+            raise ValueError('Invalid backup/cleanup limit: '+field)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(path.parent,0o700)
     atomic_json(path,safe)

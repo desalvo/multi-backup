@@ -127,6 +127,10 @@ class Backup:
         if not isinstance(me, dict) or not me.get("login"):
             raise RuntimeError("Impossibile leggere /user: verifica gh auth login")
         self.username = me["login"]
+        chosen=getattr(self.args,'github_user',None)
+        if chosen and chosen.lower()!=self.username.lower():
+            raise RuntimeError('GitHub login mismatch: authenticated as '+self.username+
+                               ', requested '+chosen+'. Sign in with gh auth login for the requested account.')
         for ep, filename, coll in [
             ("/user/emails?per_page=100", "emails.json", ""),
             ("/user/keys?per_page=100", "ssh_public_keys.json", ""),
@@ -152,6 +156,11 @@ class Backup:
                 valid.append(r)
             else:
                 self.problem("repository non valido", repr(slug), critical=True)
+        chosen=getattr(self.args,'github_user',None)
+        if chosen:
+            valid=[r for r in valid if r.get('owner',{}).get('login','').lower()==chosen.lower()]
+            # Do not save other accounts' repository inventory in the selected backup.
+            save_json(self.root / 'account' / 'repositories.json',valid)
         return {r["full_name"]: r for r in valid}
 
     def backup_organization(self, org):
