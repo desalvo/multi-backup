@@ -97,9 +97,9 @@ class PluginTests(unittest.TestCase):
         self.assertIn("'--github-user',chosen",src)
         self.assertIn('self._metadata(repos)',core)
         self.assertLess(core.index('self._metadata(repos)'),core.index('self._cleanup(repos)',core.index('def run(self):')))
-        self.assertIn("if self.counts['errors']==0:",core)
+        self.assertIn("if self.counts['errors']==0 and not self.ci_issues:",core)
 
-    def test_ci_index_backups_latest_n_without_cleanup(self):
+    def test_ci_index_retains_older_runs_for_backfill_without_cleanup(self):
         from multi_backup import ResumableBackup
         with tempfile.TemporaryDirectory() as folder:
             backup=object.__new__(ResumableBackup)
@@ -115,7 +115,9 @@ class PluginTests(unittest.TestCase):
                 {'id':9,'created_at':'2026-11-12T01:00:00Z'},
             ]
             selected=backup._ci_index('account/repo')
-            self.assertEqual([item['id'] for item in selected],[10,9])
+            self.assertEqual([item['id'] for item in selected],[10,9,8])
+            # Only the requested two successful runs count; the third is a
+            # candidate if a recent run loses an artifact.
             backup.journal.record.assert_called_once()
 
     def test_key_identity_is_discovered_or_generated_without_overwrite(self):
@@ -477,7 +479,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn('certifi>=', requirements)
         self.assertIn('cryptography>=', requirements)
         self.assertIn('Pillow>=13.0.0,<14', documentation_requirements)
-        self.assertEqual(native.count(' -r requirements.txt'),2)
+        self.assertEqual(native.count(' -r requirements.txt'),3)
+        self.assertIn('Capture current GUI and generate bilingual publications',native)
         self.assertIn('python -m pip install -r requirements.txt', (root/'scripts/build-macos-app.sh').read_text('utf-8'))
         self.assertNotIn('Pillow>=10', native)
         self.assertNotIn('Pillow>=10', requirements)
