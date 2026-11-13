@@ -1,0 +1,7 @@
+[multi-backup-early-release]
+name=Multi Backup early-release - alma EL8
+baseurl=https://desalvo.github.io/multi-backup/early-release/alma/el8/x86_64
+enabled=0
+gpgcheck=1
+repo_gpgcheck=1
+metadata_expire=6h
