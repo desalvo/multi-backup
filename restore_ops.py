@@ -27,6 +27,8 @@ class RestoreError(RuntimeError):
 
 def restore_provider(path, backup_root):
     """Derive provider from immutable backup storage layout, never from UI selection."""
+    if Path(path).is_symlink():
+        raise RestoreError('Symlinked archives cannot be restored')
     archive=Path(path).resolve()
     root=Path(backup_root).resolve()
     if archive.suffix!='.age' or not archive.is_file() or archive.is_symlink():
@@ -110,28 +112,35 @@ def restore_github_new_repository(archive,root,identity,repo,*,private=True):
     return 'https://github.com/'+repo
 
 
-def _dropbox_upload(url,token,argument,data):
+def _dropbox_upload(endpoint,token,argument,data,*,required='id'):
+    # Constant HTTPS Dropbox API host and endpoint controlled by this module.
+    if endpoint not in ('upload','upload_session/start',
+                        'upload_session/append_v2','upload_session/finish'):
+        raise RestoreError('Unrecognized Dropbox upload endpoint')
     request=urllib.request.Request(
-        'https://content.dropboxapi.com/2/files/'+url,
+        'https://content.dropboxapi.com/2/files/'+endpoint,
         data=data,
         headers={'Authorization':'Bearer '+token,
                  'Content-Type':'application/octet-stream',
                  'Dropbox-API-Arg':json.dumps(argument,separators=(',',':'))},
         method='POST')
     try:
-        with urllib.request.urlopen(request,timeout=180,context=ssl.create_default_context(cafile=certifi.where())) as response:
-            result=json.loads(response.read(1024*1024))
+        with urllib.request.urlopen(
+                request,timeout=180,
+                context=ssl.create_default_context(cafile=certifi.where())) as response:  # nosec B310 - fixed HTTPS Dropbox endpoint; CA and hostname verified
+            payload=response.read(1024*1024)
+            result=json.loads(payload) if payload else {}
     except urllib.error.HTTPError as exc:
         if exc.code==409:
-            raise RestoreError('Dropbox destination already exists or conflicts; not overwritten') from exc
+            raise RestoreError('Dropbox destination exists or conflicts; it was not overwritten') from exc
         raise RestoreError('Dropbox restore failed (HTTP '+str(exc.code)+')') from exc
-    if not isinstance(result,dict) or not result.get('id'):
-        raise RestoreError('Dropbox did not confirm upload')
+    if not isinstance(result,dict) or (required and not result.get(required)):
+        raise RestoreError('Dropbox did not confirm upload operation')
     return result
 
 
 def restore_dropbox_new_file(archive,root,identity,destination,token):
-    """Restore one encrypted Dropbox version to a new path (never overwrite)."""
+    """Restore any Dropbox backup file to a new path without overwriting data."""
     validate_plugin(archive,root,'dropbox')
     source=Path(archive).resolve()
     if '/objects/' not in str(source) or not source.name.endswith('.tar.gz.age'):
@@ -141,16 +150,37 @@ def restore_dropbox_new_file(archive,root,identity,destination,token):
     if not isinstance(token,str) or len(token)<12 or '\n' in token:
         raise RestoreError('A Dropbox token with files.content.write permission is required')
     with tempfile.TemporaryDirectory(prefix='multi-backup-dropbox-restore-') as tmp:
-        destination_root=Path(tmp)/'decoded'
-        extract_archive(source,Path(identity),destination_root)
-        files=[p for p in destination_root.rglob('*') if p.is_file()]
+        decoded=Path(tmp)/'decoded'
+        extract_archive(source,Path(identity),decoded)
+        files=[p for p in decoded.rglob('*') if p.is_file()]
         if len(files)!=1:
             raise RestoreError('Expected exactly one Dropbox file in encrypted object')
         target=files[0]
-        if target.stat().st_size>DIRECT_UPLOAD_LIMIT:
-            raise RestoreError('Dropbox file exceeds single-upload limit; resumable upload restore is needed')
-        # Check the cleartext file before the irreversible destination create.
-        payload=target.read_bytes()
-        return _dropbox_upload('upload',token,{'path':destination,'mode':'add',
-                                              'autorename':False,'strict_conflict':True,
-                                              'mute':False},payload)
+        commit={'path':destination,'mode':'add','autorename':False,
+                'strict_conflict':True,'mute':False}
+        with target.open('rb') as stream:
+            if target.stat().st_size<=DIRECT_UPLOAD_LIMIT:
+                return _dropbox_upload('upload',token,commit,stream.read())
+            # Dropbox upload sessions provide a bounded-memory restore of
+            # arbitrarily large encrypted backup objects.
+            chunk=8*1024*1024
+            first=stream.read(chunk)
+            session=_dropbox_upload('upload_session/start',token,
+                                    {'close':False},first,required='session_id')
+            session_id=session['session_id']
+            position=len(first)
+            total=target.stat().st_size
+            while total-position>chunk:
+                next_block=stream.read(chunk)
+                if not next_block:
+                    raise RestoreError('Local backup file ended during upload session')
+                _dropbox_upload('upload_session/append_v2',token,
+                    {'cursor':{'session_id':session_id,'offset':position},
+                     'close':False},next_block,required=None)
+                position+=len(next_block)
+            remainder=stream.read()
+            if position+len(remainder)!=total:
+                raise RestoreError('Local backup file changed during restore')
+            return _dropbox_upload('upload_session/finish',token,
+                {'cursor':{'session_id':session_id,'offset':position},
+                 'commit':commit},remainder)
