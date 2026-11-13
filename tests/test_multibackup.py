@@ -156,10 +156,11 @@ class PluginTests(unittest.TestCase):
                     prepare_destination(existing)
             else:
                 self.assertEqual(prepare_destination(chosen),chosen)
-            shortcut=root/'alias'
-            shortcut.symlink_to(chosen,target_is_directory=True)
-            with self.assertRaises(ValueError):
-                prepare_destination(shortcut)
+            if os.name!='nt':
+                shortcut=root/'alias'
+                shortcut.symlink_to(chosen,target_is_directory=True)
+                with self.assertRaises(ValueError):
+                    prepare_destination(shortcut)
 
     def test_native_buttons_progress_and_sidebar_are_not_aqua_dependent(self):
         from ui_widgets import PremiumButton,GradientProgress,progress_color
