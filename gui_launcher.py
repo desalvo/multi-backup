@@ -31,8 +31,12 @@ def gui_smoke():
         application.update_idletasks()
         assert application.start_button.caption == 'Start / resume backup'
         assert application.menu_button.caption == 'Hide navigation'
-        assert len(application.nav) == 7
+        application._startup_security()
+        assert not application._locked
+        assert len(application.nav) == 8
         application._show('Backup')
+        application._show('Restore')
+        application._show('Encryption')
         application._toggle_sidebar()
         assert not application.sidebar_visible
         application._toggle_sidebar()
