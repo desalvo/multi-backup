@@ -61,9 +61,32 @@ jobs:
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
 
-  native-release:
-    name: Native packages and publication (after Production Gate)
+  macos-smoke:
+    name: macOS unsigned app startup (${{ matrix.arch }}, never distributed)
     needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install helper tools
+        run: brew install age gh git-lfs
+      - name: Build and test unsigned native app (never publish)
+        env:
+          MAC_UNSIGNED_SMOKE: '1'
+          MAC_ARCH: ${{ matrix.arch }}
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+        run: bash scripts/build-macos-app.sh
+
+  native-release:
+    name: Native packages and publication (after Production Gate and macOS smoke)
+    needs: [production-gate, macos-smoke]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&

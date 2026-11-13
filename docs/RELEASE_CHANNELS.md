@@ -1,6 +1,6 @@
 # Native releases, channels, and trust
 
-**Version:** `0.1.0-r003-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
+**Version:** `0.1.0-r009-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
 
 ## Trigger contract
 
@@ -58,3 +58,7 @@ Configure these under **Settings → Secrets and variables → Actions → Repos
 After adding them, run **Multi Backup - Production CI** with `workflow_dispatch` on `main`, or push a commit containing `[full-ci]`. GitHub Actions will import the signing key only into a temporary keychain and delete it after the run. Apple notarization uses `xcrun notarytool` and two independently verified tickets. You must have a valid Apple Developer Program account to obtain these credentials. Without these secrets, the old public DMGs are **not** validated for a normal Gatekeeper install.
 
 **Important distinction:** The static Production Gate can be green even when a notarization credential is missing; actual code signing and running the app on macOS are separate native *release acceptance checks*, and release publication requires both. Windows Authenticode and RPM GPG signing are still required for the future stable channel.
+
+## r009 unsigned macOS startup qualification
+
+After the sole Production Gate, both macOS architectures build and exercise the real unsigned application (GUI self-test and bundled CLI). These builds are intentionally never uploaded or released; a distinct Developer ID signed and notarized build plus mounted-DMG Gatekeeper acceptance is still required for publication.
