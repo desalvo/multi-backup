@@ -491,6 +491,7 @@ class BackupGUI(tk.Tk):
         PremiumButton(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
         PremiumButton(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
         PremiumButton(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
+        PremiumButton(action,text='Restore backup',command=lambda:self._show('Restore')).pack(side='left',padx=12)
         ttk.Label(page,text='Latest update status',style='Sub.TLabel').pack(anchor='w',pady=(38,8))
         ttk.Label(page,textvariable=self.update_status,wraplength=650).pack(anchor='w')
 
@@ -589,13 +590,162 @@ class BackupGUI(tk.Tk):
         self._heading(page,'Archive library','Inspect, extract, checkout or mount encrypted repository snapshots.')
         row=ttk.Frame(page);row.pack(fill='x')
         for name,fn in [('Refresh',self._refresh),('List contents',self._view),('Show file',self._show_member),
-                        ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount)]:
+                        ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount),
+                        ('Restore…',lambda:self._show('Restore'))]:
             PremiumButton(row,text=name,command=fn).pack(side='left',padx=(0,7))
         self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.archives.pack(fill='both',expand=True,pady=(12,5))
         ttk.Label(page,text='Encrypted archive members').pack(anchor='w')
         self.members=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.members.pack(fill='both',expand=True,pady=7)
+
+    def _build_restore(self,page):
+        self._heading(page,'Restore protected backups',
+            'Select an encrypted archive. Only its original backup plugin can restore it.')
+        ttk.Label(page,text='GitHub snapshots restore to a new repository, Dropbox objects '
+                  'to a new file. Local extraction is also supported.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(0,8))
+        row=ttk.Frame(page)
+        row.pack(fill='x',pady=5)
+        PremiumButton(row,text='Refresh backup catalog',
+                      command=self._refresh_restore).pack(side='left',padx=(0,10))
+        PremiumButton(row,text='Browse archives',
+                      command=lambda:self._show('Archives')).pack(side='left')
+        self.restore_list=tk.Listbox(page,height=9,background='white',border=0,
+                                     selectbackground='#1864A8',font=('Courier',10),
+                                     exportselection=False)
+        self.restore_list.pack(fill='x',pady=(8,7))
+        self.restore_list.bind('<<ListboxSelect>>',self._restore_picked)
+        self.restore_summary=tk.StringVar(value='Choose an encrypted backup')
+        ttk.Label(page,textvariable=self.restore_summary,style='Sub.TLabel',
+                  wraplength=720).pack(anchor='w',pady=4)
+        row2=ttk.Frame(page)
+        row2.pack(fill='x',pady=(8,5))
+        ttk.Label(row2,text='Backup plugin').pack(side='left',padx=(0,12))
+        self.restore_plugin=tk.StringVar(value='github')
+        picker=ttk.Combobox(row2,textvariable=self.restore_plugin,
+                           values=('github','dropbox'),width=16,state='readonly')
+        picker.pack(side='left')
+        ttk.Label(row2,text='Restore mode').pack(side='left',padx=(24,12))
+        self.restore_mode=tk.StringVar(value='Local extraction')
+        options=ttk.Combobox(row2,textvariable=self.restore_mode,
+                             values=('Local extraction','Restore to provider'),
+                             state='readonly',width=21)
+        options.pack(side='left')
+        self.restore_destination=tk.StringVar()
+        self._line(page,'Restore destination',self.restore_destination)
+        ttk.Label(page,text='Local: new directory path. GitHub remote: account/new-repo '
+                  '(must not exist). Dropbox remote: /new/path/file (must not exist). '
+                  'Your provider authentication will be checked at restore time.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(5,10))
+        PremiumButton(page,text='Restore selected backup',
+                      style='Accent.TButton',command=self._restore_now).pack(
+                      anchor='w',pady=(3,8))
+        ttk.Label(page,text='Remote restore never overwrites an existing target. '
+                  'GitHub account settings and CI history are available for local '
+                  'recovery but are not automatically recreated on GitHub.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(8,0))
+        self.restore_index=[]
+
+    def _refresh_restore(self):
+        try:
+            self.restore_index=catalog(Path(self.root_dir.get()))
+            selected=self.restore_list.curselection()
+            self.restore_list.delete(0,'end')
+            for item in self.restore_index:
+                origin='Dropbox' if item['kind'].startswith('dropbox') else 'GitHub'
+                self.restore_list.insert('end',origin+' · '+item['relative'])
+            self.restore_summary.set(str(len(self.restore_index))+' encrypted backups available')
+            if selected and selected[0]<len(self.restore_index):
+                self.restore_list.selection_set(selected[0])
+        except (OSError,ValueError,RuntimeError) as exc:
+            messagebox.showerror('Cannot read backup catalog',str(exc))
+
+    def _restore_picked(self,_event=None):
+        selected=self.restore_list.curselection()
+        if not selected or selected[0]>=len(self.restore_index):
+            return
+        archive=self.restore_index[selected[0]]
+        try:
+            plugin=restore_provider(Path(archive['path']),Path(self.root_dir.get()))
+            self.restore_plugin.set(plugin)
+            self.restore_summary.set('Original plugin: '+plugin+
+                                     ' · '+archive['relative'])
+        except RestoreError as exc:
+            self.restore_summary.set('Cannot restore: '+str(exc))
+
+    def _restore_now(self):
+        if self._locked or self._session_secret is None:
+            messagebox.showwarning('Encryption key required',
+                                   'Unlock the password-protected key before restoring.')
+            return
+        selection=self.restore_list.curselection()
+        if not selection or selection[0]>=len(self.restore_index):
+            messagebox.showwarning('Select backup','Choose an encrypted backup first.')
+            return
+        selected=self.restore_index[selection[0]]
+        archive=Path(selected['path'])
+        plugin=self.restore_plugin.get()
+        root=Path(self.root_dir.get())
+        try:
+            validate_plugin(archive,root,plugin)
+        except RestoreError as exc:
+            messagebox.showerror('Incompatible restore plugin',str(exc))
+            return
+        mode=self.restore_mode.get()
+        destination=self.restore_destination.get().strip()
+        if mode=='Local extraction' and not destination:
+            parent=filedialog.askdirectory(title='Choose parent folder for a new restore directory')
+            if not parent:return
+            destination=str(Path(parent)/('Multi-Backup-Restore-'+
+                               str(int(__import__('time').time()))))
+            self.restore_destination.set(destination)
+        if not destination:
+            messagebox.showwarning('Destination required',
+                                   'Provide a destination before restoring.')
+            return
+        if mode=='Restore to provider':
+            action=('Create a NEW GitHub repository '+destination if plugin=='github'
+                    else 'Upload a NEW Dropbox file '+destination)
+            note='Remote restore will not overwrite an existing destination. '
+            if plugin=='github' and selected['kind']!='git':
+                messagebox.showerror('Unsupported remote restore',
+                    'Select a Git mirror for GitHub remote restoration. '
+                    'CI, account settings and metadata can be restored locally.')
+                return
+            if plugin=='dropbox' and selected['kind']!='dropbox':
+                messagebox.showerror('Unsupported remote restore',
+                    'Select an individual Dropbox object for remote file restoration.')
+                return
+        elif mode=='Local extraction':
+            action='Extract encrypted '+plugin+' backup to '+destination
+            note='An existing folder will never be overwritten. '
+        else:
+            messagebox.showerror('Invalid restore mode','Choose a supported restore mode.')
+            return
+        if not messagebox.askyesno('Confirm restore',
+                                   action+'?\n\n'+note+
+                                   'The original encrypted backup will remain unchanged.'):
+            return
+        token=None
+        if mode=='Restore to provider' and plugin=='dropbox':
+            token=simpledialog.askstring(
+                'Dropbox restore credentials',
+                'Enter a Dropbox access token with files.content.write permission. '
+                'It is used only for this restore and is not saved.',
+                parent=self,show='*')
+            if token is None:return
+        def work():
+            with self._identity_file() as identity:
+                if mode=='Local extraction':
+                    return restore_local(archive,root,plugin,identity,Path(destination))
+                if plugin=='github':
+                    return restore_github_new_repository(
+                        archive,root,identity,destination)
+                return restore_dropbox_new_file(
+                    archive,root,identity,destination,token)
+        self.status.set('Restoring encrypted backup…')
+        self._background(work)
 
     def _build_plugins(self,page):
         self._heading(page,'Backup engines','Each provider is an independent plugin with its own capabilities.')
