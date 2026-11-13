@@ -16,13 +16,21 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+from contextlib import contextmanager
 from pathlib import Path
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION
 from ui_widgets import PremiumButton, GradientProgress
-from key_management import ensure_default_identity, private_key_path, recipient_for_identity
+from key_management import private_key_path
+from secure_vault import (vault_path,load_vault,unlock,create_identity,migrate_legacy,
+                          export_recovery_copy,change_password,import_recovery_copy,recover_existing_vault,
+                          temporary_identity,VaultError)
+import biometric
+from restore_ops import (RestoreError,restore_provider,validate_plugin,
+                         restore_local,restore_github_new_repository,
+                         restore_dropbox_new_file)
 from backup_paths import prepare_destination
 from settings import settings_path
 from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
@@ -43,11 +51,14 @@ class BackupGUI(tk.Tk):
         except Exception:pass
         self.cfg=load_settings()
         self.events=queue.Queue();self.proc=None;self.selected_archive=None;self.archive_index=[]
+        self._session_secret=None
+        self._locked=True
+        self._startup_completed=False
         self.root_dir=tk.StringVar(value=self.cfg['output_directory'])
         self.staging=tk.StringVar();self.identity=tk.StringVar();self.recipient=tk.StringVar()
         self.github_user=tk.StringVar(value=self.cfg.get('github_username',''))
         self.github_status=tk.StringVar(value='Checking your GitHub connection…')
-        self.key_location=tk.StringVar(value='Recovery key: '+str(private_key_path()))
+        self.key_location=tk.StringVar(value='Password-protected recovery vault: '+str(vault_path()))
         self.backup_ci_runs=tk.StringVar(value=str(self.cfg.get('backup_ci_runs',5)))
         self.ci_hint=tk.StringVar()
         self.backup_ci_runs.trace_add('write',lambda *_:self._update_ci_hint())
@@ -62,14 +73,18 @@ class BackupGUI(tk.Tk):
         self.update_channel=tk.StringVar(value=self.cfg['update_channel'])
         self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
         self.update_status=tk.StringVar(value='Not checked yet')
-        self._make_styles();self._make_shell();self._show('Dashboard')
-        self._load_existing_identity()
-        self.after(350,self._discover_github_account)
+        self._make_styles();self._make_shell()
+        self.protocol('WM_DELETE_WINDOW',self._quit_securely)
         self.bind('<Control-b>',lambda _event:self._toggle_sidebar())
+        for index,(name,_) in enumerate(NAV_ITEMS,1):
+            self.bind('<Control-Key-'+str(index)+'>',
+                      lambda _event,n=name:self._show(n))
+        self.bind_all('<MouseWheel>',self._scroll_pages)
+        self.bind_all('<Button-4>',self._scroll_pages)
+        self.bind_all('<Button-5>',self._scroll_pages)
         self.after(120,self._poll)
-        if self.cfg['auto_update_check']:
-            self.after(1250,self._check_updates)
-            self.after(self.cfg['update_interval_hours']*3600*1000,self._periodic_update)
+        # No network requests, page actions or background jobs before key unlock.
+        self.after(35,self._startup_security)
 
     def _make_styles(self):
         style=ttk.Style(self)
@@ -136,19 +151,32 @@ class BackupGUI(tk.Tk):
                   style='Sub.TLabel').pack(side='right')
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
         self.hero.pack(fill='x');self.hero.bind('<Configure>',self._draw_hero)
-        body=tk.Frame(self.content,bg='#f5f8fc');body.pack(fill='both',expand=True)
+        body=tk.Frame(self.content,bg='#f5f8fc')
+        body.pack(fill='both',expand=True)
+        self.page_canvas=tk.Canvas(body,bg='#f5f8fc',highlightthickness=0,borderwidth=0)
+        page_scroll=ttk.Scrollbar(body,orient='vertical',command=self.page_canvas.yview)
+        self.page_canvas.configure(yscrollcommand=page_scroll.set)
+        page_scroll.pack(side='right',fill='y')
+        self.page_canvas.pack(side='left',fill='both',expand=True)
+        self.page_host=ttk.Frame(self.page_canvas)
+        self.page_window=self.page_canvas.create_window((0,0),window=self.page_host,anchor='nw')
+        self.page_host.bind('<Configure>',lambda _ev:self._sync_page_scroll())
+        self.page_canvas.bind('<Configure>',self._resize_page_host)
         self.pages={}
         for name in self.nav:
-            page=ttk.Frame(body);self.pages[name]=page
+            page=ttk.Frame(self.page_host)
+            self.pages[name]=page
         self._build_dashboard(self.pages['Dashboard'])
         self._build_backup(self.pages['Backup'])
         self._build_archives(self.pages['Archives'])
+        self._build_restore(self.pages['Restore'])
         self._build_plugins(self.pages['Plugins'])
         self._build_encryption(self.pages['Encryption'])
         self._build_updates(self.pages['Updates'])
         self._build_settings(self.pages['Settings'])
 
     def _toggle_sidebar(self):
+        if self._locked:return
         self.sidebar_visible=not self.sidebar_visible
         if self.sidebar_visible:
             self.sidebar.pack(side='left',fill='y',before=self.content)
@@ -156,6 +184,297 @@ class BackupGUI(tk.Tk):
             self.sidebar.pack_forget()
         self.menu_button.set_text('Hide navigation' if self.sidebar_visible
                                   else 'Show navigation')
+
+    def _resize_page_host(self,event):
+        self.page_canvas.itemconfigure(self.page_window,width=event.width)
+        self._sync_page_scroll()
+
+    def _sync_page_scroll(self):
+        bounds=self.page_canvas.bbox('all')
+        if bounds:self.page_canvas.configure(scrollregion=bounds)
+
+    def _scroll_pages(self,event):
+        if self._locked or not hasattr(self,'page_canvas'):
+            return
+        if isinstance(event.widget,(tk.Text,tk.Listbox,ttk.Combobox)):
+            return
+        if getattr(event,'num',None)==4:direction=-1
+        elif getattr(event,'num',None)==5:direction=1
+        elif getattr(event,'delta',0):direction=-1 if event.delta>0 else 1
+        else:return
+        self.page_canvas.yview_scroll(direction*2,'units')
+
+    def _quit_securely(self):
+        if isinstance(self._session_secret,bytearray):
+            for index in range(len(self._session_secret)):
+                self._session_secret[index]=0
+        self._session_secret=None
+        self.destroy()
+
+    def _ask_new_password(self,title='Protect your encryption key'):
+        password=simpledialog.askstring(title,
+            'Choose a strong password (at least 12 characters).\n'
+            'You will need it to unlock Multi Backup on every launch.',
+            show='*',parent=self)
+        if password is None:
+            return None
+        if len(password)<12:
+            messagebox.showerror('Weak password','Use at least 12 characters.')
+            return None
+        again=simpledialog.askstring(title,'Confirm your encryption password:',
+                                     show='*',parent=self)
+        if again!=password:
+            messagebox.showerror('Password mismatch','The two passwords did not match.')
+            return None
+        return password
+
+    def _unlock_password(self,password):
+        clear,recipient=unlock(password)
+        self._session_secret=bytearray(clear)
+        self.recipient.set(recipient)
+        self.key_location.set('Password-protected age vault: '+str(vault_path()))
+
+    def _startup_security(self):
+        if self._startup_completed:
+            return
+        protected=vault_path()
+        legacy=private_key_path()
+        if protected.is_symlink() or legacy.is_symlink():
+            messagebox.showerror('Encryption vault error','Refusing a symlinked encryption key.')
+            self._quit_securely()
+            return
+        if protected.exists():
+            unlocked=False
+            if self.cfg.get('biometric_enabled') and biometric.available():
+                if messagebox.askyesno('Unlock Multi Backup',
+                                       'Use Touch ID to unlock your encrypted key?\n'
+                                       'Choose No to enter your application password.'):
+                    try:
+                        self._unlock_password(biometric.unlock_password())
+                        unlocked=True
+                    except (VaultError,biometric.BiometricError,OSError) as exc:
+                        messagebox.showwarning('Touch ID unavailable',
+                                               'Biometric unlock was not successful. '
+                                               'Your password is still available.\n'+str(exc))
+            if not unlocked:
+                for attempt in range(5):
+                    password=simpledialog.askstring(
+                        'Unlock Multi Backup encryption key',
+                        'Enter the password protecting your age key.\n'
+                        'It will not be requested again until you close the app.',
+                        parent=self,show='*')
+                    if password is None:
+                        self._quit_securely()
+                        return
+                    try:
+                        self._unlock_password(password)
+                        unlocked=True
+                        break
+                    except (VaultError,OSError,ValueError) as exc:
+                        messagebox.showerror('Cannot unlock encryption key',str(exc))
+            if not unlocked:
+                if messagebox.askyesno('Recover encryption key?',
+                    'The vault could not be unlocked.\n\n'
+                    'Do you have a separately password-protected recovery copy? '
+                    'Choose Yes to import it without discarding the previous vault.'):
+                    unlocked=self._recover_at_startup()
+            if not unlocked:
+                messagebox.showerror('Access denied',
+                                     'Encryption key remains locked. No data was changed.')
+                self._quit_securely()
+                return
+        elif legacy.exists():
+            messagebox.showinfo(
+                'Protect your existing age key',
+                'A previous unencrypted age identity was found.\n'
+                'It will be encrypted with a new password without changing the key, '
+                'so your existing backups remain restorable.')
+            password=self._ask_new_password('Protect existing encryption key')
+            if password is None:
+                self._quit_securely()
+                return
+            try:
+                clear,recipient=migrate_legacy(password)
+                self._session_secret=bytearray(clear)
+                self.recipient.set(recipient)
+                self.key_location.set('Password-protected age vault: '+str(protected))
+            except (VaultError,OSError,ValueError) as exc:
+                messagebox.showerror('Cannot protect existing key',
+                                     str(exc)+'\nThe original identity has been preserved.')
+                self._quit_securely()
+                return
+        self._startup_completed=True
+        self._locked=False
+        self._show('Dashboard')
+        self.after(400,self._discover_github_account)
+        if self.cfg.get('auto_update_check'):
+            self.after(1400,self._check_updates)
+            self.after(self.cfg['update_interval_hours']*3600*1000,
+                       self._periodic_update)
+
+    def _recover_at_startup(self):
+        source=filedialog.askopenfilename(title='Encrypted age recovery copy',
+                                          filetypes=[('Age vault','*.agevault'),
+                                                     ('All files','*')])
+        if not source:return False
+        password=simpledialog.askstring('Recovery copy password',
+                'Enter the separate password of this recovery file:',
+                parent=self,show='*')
+        if password is None:return False
+        new_password=self._ask_new_password('Set new local vault password')
+        if new_password is None:return False
+        try:
+            clear,recipient=recover_existing_vault(
+                source,password,new_password)
+            self._session_secret=bytearray(clear)
+            self.recipient.set(recipient)
+            self.key_location.set('Password-protected age vault: '+str(vault_path()))
+            messagebox.showinfo('Recovery successful',
+                'Your age identity is restored. The previous vault was preserved '
+                'as a .previous file. You can decrypt your existing backups.')
+            return True
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Recovery failed',str(exc))
+            return False
+
+    def _prepare_identity(self):
+        if self._session_secret is not None:
+            return False
+        if vault_path().exists():
+            raise VaultError('Encryption key is locked. Restart and unlock the application.')
+        if private_key_path().exists():
+            raise VaultError('A previous key must be protected on application startup.')
+        if not messagebox.askyesno('Generate encryption key?',
+                    'No encryption key exists yet.\n\n'
+                    'Generate a new age key and protect it with a password now?'):
+            raise VaultError('Encryption key creation cancelled')
+        password=self._ask_new_password()
+        if password is None:
+            raise VaultError('Backup cancelled before creating the encryption key')
+        clear,recipient=create_identity(password)
+        self._session_secret=bytearray(clear)
+        self.recipient.set(recipient)
+        self.key_location.set('Password-protected age vault: '+str(vault_path()))
+        return True
+
+    @contextmanager
+    def _identity_file(self):
+        if self._session_secret is None:
+            raise VaultError('Create an encryption key before restoring or browsing backups')
+        with temporary_identity(bytes(self._session_secret)) as path:
+            yield path
+
+    def _ask_current_password(self,reason):
+        password=simpledialog.askstring('Confirm encryption password',
+                                         reason+'\nEnter your app encryption password:',
+                                         parent=self,show='*')
+        if password is None:
+            return None
+        try:
+            clear,_recipient=unlock(password)
+            if self._session_secret is None or clear!=bytes(self._session_secret):
+                raise VaultError('This is not the unlocked session identity')
+            return password
+        except (VaultError,ValueError,OSError) as exc:
+            messagebox.showerror('Password verification failed',str(exc))
+            return None
+
+    def _export_recovery(self):
+        password=self._ask_current_password('Protect a recovery copy in another location.')
+        if password is None:return
+        destination=filedialog.asksaveasfilename(
+            title='Save separately encrypted recovery key',
+            defaultextension='.agevault',
+            initialfile='Multi-Backup-recovery.agevault')
+        if not destination:return
+        backup_password=self._ask_new_password('Choose recovery-copy password')
+        if backup_password is None:return
+        try:
+            exported=export_recovery_copy(password,backup_password,Path(destination))
+            messagebox.showinfo('Recovery copy created',
+                'Encrypted recovery copy saved to:\n'+str(exported)+
+                '\n\nKeep the copy and its password in a separate safe place.')
+        except (VaultError,OSError,ValueError,FileExistsError) as exc:
+            messagebox.showerror('Recovery export failed',str(exc))
+
+    def _import_recovery(self):
+        if vault_path().exists() or private_key_path().exists():
+            messagebox.showwarning('Identity exists',
+                'Import is allowed only when no local encryption identity exists. '
+                'Existing backups must not lose their decryption key.')
+            return
+        source=filedialog.askopenfilename(title='Select encrypted age recovery copy',
+                                          filetypes=[('Age vault files','*.agevault'),('All files','*')])
+        if not source:return
+        old=simpledialog.askstring('Recovery copy password',
+                                  'Enter the password of the saved recovery copy:',
+                                  parent=self,show='*')
+        if old is None:return
+        new=self._ask_new_password('New local encryption password')
+        if new is None:return
+        try:
+            clear,recipient=import_recovery_copy(Path(source),old,new)
+            self._session_secret=bytearray(clear)
+            self.recipient.set(recipient)
+            self.key_location.set('Password-protected age vault: '+str(vault_path()))
+            messagebox.showinfo('Recovery key imported',
+                                'Your previous encryption key is ready to restore existing backups.')
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Cannot import recovery key',str(exc))
+
+    def _change_vault_password(self):
+        if self._session_secret is None:
+            messagebox.showinfo('No encryption key','Create a key with your first backup.')
+            return
+        password=self._ask_current_password('Change the primary vault password.')
+        if password is None:return
+        replacement=self._ask_new_password('New vault password')
+        if replacement is None:return
+        try:
+            change_password(password,replacement)
+            if self.cfg.get('biometric_enabled'):
+                try:biometric.disable()
+                except (biometric.BiometricError,OSError):pass
+                self.cfg['biometric_enabled']=False
+                save_settings(self.cfg)
+            messagebox.showinfo('Password changed',
+                                'New password saved. Enable Touch ID again if desired.')
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Cannot change password',str(exc))
+
+    def _enable_biometrics(self):
+        if self._session_secret is None:
+            messagebox.showwarning('No encryption key','Create or import an age vault first.')
+            return
+        if not biometric.available():
+            messagebox.showwarning('Touch ID unavailable',
+                'Touch ID must be supported and enabled in macOS, and the native '
+                'Keychain helper must be installed. Other platforms use the vault password.')
+            return
+        password=self._ask_current_password('Enable Touch ID for subsequent app launches.')
+        if password is None:return
+        try:
+            if not biometric.enable(password):
+                raise biometric.BiometricError('Touch ID enrollment was not confirmed')
+            self.cfg['biometric_enabled']=True
+            save_settings(self.cfg)
+            messagebox.showinfo('Touch ID enabled',
+                'This Mac can now unlock the age vault with enrolled Touch ID. '
+                'The password remains a recovery option.')
+        except (biometric.BiometricError,OSError,ValueError) as exc:
+            messagebox.showerror('Touch ID enrollment failed',str(exc))
+
+    def _disable_biometrics(self):
+        password=self._ask_current_password('Disable biometric app unlocking.')
+        if password is None:return
+        try:
+            biometric.disable()
+            self.cfg['biometric_enabled']=False
+            save_settings(self.cfg)
+            messagebox.showinfo('Touch ID disabled',
+                                'The vault password is required at the next app launch.')
+        except (biometric.BiometricError,OSError,ValueError) as exc:
+            messagebox.showerror('Cannot disable Touch ID',str(exc))
 
     def _update_ci_hint(self):
         count=self.backup_ci_runs.get().strip() or '?'
@@ -177,11 +496,16 @@ class BackupGUI(tk.Tk):
                            font=('Helvetica',10),fill='#dbeeff',anchor='w')
 
     def _show(self,name):
+        if self._locked or name not in self.pages:
+            return
         for key,page in self.pages.items():
             page.pack_forget()
             self.nav[key].set_active(key==name)
         self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
+        self.page_canvas.yview_moveto(0)
+        self._sync_page_scroll()
         if name=='Archives':self._refresh()
+        if name=='Restore':self._refresh_restore()
 
     def _heading(self,parent,title,sub=''):
         ttk.Label(parent,text=title,style='Title.TLabel').pack(anchor='w',pady=(0,5))
@@ -203,6 +527,7 @@ class BackupGUI(tk.Tk):
         PremiumButton(action,text='Create backup',style='Accent.TButton',command=lambda:self._show('Backup')).pack(side='left')
         PremiumButton(action,text='Browse archives',command=lambda:self._show('Archives')).pack(side='left',padx=14)
         PremiumButton(action,text='Configure plugins',command=lambda:self._show('Plugins')).pack(side='left')
+        PremiumButton(action,text='Restore backup',command=lambda:self._show('Restore')).pack(side='left',padx=12)
         ttk.Label(page,text='Latest update status',style='Sub.TLabel').pack(anchor='w',pady=(38,8))
         ttk.Label(page,textvariable=self.update_status,wraplength=650).pack(anchor='w')
 
@@ -301,13 +626,162 @@ class BackupGUI(tk.Tk):
         self._heading(page,'Archive library','Inspect, extract, checkout or mount encrypted repository snapshots.')
         row=ttk.Frame(page);row.pack(fill='x')
         for name,fn in [('Refresh',self._refresh),('List contents',self._view),('Show file',self._show_member),
-                        ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount)]:
+                        ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount),
+                        ('Restore…',lambda:self._show('Restore'))]:
             PremiumButton(row,text=name,command=fn).pack(side='left',padx=(0,7))
         self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.archives.pack(fill='both',expand=True,pady=(12,5))
         ttk.Label(page,text='Encrypted archive members').pack(anchor='w')
         self.members=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.members.pack(fill='both',expand=True,pady=7)
+
+    def _build_restore(self,page):
+        self._heading(page,'Restore protected backups',
+            'Select an encrypted archive. Only its original backup plugin can restore it.')
+        ttk.Label(page,text='GitHub snapshots restore to a new repository, Dropbox objects '
+                  'to a new file. Local extraction is also supported.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(0,8))
+        row=ttk.Frame(page)
+        row.pack(fill='x',pady=5)
+        PremiumButton(row,text='Refresh backup catalog',
+                      command=self._refresh_restore).pack(side='left',padx=(0,10))
+        PremiumButton(row,text='Browse archives',
+                      command=lambda:self._show('Archives')).pack(side='left')
+        self.restore_list=tk.Listbox(page,height=9,background='white',border=0,
+                                     selectbackground='#1864A8',font=('Courier',10),
+                                     exportselection=False)
+        self.restore_list.pack(fill='x',pady=(8,7))
+        self.restore_list.bind('<<ListboxSelect>>',self._restore_picked)
+        self.restore_summary=tk.StringVar(value='Choose an encrypted backup')
+        ttk.Label(page,textvariable=self.restore_summary,style='Sub.TLabel',
+                  wraplength=720).pack(anchor='w',pady=4)
+        row2=ttk.Frame(page)
+        row2.pack(fill='x',pady=(8,5))
+        ttk.Label(row2,text='Backup plugin').pack(side='left',padx=(0,12))
+        self.restore_plugin=tk.StringVar(value='github')
+        picker=ttk.Combobox(row2,textvariable=self.restore_plugin,
+                           values=('github','dropbox'),width=16,state='readonly')
+        picker.pack(side='left')
+        ttk.Label(row2,text='Restore mode').pack(side='left',padx=(24,12))
+        self.restore_mode=tk.StringVar(value='Local extraction')
+        options=ttk.Combobox(row2,textvariable=self.restore_mode,
+                             values=('Local extraction','Restore to provider'),
+                             state='readonly',width=21)
+        options.pack(side='left')
+        self.restore_destination=tk.StringVar()
+        self._line(page,'Restore destination',self.restore_destination)
+        ttk.Label(page,text='Local: new directory path. GitHub remote: account/new-repo '
+                  '(must not exist). Dropbox remote: /new/path/file (must not exist). '
+                  'Your provider authentication will be checked at restore time.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(5,10))
+        PremiumButton(page,text='Restore selected backup',
+                      style='Accent.TButton',command=self._restore_now).pack(
+                      anchor='w',pady=(3,8))
+        ttk.Label(page,text='Remote restore never overwrites an existing target. '
+                  'GitHub account settings and CI history are available for local '
+                  'recovery but are not automatically recreated on GitHub.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(8,0))
+        self.restore_index=[]
+
+    def _refresh_restore(self):
+        try:
+            self.restore_index=catalog(Path(self.root_dir.get()))
+            selected=self.restore_list.curselection()
+            self.restore_list.delete(0,'end')
+            for item in self.restore_index:
+                origin='Dropbox' if item['kind'].startswith('dropbox') else 'GitHub'
+                self.restore_list.insert('end',origin+' · '+item['relative'])
+            self.restore_summary.set(str(len(self.restore_index))+' encrypted backups available')
+            if selected and selected[0]<len(self.restore_index):
+                self.restore_list.selection_set(selected[0])
+        except (OSError,ValueError,RuntimeError) as exc:
+            messagebox.showerror('Cannot read backup catalog',str(exc))
+
+    def _restore_picked(self,_event=None):
+        selected=self.restore_list.curselection()
+        if not selected or selected[0]>=len(self.restore_index):
+            return
+        archive=self.restore_index[selected[0]]
+        try:
+            plugin=restore_provider(Path(archive['path']),Path(self.root_dir.get()))
+            self.restore_plugin.set(plugin)
+            self.restore_summary.set('Original plugin: '+plugin+
+                                     ' · '+archive['relative'])
+        except RestoreError as exc:
+            self.restore_summary.set('Cannot restore: '+str(exc))
+
+    def _restore_now(self):
+        if self._locked or self._session_secret is None:
+            messagebox.showwarning('Encryption key required',
+                                   'Unlock the password-protected key before restoring.')
+            return
+        selection=self.restore_list.curselection()
+        if not selection or selection[0]>=len(self.restore_index):
+            messagebox.showwarning('Select backup','Choose an encrypted backup first.')
+            return
+        selected=self.restore_index[selection[0]]
+        archive=Path(selected['path'])
+        plugin=self.restore_plugin.get()
+        root=Path(self.root_dir.get())
+        try:
+            validate_plugin(archive,root,plugin)
+        except RestoreError as exc:
+            messagebox.showerror('Incompatible restore plugin',str(exc))
+            return
+        mode=self.restore_mode.get()
+        destination=self.restore_destination.get().strip()
+        if mode=='Local extraction' and not destination:
+            parent=filedialog.askdirectory(title='Choose parent folder for a new restore directory')
+            if not parent:return
+            destination=str(Path(parent)/('Multi-Backup-Restore-'+
+                               str(int(__import__('time').time()))))
+            self.restore_destination.set(destination)
+        if not destination:
+            messagebox.showwarning('Destination required',
+                                   'Provide a destination before restoring.')
+            return
+        if mode=='Restore to provider':
+            action=('Create a NEW GitHub repository '+destination if plugin=='github'
+                    else 'Upload a NEW Dropbox file '+destination)
+            note='Remote restore will not overwrite an existing destination. '
+            if plugin=='github' and selected['kind']!='git':
+                messagebox.showerror('Unsupported remote restore',
+                    'Select a Git mirror for GitHub remote restoration. '
+                    'CI, account settings and metadata can be restored locally.')
+                return
+            if plugin=='dropbox' and selected['kind']!='dropbox':
+                messagebox.showerror('Unsupported remote restore',
+                    'Select an individual Dropbox object for remote file restoration.')
+                return
+        elif mode=='Local extraction':
+            action='Extract encrypted '+plugin+' backup to '+destination
+            note='An existing folder will never be overwritten. '
+        else:
+            messagebox.showerror('Invalid restore mode','Choose a supported restore mode.')
+            return
+        if not messagebox.askyesno('Confirm restore',
+                                   action+'?\n\n'+note+
+                                   'The original encrypted backup will remain unchanged.'):
+            return
+        token=None
+        if mode=='Restore to provider' and plugin=='dropbox':
+            token=simpledialog.askstring(
+                'Dropbox restore credentials',
+                'Enter a Dropbox access token with files.content.write permission. '
+                'It is used only for this restore and is not saved.',
+                parent=self,show='*')
+            if token is None:return
+        def work():
+            with self._identity_file() as identity:
+                if mode=='Local extraction':
+                    return restore_local(archive,root,plugin,identity,Path(destination))
+                if plugin=='github':
+                    return restore_github_new_repository(
+                        archive,root,identity,destination)
+                return restore_dropbox_new_file(
+                    archive,root,identity,destination,token)
+        self.status.set('Restoring encrypted backup…')
+        self._background(work)
 
     def _build_plugins(self,page):
         self._heading(page,'Backup engines','Each provider is an independent plugin with its own capabilities.')
@@ -331,87 +805,75 @@ class BackupGUI(tk.Tk):
         except Exception as exc:messagebox.showerror('Plugin error',str(exc))
 
     def _build_encryption(self,page):
-        self._heading(page,'Local encryption keys',
-                      'Encryption is automatic. Save your private recovery key separately.')
-        ttk.Label(page,text='Your age private key stays on this computer, outside the backup '
-                  'directory. It is needed to restore encrypted files.',
-                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(0,8))
+        self._heading(page,'Protected encryption key',
+                      'Unlock once per app session; back up your private key separately.')
+        ttk.Label(page,text='Your age private identity is encrypted with your password '
+                  'and stored outside Multi Backup.app. Updates preserve it.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(1,10))
         ttk.Label(page,textvariable=self.key_location,style='Sub.TLabel',
-                  wraplength=710).pack(anchor='w',pady=(3,12))
-        PremiumButton(page,text='Locate private recovery key',
-                      command=self._reveal_key).pack(anchor='w',pady=(0,15))
+                  wraplength=710).pack(anchor='w',pady=(1,10))
         row=ttk.Frame(page)
-        row.pack(fill='x',pady=6)
-        PremiumButton(row,text='Generate another key',style='Accent.TButton',
-                      command=self._generate_key).pack(side='left')
-        PremiumButton(row,text='Show public recipient',
-                      command=self._public_key).pack(side='left',padx=9)
-        PremiumButton(row,text='Choose existing key',
-                      command=self._choose_key).pack(side='left')
-        self.key_info=tk.Text(page,height=8,wrap='word',background='white',
+        row.pack(fill='x',pady=7)
+        PremiumButton(row,text='Create encryption key',style='Accent.TButton',
+                      command=self._create_from_encryption_page).pack(side='left',padx=(0,10))
+        PremiumButton(row,text='Locate encrypted vault',
+                      command=self._reveal_key).pack(side='left')
+        row2=ttk.Frame(page)
+        row2.pack(fill='x',pady=7)
+        PremiumButton(row2,text='Save encrypted recovery copy',
+                      command=self._export_recovery,
+                      style='Accent.TButton').pack(side='left',padx=(0,10))
+        PremiumButton(row2,text='Import recovery copy',
+                      command=self._import_recovery).pack(side='left')
+        row3=ttk.Frame(page)
+        row3.pack(fill='x',pady=7)
+        PremiumButton(row3,text='Change vault password',
+                      command=self._change_vault_password).pack(side='left',padx=(0,10))
+        PremiumButton(row3,text='Show public recipient',
+                      command=self._public_key).pack(side='left')
+        ttk.Label(page,text='Touch ID (macOS): available after a password unlock '
+                  'and explicit opt-in. Enrollment uses the macOS Keychain '
+                  'and current biometric set.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=(19,5))
+        row4=ttk.Frame(page)
+        row4.pack(fill='x',pady=7)
+        PremiumButton(row4,text='Enable Touch ID',
+                      command=self._enable_biometrics).pack(side='left',padx=(0,10))
+        PremiumButton(row4,text='Disable Touch ID',
+                      command=self._disable_biometrics).pack(side='left')
+        self.key_info=tk.Text(page,height=5,wrap='word',background='#FFFFFF',
                               relief='flat',font=('Courier',10))
-        self.key_info.pack(fill='x',pady=12)
-        ttk.Label(page,text='Never share the private identity with a third party or '
-                  'keep its only copy alongside the backup ciphertext.',
-                  style='Sub.TLabel',wraplength=700).pack(anchor='w',pady=8)
+        self.key_info.pack(fill='x',pady=14)
+        ttk.Label(page,text='Save the recovery copy to another location, protected by '
+                  'a separate password. Without the key or its recovery copy, '
+                  'encrypted backups cannot be decrypted.',
+                  style='Sub.TLabel',wraplength=710).pack(anchor='w',pady=7)
 
-    def _load_existing_identity(self):
-        path=private_key_path()
-        self.key_location.set('Private recovery key: '+str(path))
-        if path.is_file() or path.is_symlink():
-            try:
-                public=recipient_for_identity(path)
-                self.identity.set(str(path))
-                self.recipient.set(public)
-            except (OSError,ValueError,RuntimeError) as exc:
-                self.key_location.set('Recovery key unavailable: '+str(exc))
-
-    def _prepare_identity(self):
-        if self.identity.get().strip():
-            path=Path(self.identity.get()).expanduser()
-            self.recipient.set(recipient_for_identity(path))
-            self.key_location.set('Private recovery key: '+str(path))
-            return False
-        info=ensure_default_identity()
-        self.identity.set(info['private_key_file'])
-        self.recipient.set(info['public_recipient'])
-        self.key_location.set('Private recovery key: '+info['private_key_file'])
-        return info['created']
-
-    def _generate_key(self):
-        name=simpledialog.askstring('Key name','New key name (letters, digits, hyphen):',parent=self)
-        if not name:return
+    def _create_from_encryption_page(self):
+        if self._session_secret is not None:
+            messagebox.showinfo('Encryption key ready',
+                                'Your current age key is already unlocked for this session.')
+            return
         try:
-            from key_management import generate_key
-            info=generate_key(name)
-            self.identity.set(info['private_key_file'])
-            self.recipient.set(info['public_recipient'])
-            self.key_location.set('Private recovery key: '+info['private_key_file'])
-            self.key_info.insert('end','Generated key at '+info['private_key_file']+'\n')
-        except Exception as exc:
-            messagebox.showerror('Key generation failed',str(exc))
-
-    def _choose_key(self):
-        path=filedialog.askopenfilename(title='Choose an existing age private key')
-        if not path:return
-        try:
-            self.recipient.set(recipient_for_identity(Path(path)))
-            self.identity.set(path)
-            self.key_location.set('Private recovery key: '+path)
-        except Exception as exc:
-            messagebox.showerror('Invalid private key',str(exc))
+            if self._prepare_identity():
+                messagebox.showinfo('Encryption key created',
+                    'Your age key is password-protected at:\n'+str(vault_path())+
+                    '\n\nCreate an independently encrypted recovery copy before '
+                    'relying on it for important backups.')
+        except (VaultError,OSError,ValueError) as exc:
+            messagebox.showerror('Key creation cancelled or failed',str(exc))
 
     def _reveal_key(self):
-        path=Path(self.identity.get()) if self.identity.get() else private_key_path()
+        path=vault_path()
         if not path.is_file():
-            messagebox.showinfo('Recovery key',
-                                'The key is generated when you start your first backup.\n'
-                                'Expected location:\n'+str(path))
+            messagebox.showinfo('Protected vault',
+                'The encrypted vault will be created on the first backup.\n'
+                'Expected location:\n'+str(path))
             return
-        messagebox.showinfo('Protect your recovery key',
-                            'Private age identity:\n'+str(path)+
-                            '\n\nSave a separate secure/offline copy. '
-                            'Anyone with this file can decrypt your backups.')
+        messagebox.showinfo('Password-protected vault',
+            'Your protected vault is saved outside the application at:\n'+str(path)+
+            '\n\nIt is not your plaintext private key. '
+            'Use Save encrypted recovery copy to create another protected backup.')
         if sys.platform=='darwin':
             try:subprocess.Popen(['open','-R',str(path)])
             except OSError:pass
@@ -420,13 +882,12 @@ class BackupGUI(tk.Tk):
             except OSError:pass
 
     def _public_key(self):
-        try:
-            path=Path(self.identity.get()) if self.identity.get() else private_key_path()
-            public=recipient_for_identity(path)
-            self.recipient.set(public)
-            self.key_info.insert('end','Public recipient: '+public+'\n')
-        except Exception as exc:
-            messagebox.showerror('Identity error',str(exc))
+        if self._session_secret is None:
+            messagebox.showwarning('No encryption key',
+                                   'Create and unlock the age identity first.')
+            return
+        self.key_info.insert('end','Public recipient: '+self.recipient.get()+'\n')
+        self.key_info.see('end')
 
     def _discover_github_account(self,force=False):
         def work():
@@ -469,7 +930,7 @@ class BackupGUI(tk.Tk):
                                 'The connected account must match the GitHub username.')
 
     def _build_updates(self,page):
-        self._heading(page,'Native application updates','Discover signed release channels; download only when SHA-256 is available.')
+        self._heading(page,'Application updates','Check stable and early-release packages using trusted TLS and SHA-256.')
         row=ttk.Frame(page);row.pack(anchor='w',pady=16)
         ttk.Label(row,text='Release channel').pack(side='left',padx=(0,12))
         combo=ttk.Combobox(row,textvariable=self.update_channel,values=('stable','early-release'),width=22,state='readonly')
@@ -558,10 +1019,11 @@ class BackupGUI(tk.Tk):
             return
         if created:
             messagebox.showwarning(
-                'Protect your recovery key',
-                'Your private age key was generated automatically at:\n\n'+
-                self.identity.get()+'\n\nKeep a separate secure copy. Without this '
-                'file, encrypted backups cannot be restored.')
+                'Make an encrypted recovery copy',
+                'Your protected age identity is saved at:\n\n'+str(vault_path())+
+                '\n\nOpen Encryption → Save encrypted recovery copy and store it '
+                'in a separate location. Without this vault or its recovery copy '
+                'you cannot decrypt your backups.')
         args=self._cli()+['backup','--backend',backend,
                           '--output-dir',self.root_dir.get(),
                           '--max-runs-per-repo',self.backup_ci_runs.get(),
@@ -569,12 +1031,22 @@ class BackupGUI(tk.Tk):
                           '--metadata-workers',self.workers.get(),
                           '--recipient',self.recipient.get(),
                           '--json-progress']
-        if self.identity.get():args+=['--identity',self.identity.get()]
+        # The public recipient is enough to encrypt new backups. Never give
+        # the CLI a persistent plaintext private identity path.
         if backend=='github':
             args+=['--github-user',chosen]
             if self.cleanup.get():
-                args+=['--cleanup-ci-artifacts']
-                if self.dryrun.get():args+=['--cleanup-ci-dry-run']
+                if not messagebox.askyesno(
+                        'Confirm optional CI cleanup',
+                        'Run the optional GitHub Actions artifact cleanup AFTER '
+                        'the backup succeeds?\n\nThis may permanently delete '
+                        'eligible artifacts from GitHub. Select No to back up '
+                        'without cleanup.'):
+                    self.cleanup.set(False)
+                    self._save_preferences()
+                else:
+                    args+=['--cleanup-ci-artifacts']
+                    if self.dryrun.get():args+=['--cleanup-ci-dry-run']
             if self.skiplogs.get():args+=['--skip-ci-logs']
             if self.restart.get():args+=['--restart']
         elif self.dropbox_path.get():
@@ -630,6 +1102,10 @@ class BackupGUI(tk.Tk):
                     self.github_status.set('Connected to GitHub as '+login)
                 elif kind=='github-error':
                     self.github_status.set('GitHub not connected: '+str(payload))
+                elif kind=='operation-result':
+                    self._log(payload)
+                    if hasattr(self,'restore_summary'):
+                        self.restore_summary.set(payload)
                 elif kind=='update':
                     self.update_status.set(payload)
                 else:self._log(payload)
@@ -647,20 +1123,23 @@ class BackupGUI(tk.Tk):
     def _selected(self):
         sel=self.archives.curselection()
         if not sel:messagebox.showinfo('Select archive','Choose an archive first.');return None
-        if not self.identity.get():messagebox.showwarning('Key required','Select the age private identity in the Backup page.');return None
+        if self._session_secret is None:
+            messagebox.showwarning('Key required','Create or unlock your password-protected age identity.')
+            return None
         return Path(self.archive_index[sel[0]]['path'])
 
     def _background(self,fn):
         def work():
-            try:self.events.put(('out',str(fn())))
-            except Exception as exc:self.events.put(('out','ERROR: '+str(exc)))
+            try:self.events.put(('operation-result',str(fn())))
+            except Exception as exc:self.events.put(('operation-result','ERROR: '+str(exc)))
         threading.Thread(target=work,daemon=True).start()
 
     def _view(self):
         a=self._selected()
         if a:
             try:
-                values=list_members(a,Path(self.identity.get()))
+                with self._identity_file() as identity:
+                    values=list_members(a,identity)
                 self.members.delete(0,'end')
                 for item in values:self.members.insert('end',item['path'])
                 self.selected_archive=a
@@ -670,7 +1149,9 @@ class BackupGUI(tk.Tk):
         if not self.selected_archive or not self.members.curselection():
             messagebox.showinfo('Select file','Select an archive member first');return
         name=self.members.get(self.members.curselection()[0])
-        try:content=read_member(self.selected_archive,Path(self.identity.get()),name)
+        try:
+            with self._identity_file() as identity:
+                content=read_member(self.selected_archive,identity,name)
         except Exception as exc:messagebox.showerror('Archive error',str(exc));return
         view=tk.Toplevel(self);view.title(name);view.geometry('900x600')
         body=tk.Text(view,wrap='none');body.pack(fill='both',expand=True)
@@ -680,19 +1161,31 @@ class BackupGUI(tk.Tk):
         a=self._selected()
         if a:
             dst=filedialog.askdirectory(title='Extract into private directory')
-            if dst:self._background(lambda:extract_archive(a,Path(self.identity.get()),Path(dst)))
+            if dst:
+                def work():
+                    with self._identity_file() as identity:
+                        return extract_archive(a,identity,Path(dst))
+                self._background(work)
 
     def _checkout(self):
         a=self._selected()
         if a:
             dst=filedialog.asksaveasfilename(title='Create new Git checkout directory')
-            if dst:self._background(lambda:checkout_git(a,Path(self.identity.get()),Path(dst)))
+            if dst:
+                def work():
+                    with self._identity_file() as identity:
+                        return checkout_git(a,identity,Path(dst))
+                self._background(work)
 
     def _mount(self):
         a=self._selected()
         if not a:return
         point=simpledialog.askstring('Mount archive','Select mountpoint (Windows: unused drive letter such as X:)',parent=self)
-        if point:self._background(lambda:mount_archive(a,Path(self.identity.get()),point,Path(self.root_dir.get())/'.state'))
+        if point:
+            def work():
+                with self._identity_file() as identity:
+                    return mount_archive(a,identity,point,Path(self.root_dir.get())/'.state')
+            self._background(work)
 
     def _check_updates(self):
         def work():

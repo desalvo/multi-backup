@@ -118,7 +118,9 @@ def extract_archive(path: Path, identity: Path, destination: Path, *, max_member
 def catalog(root: Path):
     result = []
     for kind, folder in [('git', root / 'repositories'), ('metadata', root / 'metadata'),
-                         ('legacy', root / '_metadata')]:
+                         ('legacy', root / '_metadata'),
+                         ('dropbox', root / 'dropbox' / 'objects'),
+                         ('dropbox-manifest', root / 'dropbox' / 'manifests')]:
         if not folder.is_dir(): continue
         for path in sorted(folder.rglob('*.tar.gz.age'), key=lambda p: p.stat().st_mtime, reverse=True):
             if path.is_symlink(): continue

@@ -18,6 +18,7 @@ DEFAULTS = {
     'keep_ci_runs': 5,
     'cleanup_ci_artifacts': False,
     'github_cleanup_dry_run': True,
+    'biometric_enabled': False,
     'default_recipient': '',
 }
 
@@ -43,6 +44,8 @@ def load_settings(path: Path | None = None) -> dict:
             raise ValueError('Invalid configuration format')
     result = dict(DEFAULTS)
     result.update({k: v for k,v in obj.items() if k in DEFAULTS})
+    if type(result['biometric_enabled']) is not bool:
+        raise ValueError('Invalid biometric setting')
     if result['update_channel'] not in ('stable','early-release'):
         raise ValueError('Invalid update channel')
     if not isinstance(result['enabled_backends'], list) or not all(

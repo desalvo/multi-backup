@@ -41,6 +41,7 @@ NAV_ITEMS = (
     ('Dashboard', 'dashboard'),
     ('Backup', 'backup'),
     ('Archives', 'archives'),
+    ('Restore', 'restore'),
     ('Plugins', 'plugins'),
     ('Encryption', 'encryption'),
     ('Updates', 'updates'),
@@ -134,6 +135,12 @@ class SidebarNavItem(tk.Canvas):
                                       outline=colour, width=1.5)
                 self.create_oval(x+4, y+offset-0.8, x+5.6, y+offset+0.8,
                                  fill=colour, outline=colour)
+        elif kind == 'restore':
+            self.create_arc(x-9, y-9, x+9, y+9, start=190, extent=285,
+                            style=tk.ARC, outline=colour, width=2)
+            line(x-7, y+7, x-10, y+1, x-3, y)
+            line(x, y-8, x, y+4)
+            line(x-5, y, x, y+5, x+5, y)
         elif kind == 'plugins':
             line(x-7, y-5, x+5, y+1)
             line(x-7, y+6, x+5, y+1)

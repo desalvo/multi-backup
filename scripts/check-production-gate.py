@@ -80,6 +80,30 @@ def validate():
                  'docs/brochures/Multi-Backup-Brochure-IT.pdf',
                  'docs/brochures/Multi-Backup-Brochure-EN.pdf'):
         assert (ROOT/name).is_file() and (ROOT/name).stat().st_size,f'Missing release file: {name}'
+    requirements=(ROOT/'requirements.txt').read_text('utf-8')
+    assert 'cryptography>=50.0.0' in requirements, 'Unsupported vulnerable encryption dependency'
+    assert 'certifi>=' in requirements, 'Portable CA trust roots must be shipped'
+    vault=(ROOT/'secure_vault.py').read_text('utf-8')
+    for token in ('hashlib.scrypt','AESGCM','migrate_legacy','export_recovery_copy',
+                  'temporary_identity','biometry'):
+        if token!='biometry':
+            assert token in vault,'Protected vault missing '+token
+    updater=(ROOT/'updater.py').read_text('utf-8')
+    assert 'certifi.where()' in updater and 'ssl.create_default_context' in updater
+    assert 'CERT_NONE' not in updater and 'unverified_context' not in updater
+    restore=(ROOT/'restore_ops.py').read_text('utf-8')
+    for token in ('validate_plugin','restore_github_new_repository','restore_dropbox_new_file',
+                  'strict_conflict','upload_session/finish','RefuseRedirect'):
+        assert token in restore,'Restore safety check missing '+token
+    shell=(ROOT/'gui.py').read_text('utf-8')
+    assert 'self.after(35,self._startup_security)' in shell
+    assert 'Save encrypted recovery copy' in shell
+    assert 'self._locked' in shell and "self.page_canvas" in shell
+    assert 'Restore' in (ROOT/'sidebar_nav.py').read_text('utf-8')
+    assert 'packaging/macos/biometric.swift' in build_macos
+    native_helper=(ROOT/'packaging/macos/biometric.swift').read_text('utf-8')
+    assert 'biometryCurrentSet' in native_helper and 'WhenUnlockedThisDeviceOnly' in native_helper
+    assert '--gui-smoke' in (ROOT/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
     print('Production Gate policy: PASS')
 
 if __name__=='__main__':

@@ -65,7 +65,7 @@ class PluginTests(unittest.TestCase):
         from sidebar_nav import (NAV_ITEMS,NAV_TEXT,NAV_NORMAL,NAV_HOVER,
                                  NAV_ACTIVE,SidebarNavItem,contrast_ratio)
         self.assertEqual([name for name,_ in NAV_ITEMS],
-                         ['Dashboard','Backup','Archives','Plugins',
+                         ['Dashboard','Backup','Archives','Restore','Plugins',
                           'Encryption','Updates','Settings'])
         for background in (NAV_NORMAL,NAV_HOVER,NAV_ACTIVE):
             self.assertGreaterEqual(contrast_ratio(NAV_TEXT,background),7.0)
@@ -179,6 +179,11 @@ class PluginTests(unittest.TestCase):
         self.assertIn('self.sidebar.pack_forget()',gui)
         self.assertIn("self.progress.set_percent(",gui)
         self.assertIn('self._prepare_identity()',gui)
+        self.assertIn('self.after(35,self._startup_security)',gui)
+        self.assertIn('self._export_recovery',gui)
+        self.assertIn('self._enable_biometrics',gui)
+        self.assertIn('self._build_restore',gui)
+        self.assertIn('restore_github_new_repository',gui)
 
     def test_mac_early_release_uses_clean_file_names_without_bypassing_stable(self):
         root=Path(__file__).resolve().parents[1]
@@ -190,6 +195,176 @@ class PluginTests(unittest.TestCase):
         self.assertIn('multi-backup-macos-arm64-test.dmg',native)
         self.assertIn("gh release edit",native)
         self.assertIn("--prerelease --title 'Multi Backup - Early Release'",native)
+
+    def test_age_vault_encrypts_identity_and_produces_independent_recovery(self):
+        from secure_vault import (seal_identity,open_identity,export_recovery_copy,
+                                  load_vault,_write_vault,change_password,VaultError)
+        private=b'# test identity\nAGE-SECRET-KEY-'+b'A'*24+b'\n'
+        public='age1'+'q'*50
+        encoded=seal_identity(private,'super-secret-password-123',public)
+        self.assertNotIn(private,repr(encoded).encode())
+        self.assertEqual(open_identity(encoded,'super-secret-password-123'),(private,public))
+        with self.assertRaises(VaultError):
+            open_identity(encoded,'wrong-password')
+        with tempfile.TemporaryDirectory() as directory:
+            primary=Path(directory)/'default.agevault'
+            recovery=Path(directory)/'recovery.agevault'
+            _write_vault(primary,encoded)
+            if os.name!='nt':self.assertEqual(primary.stat().st_mode&0o077,0)
+            self.assertEqual(export_recovery_copy('super-secret-password-123',
+                'backup-password-987654',recovery,primary),recovery)
+            self.assertEqual(open_identity(load_vault(recovery),'backup-password-987654'),
+                             (private,public))
+            with self.assertRaises(FileExistsError):
+                export_recovery_copy('super-secret-password-123',
+                    'backup-password-987654',recovery,primary)
+            change_password('super-secret-password-123','changed-password-12345',primary)
+            with self.assertRaises(VaultError):
+                open_identity(load_vault(primary),'super-secret-password-123')
+            self.assertEqual(open_identity(load_vault(primary),'changed-password-12345'),
+                             (private,public))
+
+    def test_age_vault_creates_identity_without_plaintext_key_file(self):
+        from secure_vault import create_identity,VaultError,unlock
+        private=b'# age-keygen fixture\nAGE-SECRET-KEY-'+b'A'*24+b'\n'
+        public='age1'+'q'*50
+        def fake_keygen(argv,**kwargs):
+            if argv==['age-keygen']:
+                return mock.Mock(returncode=0,stdout=private)
+            if argv==['age-keygen','-y']:
+                self.assertEqual(kwargs['input'],private)
+                return mock.Mock(returncode=0,stdout=(public+'\n').encode())
+            raise AssertionError(argv)
+        with tempfile.TemporaryDirectory() as directory:
+            file=Path(directory)/'keys'/'default.agevault'
+            with mock.patch('secure_vault.subprocess.run',side_effect=fake_keygen):
+                self.assertEqual(create_identity('strong-passphrase-12345',file),
+                                 (private,public))
+            self.assertEqual(unlock('strong-passphrase-12345',file),(private,public))
+            self.assertFalse((file.parent/'default.txt').exists())
+            with self.assertRaises(VaultError):
+                create_identity('strong-passphrase-12345',file)
+
+    def test_encrypted_recovery_preserves_previous_vault_and_checks_recipient(self):
+        from secure_vault import (seal_identity,_write_vault,unlock,
+                                  recover_existing_vault,VaultError)
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d)
+            target=base/'default.agevault'
+            rescue=base/'rescue.agevault'
+            secret=b'AGE-SECRET-KEY-'+b'A'*24+b'\n'
+            pub='age1'+'q'*50
+            _write_vault(target,seal_identity(secret,'old-vault-password-123',pub))
+            _write_vault(rescue,seal_identity(secret,'recovery-password-456',pub))
+            self.assertEqual(recover_existing_vault(
+                rescue,'recovery-password-456','new-vault-password-789',target),(secret,pub))
+            self.assertEqual(unlock('new-vault-password-789',target),(secret,pub))
+            self.assertEqual(unlock('old-vault-password-123',
+                             target.with_name(target.name+'.previous')),(secret,pub))
+            with self.assertRaises(VaultError):
+                recover_existing_vault(rescue,'recovery-password-456',
+                                       'another-password-987',target)
+            wrong=base/'wrong.agevault'
+            _write_vault(wrong,seal_identity(secret,'other-vault-password-456',
+                                              'age1'+'p'*50))
+            with self.assertRaises(VaultError):
+                recover_existing_vault(wrong,'other-vault-password-456',
+                                       'new-password-987654',target)
+
+    def test_restores_are_strictly_bound_to_original_plugin(self):
+        from restore_ops import restore_provider,validate_plugin,RestoreError,restore_local
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            gh=root/'repositories'/'a'/'b'/'git'/'backup.tar.gz.age'
+            db=root/'dropbox'/'objects'/'ab'/'object.tar.gz.age'
+            gh.parent.mkdir(parents=True);db.parent.mkdir(parents=True)
+            gh.write_bytes(b'ciphertext');db.write_bytes(b'ciphertext')
+            self.assertEqual(restore_provider(gh,root),'github')
+            self.assertEqual(restore_provider(db,root),'dropbox')
+            for file,wrong in ((gh,'dropbox'),(db,'github')):
+                with self.assertRaises(RestoreError):
+                    validate_plugin(file,root,wrong)
+            old=root/'existing';old.mkdir()
+            with self.assertRaises(RestoreError):
+                restore_local(gh,root,'github',root/'identity',old)
+
+    def test_https_update_uses_verified_embedded_certificates(self):
+        import ssl
+        from updater import _get_json,_verified_https_context
+        ctx=_verified_https_context()
+        self.assertTrue(ctx.check_hostname)
+        self.assertEqual(ctx.verify_mode,ssl.CERT_REQUIRED)
+        class Response:
+            def __enter__(self):return self
+            def __exit__(self,*a):return False
+            def read(self,n):return b'{"tag_name":"early-release","assets":[]}'
+        with mock.patch('updater.urllib.request.urlopen',return_value=Response()) as opened:
+            self.assertEqual(_get_json(release_endpoint('early-release'))['tag_name'],
+                             'early-release')
+        assert opened.call_args.kwargs['context'].check_hostname
+        self.assertEqual(opened.call_args.kwargs['context'].verify_mode,ssl.CERT_REQUIRED)
+
+    def test_age_vault_legacy_migration_and_import_preserve_identity(self):
+        from secure_vault import (migrate_legacy,unlock,export_recovery_copy,
+                                  import_recovery_copy,VaultError)
+        secret=b'# legacy age identity\nAGE-SECRET-KEY-'+b'A'*24+b'\n'
+        recipient='age1'+'q'*50
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)/'keys'
+            root.mkdir(mode=0o700)
+            plaintext=root/'default.txt'
+            plaintext.write_bytes(secret)
+            if os.name!='nt':plaintext.chmod(0o600)
+            vault=root/'default.agevault'
+            with mock.patch('secure_vault.subprocess.run',
+                            return_value=mock.Mock(returncode=0,
+                                stdout=(recipient+'\n').encode())):
+                clear,public=migrate_legacy('strong-migration-password',vault)
+            self.assertEqual((clear,public),(secret,recipient))
+            self.assertFalse(plaintext.exists())
+            self.assertEqual(unlock('strong-migration-password',vault),
+                             (secret,recipient))
+            recovery=Path(directory)/'saved.agevault'
+            export_recovery_copy('strong-migration-password',
+                                 'separate-backup-password',recovery,vault)
+            with self.assertRaises(VaultError):
+                import_recovery_copy(recovery,'separate-backup-password',
+                                     'fresh-local-password',vault)
+            vault.unlink()
+            imported=import_recovery_copy(recovery,'separate-backup-password',
+                                          'fresh-local-password',vault)
+            self.assertEqual(imported,(secret,recipient))
+            self.assertEqual(unlock('fresh-local-password',vault),(secret,recipient))
+
+    def test_large_dropbox_restore_uses_bounded_upload_sessions(self):
+        from restore_ops import restore_dropbox_new_file
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            archive=root/'dropbox'/'objects'/'cc'/'object.tar.gz.age'
+            archive.parent.mkdir(parents=True)
+            archive.write_bytes(b'ciphertext')
+            endpoints=[]
+            def fake_extract(source,identity,destination):
+                file=destination/'multi-backup'/'dropbox'/'payload'
+                file.parent.mkdir(parents=True)
+                with file.open('wb') as stream:stream.truncate(17*1024*1024)
+                return destination
+            def fake_upload(endpoint,token,argument,bytesdata,*,required='id'):
+                self.assertEqual(token,'temporary-write-token-123')
+                self.assertLessEqual(len(bytesdata),8*1024*1024)
+                endpoints.append(endpoint)
+                return {'session_id':'session-abc'} if endpoint.endswith('start') else (
+                    {'id':'id:restored'} if endpoint.endswith('finish') else {})
+            with mock.patch('restore_ops.extract_archive',side_effect=fake_extract), \
+                 mock.patch('restore_ops._dropbox_upload',side_effect=fake_upload), \
+                 mock.patch('restore_ops.DIRECT_UPLOAD_LIMIT',1024):
+                result=restore_dropbox_new_file(
+                    archive,root,root/'identity','/new/restore.bin',
+                    'temporary-write-token-123')
+            self.assertEqual(result['id'],'id:restored')
+            self.assertEqual(endpoints,['upload_session/start',
+                                        'upload_session/append_v2',
+                                        'upload_session/finish'])
 
     def test_dropbox_keys_are_stable_and_revision_sensitive(self):
         a={'.tag':'file','id':'id:aaa','rev':'ab12'}
@@ -298,8 +473,10 @@ class PluginTests(unittest.TestCase):
         native = (root/'.github/workflows/build-native.yml').read_text('utf-8')
         security = (root/'.github/workflows/ci.yml').read_text('utf-8')
         self.assertIn('Pillow>=13.0.0,<14', requirements)
+        self.assertIn('certifi>=', requirements)
+        self.assertIn('cryptography>=', requirements)
         self.assertIn('Pillow>=13.0.0,<14', documentation_requirements)
-        self.assertEqual(native.count("'Pillow>=13.0.0,<14'"), 2)
+        self.assertEqual(native.count(' -r requirements.txt'),2)
         self.assertIn('python -m pip install -r requirements.txt', (root/'scripts/build-macos-app.sh').read_text('utf-8'))
         self.assertNotIn('Pillow>=10', native)
         self.assertNotIn('Pillow>=10', requirements)
@@ -338,6 +515,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn('Contents/Resources/bin',build)
         self.assertIn('MAC_UNSIGNED_SMOKE',build)
         self.assertIn('SIGN_ARGS',build)
+        self.assertIn('packaging/macos/biometric.swift',build)
+        self.assertIn('multi-backup-biometric',build)
         packager=(root/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
         self.assertIn('Signature=adhoc',packager)
         self.assertIn('hdiutil attach',packager)

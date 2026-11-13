@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r012-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r013-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -126,10 +126,28 @@ The desktop sidebar uses a high-contrast dark-navy design with clean rounded nav
 
 The desktop app now defaults to just **Backup destination** (the folder where encrypted archives are stored) and **GitHub username**. A one-time GitHub authorization is still necessary for private repositories: use **Connect GitHub account** to run `gh auth login` securely, then **Detect** to fill the name of the authenticated account. The app never stores GitHub access tokens in its settings. The selected account must match the signed-in login; other owners' repositories are not silently included.
 
-**No staging or encryption configuration is required.** Staging is managed automatically inside the selected destination. On the first run the application creates an age X25519 key at the operating-system application-config location (macOS: `~/Library/Application Support/multi-backup/keys/default.txt`) with private permissions; thereafter it reuses that key, without overwriting it. The public recipient is derived from the key automatically. Use **Encryption → Locate private recovery key** to see/reveal its location. Back up this private identity separately and securely: without it encrypted archives cannot be restored. If the destination is not on an encrypted volume, temporary decrypted staging data may be exposed to local disk recovery; prefer an encrypted filesystem.
+**No staging or encryption configuration is required.** Staging is managed automatically inside the selected destination. **Changed in r013:** the first backup asks the user to create a password-protected age X25519 identity. The application now stores `default.agevault`, not `default.txt` (macOS: `~/Library/Application Support/multi-backup/keys/default.agevault`); existing unprotected keys are migrated without rotating the identity. The public recipient is derived from the key automatically. Use **Encryption → Save encrypted recovery copy** to create a separately password-encrypted recovery file, which is required to restore encrypted data if the local vault is lost. If the destination is not on an encrypted volume, temporary decrypted staging data may be exposed to local disk recovery; prefer an encrypted filesystem.
 
 **GitHub Actions CI runs:** Preferences → **CI runs to back up per repo** (default 5) controls recent runs saved, including logs and available artifacts, even with cleanup disabled. **CI runs to keep if cleaning** is a different value and has no effect until the user explicitly selects cleanup in Advanced options. Cleanup runs only after a successful backup; an incomplete backup prevents deletion. The advanced controls can be expanded when necessary.
 
 All GUI action buttons now have rounded glossy rendering and explicit readable labels independently of the macOS Aqua native theme. The sidebar can be collapsed with **Hide navigation** (or Ctrl+B) and reopened with **Show navigation**. Progress is presented as a rounded 3D-style bar with a red→yellow→green position gradient from 0% to 100%.
 
 **Early-release macOS images:** `multi-backup-macos-arm64.dmg` and `multi-backup-macos-x86_64.dmg`, without test-only filename labels. The release is still a clearly marked prerelease, ad-hoc signed and not Apple-notarized. General distribution remains gated on the separate stable signing policy.
+
+## R013 — Password-protected age key and session unlock
+
+The first backup asks to generate a new age encryption key and to set/confirm a strong password of at least 12 characters. The age private key is **not left as a plaintext file**: an AES-256-GCM/scrypt password-protected `default.agevault` is stored outside the application under the private per-user app support directory. Whenever the app opens and a vault exists, it must be unlocked before navigating pages, checking updates or performing operations. The password is required only once in each application session. Software upgrades **do not overwrite the key**. On the first launch after upgrading from a previous version, the old `default.txt` identity is migrated into the vault while retaining the original private key, so older encrypted backup archives remain recoverable.
+
+The **Encryption** page provides *Save encrypted recovery copy*, *Import recovery copy*, *Change vault password* and the vault location. Saving a copy requires re-entering the current password and choosing another password for the new encrypted recovery copy. Copies cannot overwrite existing vault files. No plaintext private key is sent to a destination or stored in preferences. Store the recovery file separately, with its password saved safely. Without the local vault or a recovery copy, backup contents cannot be decrypted.
+
+On macOS devices with Touch ID enrolled, an **optional** biometric shortcut can be enabled **after** the app password has been verified. A signed helper uses a device-only macOS Keychain item protected by the current biometric enrolment; no fingerprints or OS login passwords are captured by Multi Backup. On the next launch, the user can select Touch ID or password. Changing the application vault password disables the previous biometric enrolment. Windows/Linux continue to use password access.
+
+## R013 — Plugin-bound restore and navigation
+
+The new **Restore** sidebar page lets the user select a locally stored encrypted GitHub or Dropbox archive. Both support recovery to a new local destination. Only the original plugin may be used: GitHub backups cannot be restored to Dropbox, and vice versa. For remote GitHub restoration, the app requires the GitHub CLI sign-in and confirmation of a **new** repository belonging to the authenticated owner; it restores the Git mirror and LFS content, never overwriting an existing repository. For remote Dropbox, an access token with `files.content.write` is requested only for the operation, not saved; the upload uses new-file-only semantics and resumable sessions for larger files. The backup archive remains unchanged. Remote reconstruction of all GitHub user settings, Actions metadata and secret values is **not** automated: GitHub Secrets API cannot export secret values. For those archives, local recovery remains available.
+
+The interface uses scrollable content on all pages, preserves the collapsible sidebar and adds keyboard navigation (Ctrl+1 through Ctrl+8). Optional CI cleanup still requires explicit confirmation and runs after successful backup, never before.
+
+## R013 — macOS early-release SSL validation
+
+Update checks and downloads use a trusted `certifi` CA trust bundle packaged inside the actual app, with TLS certificate and host-name validation intact. The previous frozen-Python `CERTIFICATE_VERIFY_FAILED` issue must be resolved without disabling certificate verification. Release asset downloads also require SHA-256 digest verification.
