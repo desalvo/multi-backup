@@ -1,6 +1,6 @@
 # Multi Backup development status
 
-**Current version:** 0.1.0-r002-rc1  
+**Current version:** 0.1.0-r003-rc1  
 **Repository:** https://github.com/desalvo/multi-backup  
 **Baseline:** migrated from desalvo/github-backup 0.1.0-r001; new project namespace and plugin architecture.
 
@@ -37,3 +37,13 @@
 ## Next steps
 
 Inspect CI logs after `[full-ci]` bootstrap commit, fix failed package jobs, enable GitHub Pages only if desired, configure signing secrets, and perform deployment verification. Continue by functional macro-areas, preserving the existing GitHub backup engine without deleting historical snapshots.
+
+## CI corrective cycle: r003 (2026-11-13)
+
+- Corrected Ruff E401/E402 errors in the unit-test sources, affecting the `Security checks` job.
+- Corrected the Windows Chocolatey package name to `age.portable`, checked availability, and use Inno Setup preinstalled on the runner instead of reinstalling it.
+- Hardened/annotated fixed HTTPS-only URL fetch sites for the medium-severity Bandit B310 check.
+- Added offline regression tests for CI tool/package naming and URL-scheme rejection.
+- Verified 45 local unit tests, Python compileall and workflow YAML parse checks after the patch.
+- **Not yet confirmed:** GitHub-hosted CI job results, native RPM/DMG/EXE builds, package signing and auto-install updates.
+- Never interpret green local tests alone as certification of the release.

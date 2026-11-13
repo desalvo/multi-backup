@@ -1,7 +1,7 @@
 # Multi Backup - portable project handoff
 
 **Project:** `desalvo/multi-backup`  
-**Version:** `0.1.0-r002-rc1`  
+**Version:** `0.1.0-r003-rc1`  
 **Origin:** `desalvo/github-backup` 0.1.0-r001 (history remains in that repository; Multi Backup has a new initial repository history).  
 **License:** EUPL-1.2  
 **Languages:** CLI and help in English; README, manuals and brochures in English and Italian.
@@ -31,3 +31,7 @@ Continue from repository `desalvo/multi-backup` or cumulative ZIP; run `python -
 ## Important limits
 
 GitHub API does not expose secret values; restored GitHub accounts need manual remapping of tokens, runners, SSO and applications. The Dropbox plugin covers file revision payloads only, not Dropbox sharing/admin metadata. `age`, `gh`, `git`, `git-lfs` dependencies still need packaging runtime verification; do not claim security certification based on unit tests alone.
+
+## r003 CI repair handoff (2026-11-13)
+
+The user reported the first RC build CI failed. Connected GitHub tooling cannot enumerate the push-triggered workflow runs/logs; direct logs were not available. Reproduced two definite Ruff failures (E401/E402), corrected Windows age Chocolatey package id (`age.portable`), removed redundant Inno Setup installation on Windows runner, and tightened HTTPS entry-point checks for Bandit B310. Do not claim the exact failure step was confirmed. Check `/actions` for the [full-ci] fix commit and inspect any remaining failing job. Preserve EUPL and cumulative ZIP on future revisions.

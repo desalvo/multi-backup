@@ -59,8 +59,11 @@ def detect_asset_prefix(os_name=None, machine=None, distro=None, distro_version=
 
 
 def _get_json(url):
+    # Fixed, HTTPS-only GitHub REST endpoints; not an arbitrary URL fetcher.
+    if url not in (release_endpoint('stable'), release_endpoint('early-release')):
+        raise ValueError('Untrusted GitHub Releases endpoint')
     req=urllib.request.Request(url,headers={'Accept':'application/vnd.github+json','User-Agent':'multi-backup/'+VERSION})
-    with urllib.request.urlopen(req,timeout=20) as response:
+    with urllib.request.urlopen(req,timeout=20) as response:  # nosec B310 - fixed HTTPS GitHub API endpoint
         return json.loads(response.read(2*1024*1024))
 
 
@@ -123,7 +126,7 @@ def download_asset(asset, output_dir, expected_sha256):
         digest=hashlib.sha256();total=0
         with os.fdopen(fd,'wb') as out:
             req=urllib.request.Request(asset['browser_download_url'],headers={'User-Agent':'multi-backup/'+VERSION})
-            with urllib.request.urlopen(req,timeout=90) as inp:
+            with urllib.request.urlopen(req,timeout=90) as inp:  # nosec B310 - HTTPS URL and redirects checked against allowlist
                 if not _allowed_asset_uri(inp.geturl()):raise RuntimeError('Untrusted update redirect')
                 for block in iter(lambda:inp.read(1024*1024),b''):
                     total+=len(block)

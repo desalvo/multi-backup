@@ -17,7 +17,8 @@ from version import VERSION
 
 class PluginTests(unittest.TestCase):
     def test_cli_global_help_includes_plugins_and_backup(self):
-        import subprocess, sys
+        import subprocess
+        import sys
         completed=subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1]/'multi_backup.py'), '--help'],
                                  capture_output=True,text=True,check=True)
         self.assertIn('plugins', completed.stdout)
@@ -98,6 +99,19 @@ class PluginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):download_asset(info['asset'],tmp,'')
             with self.assertRaises(ValueError):download_asset(dict(info['asset'],browser_download_url='http://evil.example/file'),tmp,'a'*64)
+
+    def test_ci_workflow_uses_installable_windows_encryption_package(self):
+        workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')
+        self.assertIn('choco install age.portable', workflow)
+        self.assertNotIn('choco install age -y', workflow)
+        self.assertIn('age.exe --version', workflow)
+
+    def test_dropbox_rejects_non_allowlisted_api_endpoints(self):
+        from backends.dropbox_backend import DropboxAPI
+        api=DropboxAPI('some-long-enough-token')
+        for endpoint in ('file:///etc/passwd', 'https://evil.example/2/files/download'):
+            with self.assertRaises(ValueError):
+                api._request(endpoint, {})
 
     def test_age_key_path_sanitized(self):
         with tempfile.TemporaryDirectory() as tmp:

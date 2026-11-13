@@ -153,18 +153,20 @@ jobs:
           python -m PyInstaller --onefile --clean --noconfirm --name multi-backup --icon assets/multi-backup.ico --add-data "assets;assets" multi_backup.py
           python -m PyInstaller --onefile --windowed --clean --noconfirm --name MultiBackupGUI --icon assets/multi-backup.ico --add-data "assets;assets" gui_launcher.py
           New-Item -ItemType Directory -Force -Path dist/bin
-          choco install age -y --no-progress
+          choco install age.portable -y --no-progress
           foreach ($exe in @('age.exe','age-keygen.exe','gh.exe','git-lfs.exe')) {
             $tool = (Get-Command $exe -ErrorAction SilentlyContinue).Source
             if ($tool) { Copy-Item $tool dist/bin/ }
           }
           if (!(Test-Path dist/bin/age.exe)) { throw 'age.exe is not available; aborting native build' }
+          & dist/bin/age.exe --version
           Compress-Archive -Path dist/multi-backup.exe,dist/MultiBackupGUI.exe,dist/bin,LICENSE,README.md -DestinationPath multi-backup-windows11-x64.zip
       - name: Windows installer
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
-          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' packaging/windows/installer.iss
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $iscc)) { throw 'Inno Setup 6 not installed on the Windows runner' }
+          & $iscc packaging/windows/installer.iss
           Get-FileHash installers/*.exe -Algorithm SHA256 | Out-File checksums-windows.txt
       - uses: actions/upload-artifact@v4
         with:

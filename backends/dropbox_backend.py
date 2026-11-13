@@ -31,10 +31,14 @@ class DropboxAPI:
         self.token=token.strip();self.timeout=timeout
 
     def _request(self, url, headers, data=None):
+        # All requests are limited to fixed HTTPS endpoints owned by Dropbox.
+        # This rules out file:, ftp: and user-controlled fetch targets.
+        if url not in (API + 'list_folder', API + 'list_folder/continue', CONTENT):
+            raise ValueError('Untrusted Dropbox API endpoint')
         for attempt in range(4):
             request=urllib.request.Request(url,headers=headers,data=data,method='POST')
             try:
-                return urllib.request.urlopen(request,timeout=self.timeout)
+                return urllib.request.urlopen(request,timeout=self.timeout)  # nosec B310 - fixed HTTPS Dropbox endpoint
             except urllib.error.HTTPError as exc:
                 if exc.code not in (429,500,502,503,504) or attempt==3:
                     raise RuntimeError(f'Dropbox API failed (HTTP {exc.code})') from None
