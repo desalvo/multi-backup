@@ -65,7 +65,7 @@ class PluginTests(unittest.TestCase):
         from sidebar_nav import (NAV_ITEMS,NAV_TEXT,NAV_NORMAL,NAV_HOVER,
                                  NAV_ACTIVE,SidebarNavItem,contrast_ratio)
         self.assertEqual([name for name,_ in NAV_ITEMS],
-                         ['Dashboard','Backup','Archives','Plugins',
+                         ['Dashboard','Backup','Archives','Restore','Plugins',
                           'Encryption','Updates','Settings'])
         for background in (NAV_NORMAL,NAV_HOVER,NAV_ACTIVE):
             self.assertGreaterEqual(contrast_ratio(NAV_TEXT,background),7.0)
@@ -179,6 +179,11 @@ class PluginTests(unittest.TestCase):
         self.assertIn('self.sidebar.pack_forget()',gui)
         self.assertIn("self.progress.set_percent(",gui)
         self.assertIn('self._prepare_identity()',gui)
+        self.assertIn('self._startup_security()',gui)
+        self.assertIn('self._export_recovery',gui)
+        self.assertIn('self._enable_biometrics',gui)
+        self.assertIn('self._build_restore',gui)
+        self.assertIn('restore_github_new_repository',gui)
 
     def test_mac_early_release_uses_clean_file_names_without_bypassing_stable(self):
         root=Path(__file__).resolve().parents[1]
