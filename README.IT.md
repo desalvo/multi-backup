@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r002-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
+**Multi Backup `0.1.0-r003-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
 
 ![Dashboard Multi Backup](docs/screenshots/dashboard.png)
 

@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r002-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r003-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 

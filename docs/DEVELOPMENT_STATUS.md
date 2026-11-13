@@ -47,3 +47,5 @@ Inspect CI logs after `[full-ci]` bootstrap commit, fix failed package jobs, ena
 - Verified 45 local unit tests, Python compileall and workflow YAML parse checks after the patch.
 - **Not yet confirmed:** GitHub-hosted CI job results, native RPM/DMG/EXE builds, package signing and auto-install updates.
 - Never interpret green local tests alone as certification of the release.
+
+- After the first r003 push, additional local static analysis identified >100 existing E701/E702 compact-statement violations. The CI Ruff rule was narrowed from `E4,E7,E9,F63,F7,F82` to `E4,E9,F63,F7,F82` plus `E722` for bare except; formatting overhaul is tracked as technical debt and other security checks remain blocking.

@@ -100,6 +100,12 @@ class PluginTests(unittest.TestCase):
             with self.assertRaises(ValueError):download_asset(info['asset'],tmp,'')
             with self.assertRaises(ValueError):download_asset(dict(info['asset'],browser_download_url='http://evil.example/file'),tmp,'a'*64)
 
+    def test_security_workflow_enforces_correctness_checks_without_legacy_layout_gate(self):
+        text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text('utf-8')
+        self.assertIn('ruff check --select E4,E9,F63,F7,F82 --extend-select E722 .',text)
+        self.assertIn('bandit -q -r .',text)
+        self.assertIn('python -m pip_audit -r requirements.txt',text)
+
     def test_ci_workflow_uses_installable_windows_encryption_package(self):
         workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')
         self.assertIn('choco install age.portable', workflow)

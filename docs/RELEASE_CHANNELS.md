@@ -1,6 +1,6 @@
 # Native releases, channels, and trust
 
-**Version:** `0.1.0-r002-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
+**Version:** `0.1.0-r003-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
 
 ## Trigger contract
 
