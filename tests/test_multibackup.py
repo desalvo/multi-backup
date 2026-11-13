@@ -126,6 +126,15 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn('choco install age -y', workflow)
         self.assertIn('age.exe --version', workflow)
 
+    def test_native_build_uses_real_age_binary_and_supported_rocky_images(self):
+        workflow = (Path(__file__).resolve().parents[1]/'.github/workflows/build-native.yml').read_text('utf-8')
+        self.assertIn("Join-Path $chocoRoot 'lib\\age.portable\\tools'", workflow)
+        self.assertIn('Copy-Item -LiteralPath $real.FullName', workflow)
+        self.assertIn('& dist/bin/age-keygen.exe --version', workflow)
+        for release in (8,9,10):
+            self.assertIn(f"image: 'rockylinux/rockylinux:{release}'", workflow)
+            self.assertNotIn(f"image: 'rockylinux:{release}'", workflow)
+
     def test_dropbox_rejects_non_allowlisted_api_endpoints(self):
         from backends.dropbox_backend import DropboxAPI
         api=DropboxAPI('some-long-enough-token')

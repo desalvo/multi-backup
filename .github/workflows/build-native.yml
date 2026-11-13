@@ -154,12 +154,21 @@ jobs:
           python -m PyInstaller --onefile --windowed --clean --noconfirm --name MultiBackupGUI --icon assets/multi-backup.ico --add-data "assets;assets" gui_launcher.py
           New-Item -ItemType Directory -Force -Path dist/bin
           choco install age.portable -y --no-progress
-          foreach ($exe in @('age.exe','age-keygen.exe','gh.exe','git-lfs.exe')) {
-            $tool = (Get-Command $exe -ErrorAction SilentlyContinue).Source
-            if ($tool) { Copy-Item $tool dist/bin/ }
+          # The Chocolatey bin/age.exe is a SHIM referencing ../lib/...;
+          # copying the shim to dist/bin produces a broken standalone executable.
+          $chocoRoot = if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }
+          $ageTools = Join-Path $chocoRoot 'lib\age.portable\tools'
+          foreach ($exe in @('age.exe','age-keygen.exe')) {
+            $real = Get-ChildItem -LiteralPath $ageTools -Filter $exe -File -Recurse | Select-Object -First 1
+            if (!$real) { throw "Missing genuine $exe in age.portable installation" }
+            Copy-Item -LiteralPath $real.FullName -Destination (Join-Path 'dist/bin' $exe)
           }
-          if (!(Test-Path dist/bin/age.exe)) { throw 'age.exe is not available; aborting native build' }
+          foreach ($exe in @('gh.exe','git-lfs.exe')) {
+            $tool = (Get-Command $exe -ErrorAction SilentlyContinue).Source
+            if ($tool) { Copy-Item -LiteralPath $tool -Destination dist/bin/ }
+          }
           & dist/bin/age.exe --version
+          & dist/bin/age-keygen.exe --version
           Compress-Archive -Path dist/multi-backup.exe,dist/MultiBackupGUI.exe,dist/bin,LICENSE,README.md -DestinationPath multi-backup-windows11-x64.zip
       - name: Windows installer
         shell: pwsh
@@ -184,9 +193,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {distro: rocky, el: 8, image: 'rockylinux:8'}
-          - {distro: rocky, el: 9, image: 'rockylinux:9'}
-          - {distro: rocky, el: 10, image: 'rockylinux:10'}
+          - {distro: rocky, el: 8, image: 'rockylinux/rockylinux:8'}
+          - {distro: rocky, el: 9, image: 'rockylinux/rockylinux:9'}
+          - {distro: rocky, el: 10, image: 'rockylinux/rockylinux:10'}
           - {distro: alma, el: 8, image: 'almalinux:8'}
           - {distro: alma, el: 9, image: 'almalinux:9'}
           - {distro: alma, el: 10, image: 'almalinux:10'}
