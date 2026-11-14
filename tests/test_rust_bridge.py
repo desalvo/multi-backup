@@ -1,10 +1,14 @@
 """Verify that the actually compiled Rust ABI matches the legacy progress model."""
 import colorsys
+import hashlib
+import tempfile
 import unittest
+from pathlib import Path
 
 from rust_bridge import (_native_core, native_progress_color,
                          native_completion_percent, native_ci_target_count,
-                         native_ci_should_schedule)
+                         native_ci_should_schedule,
+                         native_dropbox_content_hash)
 
 
 class RustKernelTests(unittest.TestCase):
@@ -41,6 +45,21 @@ class RustKernelTests(unittest.TestCase):
                         self.assertEqual(native_ci_should_schedule(
                             done, pending, target, workers), expected)
 
+    def test_rust_dropbox_hash_matches_legacy_four_megabyte_blocks(self):
+        if _native_core() is None:
+            self.skipTest('Rust native core is not built')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'données.bin'
+            for data in (b'', b'hello', b'abcd' * (1024 * 1024),
+                         b'abcd' * (1024 * 1024) + b'1'):
+                path.write_bytes(data)
+                expected = hashlib.sha256()
+                for i in range(0, len(data), 4 * 1024 * 1024):
+                    expected.update(hashlib.sha256(
+                        data[i:i + 4 * 1024 * 1024]).digest())
+                self.assertEqual(native_dropbox_content_hash(path),
+                                 expected.hexdigest())
+
     def test_missing_library_fallback_is_not_implicit_success(self):
         from unittest.mock import patch
         with patch('rust_bridge._native_core', return_value=None):
@@ -48,6 +67,7 @@ class RustKernelTests(unittest.TestCase):
             self.assertIsNone(native_completion_percent(54, 100))
             self.assertIsNone(native_ci_target_count(5, 3))
             self.assertIsNone(native_ci_should_schedule(1, 0, 5, 4))
+            self.assertIsNone(native_dropbox_content_hash('missing.bin'))
 
 
 if __name__ == '__main__':

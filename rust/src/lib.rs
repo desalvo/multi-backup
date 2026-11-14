@@ -5,6 +5,8 @@
 //! This Rust module intentionally does not open or modify existing archives.
 
 pub mod archive;
+pub mod checkpoint_audit;
+pub mod dropbox_hash;
 
 use std::collections::HashSet;
 

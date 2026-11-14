@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from archive_ops import extract_archive, list_members  # noqa: E402
 from github_engine import StreamingArchive  # noqa: E402
+from checkpoint import Journal  # noqa: E402
 
 
 def invoke(*argv, expect_success=True):
@@ -72,6 +73,12 @@ def main():
         assert "multi-backup/example/nested/data.json" in names, names
         assert "multi-backup/backup_manifest.json" in names, names
         invoke(binary, "archive", "verify", "--archive", legacy, "--identity", identity)
+        checkpoint = Journal(root / ".state", {"recipient": recipient}, restart=True)
+        checkpoint.record("encrypted", legacy)
+        audit = json.loads(invoke(
+            binary, "checkpoint", "audit", "--file",
+            root / ".state" / "active.json", "--json").stdout)
+        assert audit["valid"] == ["encrypted"] and not audit["invalid"]
         rust_dest = root / "restored_by_rust"
         invoke(binary, "archive", "extract", "--archive", legacy,
                "--identity", identity, "--destination", rust_dest)
@@ -125,6 +132,11 @@ def main():
         assert not evil_dest.exists()
         assert not (root.parent / "escape.txt").exists()
 
+        # The read-only Rust checkpoint auditor must detect modified files.
+        legacy.write_bytes(b"changed after journal verification")
+        invoke(binary, "checkpoint", "audit", "--file",
+               root / ".state" / "active.json", "--json",
+               expect_success=False)
         # No unencrypted whole-archive staging is permitted.
         assert not list(root.rglob("*.tar.gz"))
     print("REAL age/tar encrypted Rust↔Python interoperability: PASS", flush=True)

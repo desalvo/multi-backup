@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::archive;
+use multi_backup_core::{archive, checkpoint_audit, dropbox_hash};
 use std::{collections::BTreeMap, env, path::Path, process};
 
 fn usage() -> &'static str {
@@ -12,6 +12,8 @@ fn usage() -> &'static str {
        multi-backup-native archive list --archive FILE.tar.gz.age --identity AGE_KEY [--json]\n\
        multi-backup-native archive verify --archive FILE.tar.gz.age --identity AGE_KEY\n\
        multi-backup-native archive extract --archive FILE.tar.gz.age --identity AGE_KEY --destination NEW_DIR\n\
+       multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
+       multi-backup-native dropbox hash --file LOCAL_FILE\n\
      Safety: explicit identity required, encrypted output only, no overwriting.\n"
 }
 
@@ -56,11 +58,33 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("multi-backup-native 0.1.0-r019-dev");
         return Ok(());
     }
-    if args.len() < 2 || args[0] != "archive" {
-        return Err(usage().into());
-    }
+    if args.len() < 2 { return Err(usage().into()); }
+    let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json) = options(&args[2..])?;
+    if family == "checkpoint" && command == "audit" {
+        accepted(&flags, &["--file"])?;
+        let state = Path::new(required(&flags, "--file")?);
+        let audit = checkpoint_audit::audit(state)?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&audit)?);
+        } else {
+            println!("Checkpoint {}: {} verified, {} invalid",
+                audit.cycle, audit.valid.len(), audit.invalid.len());
+        }
+        if !audit.invalid.is_empty() {
+            return Err("Checkpoint contains missing or modified archives".into());
+        }
+        return Ok(());
+    }
+    if family == "dropbox" && command == "hash" {
+        if json { return Err("--json not valid for dropbox hash".into()); }
+        accepted(&flags, &["--file"])?;
+        let file = Path::new(required(&flags, "--file")?);
+        println!("{}", dropbox_hash::hash_file(file)?);
+        return Ok(());
+    }
+    if family != "archive" { return Err(usage().into()); }
     match command {
         "create" => {
             accepted(&flags, &["--source", "--output", "--recipient", "--prefix"])?;

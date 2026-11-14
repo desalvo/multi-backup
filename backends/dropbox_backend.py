@@ -21,6 +21,7 @@ from typing import Any
 from checkpoint import atomic_json, sha256
 from backup_sessions import start_dropbox_session, finalize_dropbox_session
 from github_engine import StreamingArchive
+from rust_bridge import native_dropbox_content_hash
 
 API = 'https://api.dropboxapi.com/2/files/'
 CONTENT = 'https://content.dropboxapi.com/2/files/download'
@@ -86,7 +87,14 @@ def object_key(item):
 
 
 def dropbox_content_hash(source: Path) -> str:
-    """Dropbox SHA-256 of concatenated 4-MiB block SHA-256 digests."""
+    """Dropbox SHA-256 of concatenated 4-MiB block SHA-256 digests.
+
+    Use the Rust-native streaming kernel in Mac/Windows bundles; retain exact
+    Python semantics on Linux/source checkouts and if native IO fails.
+    """
+    native = native_dropbox_content_hash(source)
+    if native is not None:
+        return native
     overall = hashlib.sha256()
     with source.open('rb') as stream:
         while True:
