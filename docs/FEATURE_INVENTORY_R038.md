@@ -84,3 +84,17 @@ the affected procedure in both languages, the corresponding engineering
 reference, the development status/handoff, and the current acceptance tests.
 The Production Gate executes check-documentation-consistency.py to detect
 missing coverage, but that check does not certify functional correctness.
+
+## r039 overlay — additional Preview / Blocked features
+
+| Status | Feature | Actual progress / missing proof |
+| --- | --- | --- |
+| Preview | AFS local/SSH volume dump | Validated vos volume dump plans and stdout streaming; keytab, localauth and restore on real cells outstanding |
+| Preview | Authenticated native agent | Rust CLI push/pull, age encrypted spool, PG registry, admin approval, token/Ed25519 and nonce replay check; actual agent/server E2E outstanding |
+| Preview | Resource-limited parallel volumes | Max job workers, threads field, bytes/s throttling, cooperative CPU/RAM limits, stricter server vs agent policy. Hard limits and SSH remote probe outstanding |
+| Preview | PostgreSQL multi-replica orchestration | TLS verify-full, shared registered storage inventory, node-local affinity, SKIP LOCKED lease/heartbeat, opt-in filesystem worker; physical write fencing after lease loss outstanding |
+| Preview | Unified replica browser sessions | PostgreSQL shared login/logout; pre-login OIDC state and cross-replica local restore proxy remain pending |
+| Preview | Agent native installers | macOS arm64/x86_64 PKG, Windows x64 EXE, Debian 12/13 amd64/arm64 DEB, Rocky/Alma EL8/9/10 x86_64 RPM CI jobs, with services disabled until approval |
+| Blocked | r039 RC readiness | Real Kubernetes 2+ replica failover/fencing, real AFS full/incremental recoveries, signed installers, load/memory benchmarks and security audit required |
+
+The r038 base inventory below is historical for these r039 extensions. The source of truth is [CLUSTER_ORCHESTRATION_R039_IT.md](CLUSTER_ORCHESTRATION_R039_IT.md) and [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHESTRATION_R039_EN.md).

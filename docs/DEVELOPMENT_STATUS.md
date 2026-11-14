@@ -618,3 +618,12 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - Documentazione: nuovi manuali operativi Rust IT/EN, inventario delle funzionalità, indice documentale e controllo di coerenza CI. Aggiornato generatore PDF bilingue con sezioni Rust e avvertenze sulla GUI Python/Tk storica.
 - Implementazione: repack automatico delle stripe 8+2 miste durante GC confermata, nuovi shard age verificati, indice successore committato ultimo, mantenimento del predecessore fino a grace 48h. Previste riprese da preparazioni non committate.
 - Test: roundtrip del purge, GC, protezione, repack, interruzione prima del commit; CI corrente in attesa di certificazione. Restano fault-injection di produzione, multiwriter, restore account reali e aggiornamenti firmati. Nessun merge o rilascio.
+
+## r039 — AFS, agent parallelism and Kubernetes (2026-11-15)
+
+- Developed OpenAFS volume-only vos dump planning (local, pinned SSH and managed agent transport) with validated arguments; separately approved keytab/localauth privileged execution and live vos restore still pending.
+- Added native multi-backup-agent Rust CLI with push/pull, Ed25519 device key, linked user and bearer token, age ciphertext spool, server approval, revocation, nonce-based anti-replay, encrypted upload receipts and multi-volume bounded parallelism.
+- Added ExecutionLimits for 1–256 concurrent jobs, 1–64 threads/job, per-stream bytes/s, CPU utilization, RAM utilization and free RAM minimum; server+agent restrictions intersect on both push and pull. Resource probes are cooperative; hard cgroups/Job Objects and remote SSH-host load enforcement remain pending.
+- Added PostgreSQL TLS verify-full shared queue, storage visibility shared/node_local, replica heartbeat, row-level atomic claims, lease/renew/finish, optional filesystem worker, shared browser sessions, readiness probe and centralized agent registry.
+- Added independent agent installer matrix: Mac arm64/x86_64 PKG, Windows x64 EXE, Debian 12/13 amd64/arm64 DEB, Rocky/Alma 8/9/10 x86_64 RPM. No auto-start.
+- Updated IT/EN agent and cluster runbooks; r039 draft PR #11 based on r038 draft PR #10. CI and live field testing are required; no RC or tag created. Open blockers: physical write fencing after lease expiry, OIDC pending state, remote restore routing, single-volume AFS restore, hard limits, real-agent and real-K8s tests.

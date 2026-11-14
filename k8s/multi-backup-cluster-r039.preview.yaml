@@ -1,0 +1,115 @@
+# Development EXAMPLE only; replace all placeholders before deployment.
+# Independent PostgreSQL with CA/host verified TLS is mandatory.
+# This is NOT a certified RC, nor a ready-made production deployment.
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  selector:
+    app: multi-backup
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  selector:
+    matchLabels: {app: multi-backup}
+  template:
+    metadata:
+      labels: {app: multi-backup}
+    spec:
+      # Database and agent ingress secrets are never embedded in ConfigMaps.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: server
+          image: REPLACE_WITH_CI_VERIFIED_R039_SERVER_IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: MULTI_BACKUP_BIND, value: "0.0.0.0:8080"}
+            - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: "https://REPLACE_WITH_FQDN"}
+            - name: MULTI_BACKUP_CLUSTER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: multi-backup-db, key: postgresql-url-verify-full}
+            - name: MULTI_BACKUP_REPLICA_ID
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - {name: MULTI_BACKUP_REPLICA_MAX_JOBS, value: "4"}
+            - {name: MULTI_BACKUP_CLUSTER_STORAGE_IDS, value: "shared-cephfs"}
+            # Disable automatic backup execution until storage and write-fence
+            # acceptance is complete; opt in only in a controlled test.
+            - {name: MULTI_BACKUP_CLUSTER_EXECUTOR, value: "disabled"}
+            - {name: MULTI_BACKUP_ADMIN_USER, value: "admin"}
+            - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: "/run/secrets/admin-hash"}
+            - {name: MULTI_BACKUP_AGENT_PROXY_SECRET_FILE, value: "/run/secrets/agent-proxy"}
+            - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: "/run/secrets/age-identity"}
+            - {name: MULTI_BACKUP_DATA_ROOT, value: "/data/encrypted-store"}
+            - {name: MULTI_BACKUP_EXPORT_ROOT, value: "/data/exports"}
+            - {name: MULTI_BACKUP_AGENT_UPLOAD_ROOT, value: "/data/agent-uploads"}
+            - {name: MULTI_BACKUP_AUDIT_LOG, value: "/data/audit/events.jsonl"}
+          volumeMounts:
+            - {name: shared-data, mountPath: /data}
+            # Kubernetes Secret files as subPath are regular bind mounts, not
+            # projected symlinks, matching Rust symlink rejection rules.
+            - name: admin-secret
+              mountPath: /run/secrets/admin-hash
+              subPath: admin-hash
+              readOnly: true
+            - name: agent-proxy-secret
+              mountPath: /run/secrets/agent-proxy
+              subPath: agent-proxy
+              readOnly: true
+            - name: age-secret
+              mountPath: /run/secrets/age-identity
+              subPath: age-identity
+              readOnly: true
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim: {claimName: multi-backup-rwx}
+        - name: admin-secret
+          secret: {secretName: multi-backup-admin, defaultMode: 256}
+        - name: agent-proxy-secret
+          secret: {secretName: multi-backup-agent-proxy, defaultMode: 256}
+        - name: age-secret
+          secret: {secretName: multi-backup-age, defaultMode: 256}
+---
+# The PVC must bind to a provisioner that supports RWX across all replicas.
+# A local-path or RWO volume is not a valid substitute for shared storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: multi-backup-rwx
+  namespace: multi-backup
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests: {storage: 1Ti}
+  # Set a verified shared CephFS/NFS/etc StorageClass before applying.
+  storageClassName: REPLACE_WITH_VERIFIED_RWX_STORAGECLASS
