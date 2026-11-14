@@ -27,7 +27,14 @@ def validate():
     jobs=flow['jobs']; assert 'production-gate' in jobs
     assert 'native-release' in jobs
     assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
-    assert jobs['native-release']['needs']==['production-gate','macos-smoke'], 'Native release must wait for gate and app startup'
+    assert jobs['publications-smoke']['needs']==['production-gate'], 'GUI capture must follow the security gate'
+    doc_steps='\\n'.join(str(step.get('run','')) for step in
+                        jobs['publications-smoke']['steps'])
+    assert 'scripts/capture-ui.py' in doc_steps and 'scripts/build-publications.py' in doc_steps
+    assert 'docs/screenshots/about.png' in doc_steps, 'About screenshot validation missing'
+    assert jobs['native-release']['needs']==[
+        'production-gate','macos-smoke','publications-smoke'
+    ], 'Native release must wait for gate, app startup and documentation screenshots'
     assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
     assert 'workflow_call' in native['on'] and len(native['on'])==1, 'Native workflow must not publish independently'
     release=native['jobs']
