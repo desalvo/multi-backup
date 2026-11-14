@@ -63,3 +63,8 @@ Retain legacy format converter optionally, but stop requiring old Python archive
 | GC | Separate preview and confirmed local purge of orphan ciphertext, parity checks, grace | Crash-safe mixed-stripe repack, remote GC, WORM |
 | Scheduler | Rust one-shot/daemon and persistent job state | OS service/GUI persistence, alerts |
 | Cross-account restore | GitHub target-owner control, Dropbox independent target-write-token verification | Full/partial multi-item provider restores and permission fidelity |
+
+## r038 — Stato Rust aggiornato
+
+Implementati in anteprima: FULL/INCREMENTAL con catene e statistiche complete, verify-chain, scheduler Rust run/daemon, purge con rebase, GC confermata con repack automatico Reed-Solomon 8+2, mantenimento dei vecchi shard per grace e recupero di preparazioni senza commit. Documentazione operativa bilingue e inventario sono in docs/OPERATIONS_R038_IT.md, docs/OPERATIONS_R038_EN.md e docs/FEATURE_INVENTORY_R038.md. Il completamento Rust e la release restano non certificati fino a CI, failover, dati reali, plugin, firma e rollback; la compatibilità degli archivi Python rimane opzionale.
+
