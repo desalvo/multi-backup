@@ -77,10 +77,14 @@ jobs:
           # Legacy Python archive interoperability is optional, not an RC blocker.
           # Native functional recovery is mandatory instead.
           cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
+      - name: Rust r038 operator documentation contract
+        run: python scripts/check-documentation-consistency.py
 
   rust-server-validation:
     name: Rust web server, storage and OCI image build verification
