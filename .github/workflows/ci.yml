@@ -70,6 +70,9 @@ jobs:
           cargo test --manifest-path rust/Cargo.toml
           cargo build --manifest-path rust/Cargo.toml --release
           python -m unittest discover -s tests -p test_rust_bridge.py -v
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          python scripts/test-rust-archive-compat.py rust/target/release/multi-backup-native
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
 

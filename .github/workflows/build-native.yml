@@ -154,12 +154,14 @@ jobs:
           python scripts/create-photo-assets.py
           cargo build --manifest-path rust/Cargo.toml --release
           if (!(Test-Path rust/target/release/multi_backup_core.dll)) { throw 'Rust native core DLL missing' }
+          if (!(Test-Path rust/target/release/multi-backup-native.exe)) { throw 'Rust native CLI missing' }
       - name: Windows binary and executable dependencies
         shell: pwsh
         run: |
           python -m PyInstaller --onefile --clean --noconfirm --name multi-backup --icon assets/multi-backup.ico --add-data "assets;assets" --add-binary "rust/target/release/multi_backup_core.dll;rust-native" multi_backup.py
           python -m PyInstaller --onefile --windowed --clean --noconfirm --name MultiBackupGUI --icon assets/multi-backup.ico --add-data "assets;assets" --add-binary "rust/target/release/multi_backup_core.dll;rust-native" gui_launcher.py
           New-Item -ItemType Directory -Force -Path dist/bin
+          Copy-Item rust/target/release/multi-backup-native.exe dist/bin/
           choco install age.portable -y --no-progress
           # The Chocolatey bin/age.exe is a SHIM referencing ../lib/...;
           # copying the shim to dist/bin produces a broken standalone executable.
@@ -175,6 +177,7 @@ jobs:
             if ($tool) { Copy-Item -LiteralPath $tool -Destination dist/bin/ }
           }
           & dist/bin/age.exe --version
+          & dist/bin/multi-backup-native.exe --version
           & dist/bin/age-keygen.exe --version
           Compress-Archive -Path dist/multi-backup.exe,dist/MultiBackupGUI.exe,dist/bin,LICENSE,README.md -DestinationPath multi-backup-windows11-x64.zip
       - name: Windows installer
