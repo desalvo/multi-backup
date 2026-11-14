@@ -114,3 +114,8 @@ including when it is older than 30 days. No deletion is performed by
 ## r038 — protezione del successore durante il rebase
 
 A protected child prevents the purge of a parent if that action would rewrite the child's authenticated lineage. A separate confirmed `unprotect-backup` is required; it must never run implicitly. `storage protect` configures 8+2 parity; `storage protect-backup` sets a no-delete hold; neither provides independent hardware WORM. The physical GC only removes unreferenced ciphertext, and partially live parity stripes are retained. See [IT procedures](R038_OPERATIONS_IT.md) and [EN procedures](R038_OPERATIONS_EN.md).
+
+## r038 — Impatto della protezione sul rebase e sul repack
+
+Un backup o un discendente protetto non può essere cancellato o avere i manifest riscritti implicitamente dal purge con riconciliazione. Eliminare un FULL promuove il successore incrementale a FULL; eliminare un incrementale ricollega i successori al predecessore. La GC è separata dal purge e include repack automatico della parità 8+2, con nuovo indice autenticato pubblicato solo dopo aver verificato i nuovi shard e vecchia stripe conservata durante il grace period. Nessuna GC bypassa la protezione esplicita o costituisce WORM reale.
+
