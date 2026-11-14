@@ -16,10 +16,12 @@ case "$AGENT_FORMAT" in
     case "$arch" in arm64|x86_64);; *) echo "Unsupported macOS agent arch" >&2; exit 2;; esac
     stage="$(mktemp -d)"
     trap 'rm -rf "$stage"' EXIT
-    install -Dpm0755 "$binary" "$stage/usr/local/bin/multi-backup-agent"
-    install -Dpm0644 LICENSE "$stage/usr/local/share/multi-backup-agent/LICENSE"
-    install -Dpm0644 docs/AGENTS_AFS_R039_IT.md "$stage/usr/local/share/multi-backup-agent/AGENT-README-IT.md"
-    install -Dpm0644 packaging/macos/multi-backup-agent.plist.example "$stage/usr/local/share/multi-backup-agent/launchagent.plist.example"
+    mkdir -p "$stage/usr/local/bin" "$stage/usr/local/share/multi-backup-agent"
+    install -m0755 "$binary" "$stage/usr/local/bin/multi-backup-agent"
+    install -m0644 LICENSE "$stage/usr/local/share/multi-backup-agent/LICENSE"
+    install -m0644 docs/AGENTS_AFS_R039_IT.md "$stage/usr/local/share/multi-backup-agent/AGENT-README-IT.md"
+    install -m0644 docs/AGENTS_AFS_R039_EN.md "$stage/usr/local/share/multi-backup-agent/AGENT-README-EN.md"
+    install -m0644 packaging/macos/multi-backup-agent.plist.example "$stage/usr/local/share/multi-backup-agent/launchagent.plist.example"
     out="packages/multi-backup-agent-preview-macos-$arch.pkg"
     pkgbuild --root "$stage" --identifier eu.adsnet.multi-backup-agent.preview --version 0.1.0.39 --install-location / "$out"
     test -s "$out"
