@@ -59,3 +59,52 @@ A full GC implementation requires cross-provider reference ownership,
 append-only vault integrity, rate limiting, quarantine and independent
 recovery drills. Never report these policy-only pieces as automated
 production cleanup. See `docs/BACKUP_PROTECTION.md`.
+
+
+## r038 — full/incremental chain purge and garbage collection contract
+
+A logical **FULL** represents all files at a reference point. An **INCREMENTAL**
+is a complete snapshot inventory of encrypted chunk references, but reuses
+all unchanged content-addressed chunks and adds only changed chunks.
+The `parent_id` chain is authenticated and is used for provenance,
+integrity audits and user-visible full/incremental statistics. Full and
+incremental modes may be selected manually or independently per schedule.
+
+**Cancellazione / purge:** the explicitly confirmed `storage delete-backup`
+now automatically invokes `Store::delete_backup_rebase`: direct children of
+a deleted incremental are reparented to the deleted increment's predecessor;
+direct children of a deleted full become new full reference points. Complete
+per-backup file inventories and their chunk references remain intact. More
+remote/incremental children are discovered before any mutation. A protected
+child or unhealthy dependency blocks the operation; the user must remove
+protection explicitly, never implicitly. If a child is already full, its
+file references need not be copied. The physical chunk count is UNCHANGED
+by purge.
+
+**Garbage collection:** `storage gc-preview` is read-only and reports
+eligible ciphertext and the bytes potentially reclaimable; `storage
+gc-collect --confirm ERASE-ORPHANS` is a distinct, explicitly approved
+operation. A common store lock protects the authenticated reference graph.
+Before any deletion the engine verifies every live backup/lineage, including
+parity. Default grace 48h, minimum 24h. Fully unreferenced parity stripes
+and eligible orphan ciphertext chunks may be removed after grace. If a parity
+stripe has **both live and orphan members**, its full old membership is
+retained; a separate crash-recoverable **stripe repacker** is still required
+to reclaim *all* otherwise redundant data. No live chunk, protected hold or
+source snapshot is deliberately deleted. Remote object GC, automatic policy
+purge and physical WORM enforcement are still outside this preview.
+
+**Verification:** new Rust `storage verify-chain` checks the entire
+incremental chain back to its reference full by default; `--no-chain`
+limits verification to the selected point. Scheduling uses
+`verify_full_chain: true` unless explicitly overridden. A corrupt link
+or unverified chain blocks GC. `storage info` reports file count,
+uncompressed bytes, zstd-compressed bytes, post-dedup zstd bytes, new
+compressed chunk bytes, added/modified and removed files, and the full
+ordered history of increments with reference full ID.
+
+This is a locally implemented Rust development path, **not** yet a certified
+unattended production retention/GC service. Acceptance tests include chain
+promotion, protected-dependency refusal, no physical deletion at purge,
+grace-period gating, orphan parity deletion, and preservation of mixed
+live/dead parity protection.
