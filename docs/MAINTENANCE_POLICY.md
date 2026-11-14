@@ -6,7 +6,7 @@ be editable in the desktop/server settings with durable saved state.
 
 | Policy | Default | Implemented today |
 | --- | --- | --- |
-| Backup schedule | Disabled until explicitly enabled, then daily 02:00 UTC | Deterministic `Schedule::due`; background job/service not wired |
+| Backup schedule | Disabled until explicitly enabled; configurable per-job interval | Native `schedule run` (manual/cron/launchd/Task Scheduler) and Rust `schedule daemon` added in r038; live provider/service qualification pending |
 | Backup retention | 30 days; keep at least one verified backup per namespace | `expiry_preview` and authenticated `storage retention-preview`; deletion job not wired |
 | Explicit protection | Off until user protects a backup | Protected logical chunk-store and local legacy archives, UI/CLI and confirmation, E2E unit tests |
 | Garbage collection | Enabled, interval 24 hours, 48-hour orphan grace | Policy `GarbageCollection::due`; actual mark-and-sweep and task scheduler not wired |
