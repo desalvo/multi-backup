@@ -436,3 +436,18 @@ mod tests {
         assert!(create(&source, &dest, "age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "multi-backup").is_err());
     }
 }
+
+/// Stream verified legacy tar.gz.age members to a visitor without ever
+/// writing unencrypted content to staging. The entire age stream must
+/// authenticate successfully before this function returns Ok.
+pub fn visit_files(path:&Path,identity:&Path,
+    mut visitor:impl FnMut(&mut dyn Read,&Member)->ArchiveResult<()>)
+    ->ArchiveResult<usize>{
+    with_child(start_decrypt(path,identity)?,|archive|{
+        let members=scan(archive,|entry,member,_|{
+            if !member.directory {visitor(entry,member)?;}
+            Ok(())
+        })?;
+        Ok(members.into_iter().filter(|m|!m.directory).count())
+    })
+}

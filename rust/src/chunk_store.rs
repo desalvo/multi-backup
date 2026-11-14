@@ -573,3 +573,55 @@ impl Store {
         Ok(objects)
     }
 }
+
+/// User-selected legacy encrypted archives that belong to ONE logical cycle.
+pub struct LegacySource {pub namespace:String,pub archive:PathBuf}
+impl Store {
+    /// Non-destructive streaming migration from old age/tar.gz into zstd+age
+    /// immutable chunks and one unified manifest; the old files stay intact.
+    pub fn import_legacy(&self,identity:&Path,label:&str,
+                         sources:&[LegacySource])->Res<LogicalBackup>{
+        if sources.is_empty()||label.len()>256 {return Err("Invalid legacy migration".into());}
+        let lock=OpenOptions::new().create(true).write(true)
+            .open(self.root.join(".lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
+        let mut entries=Vec::new();
+        let mut seen=HashSet::new();
+        for source in sources {
+            if source.namespace.is_empty()||source.namespace.len()>80||
+               !source.namespace.bytes().all(|b|
+                 b.is_ascii_alphanumeric()||b==b'_'||b==b'-'){
+                return Err("Unsafe legacy namespace".into());
+            }
+            crate::archive::visit_files(&source.archive,identity,|reader,member|{
+                let path=format!("{}/{}",source.namespace,member.path.trim_end_matches('/'));
+                if !safe_path(&path)||!seen.insert(path.clone()){
+                    return Err("Unsafe or duplicate legacy path".into());
+                }
+                let mut remaining=member.bytes;
+                let mut chunks=Vec::new();
+                while remaining>0 {
+                    let take=remaining.min(self.cfg.chunk_bytes as u64) as usize;
+                    let mut bytes=vec![0u8;take];
+                    reader.read_exact(&mut bytes)?;
+                    chunks.push(self.save_chunk(identity,&bytes)?);
+                    remaining-=take as u64;
+                }
+                entries.push(Entry {path,bytes:member.bytes,chunks});
+                Ok(())
+            })?;
+        }
+        entries.sort_by(|a,b|a.path.cmp(&b.path));
+        let mut nonce=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut nonce);
+        let snapshot=LogicalBackup{version:1,id:hex::encode(nonce),
+            label:label.to_string(),entries};
+        let encrypted=age(&serde_json::to_vec(&snapshot)?,
+            Some(&self.cfg.recipient),None)?;
+        if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)? {
+            return Err("Legacy migration manifest conflict".into());
+        }
+        self.protect(identity,&snapshot.id)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(snapshot)
+    }
+}

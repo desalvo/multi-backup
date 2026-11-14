@@ -135,6 +135,23 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                 }
             }
+            "migrate-legacy" => {
+                accepted(&flags,&["--root","--identity","--label","--archives-json"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let source_file=std::fs::File::open(required(&flags,"--archives-json")?)?;
+                let values:Vec<serde_json::Value>=serde_json::from_reader(source_file)?;
+                if values.is_empty(){return Err("Legacy archive list is empty".into());}
+                let sources:Vec<chunk_store::LegacySource>=values.iter().map(|v|{
+                    Ok::<_,Box<dyn std::error::Error+Send+Sync>>(chunk_store::LegacySource {
+                        namespace:v["namespace"].as_str().ok_or("Missing namespace")?.into(),
+                        archive:v["archive"].as_str().ok_or("Missing archive path")?.into()
+                    })
+                }).collect::<Result<_,_>>()?;
+                let store=chunk_store::Store::open(root,key)?;
+                let backup=store.import_legacy(key,required(&flags,"--label")?,&sources)?;
+                println!("Migrated {} files into unified logical backup {}",
+                    backup.entries.len(),backup.id);
+            }
             "export-zip" => {
                 accepted(&flags,&["--root","--identity","--id","--destination","--volume-mib"])?;
                 let key=Path::new(required(&flags,"--identity")?);

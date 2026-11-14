@@ -133,3 +133,32 @@ fn one_logical_backup_multi_selection_restores_cross_provider_files(){
     assert!(store.restore_many(&key,&backup.id,&unsafe_selected,
         &tmp.path().join("unsafe")).is_err());
 }
+
+#[test]
+fn streaming_legacy_age_tar_migration_unifies_independent_archives(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(tmp.path()) else{return};
+    let original_git=tmp.path().join("legacy-git");
+    let original_ci=tmp.path().join("legacy-ci");
+    fs::create_dir(&original_git).unwrap();fs::create_dir(&original_ci).unwrap();
+    fs::write(original_git.join("main.txt"),b"Git archive payload").unwrap();
+    fs::write(original_ci.join("run.txt"),b"CI archive payload").unwrap();
+    let git_archive=tmp.path().join("git.tar.gz.age");
+    let ci_archive=tmp.path().join("ci.tar.gz.age");
+    multi_backup_core::archive::create(&original_git,&git_archive,&recipient,"legacy").unwrap();
+    multi_backup_core::archive::create(&original_ci,&ci_archive,&recipient,"legacy").unwrap();
+    let destination=tmp.path().join("new-store");
+    Store::init(&destination,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&destination,&key).unwrap();
+    let logical=store.import_legacy(&key,"combined legacy cycle",&[
+        multi_backup_core::chunk_store::LegacySource{namespace:"github".into(),archive:git_archive.clone()},
+        multi_backup_core::chunk_store::LegacySource{namespace:"ci".into(),archive:ci_archive.clone()}
+    ]).unwrap();
+    assert_eq!(logical.entries.len(),2);
+    assert!(store.verify(&key,&logical.id).unwrap().healthy);
+    let fresh=tmp.path().join("migrated-restore");
+    store.restore(&key,&logical.id,None,&fresh).unwrap();
+    assert_eq!(fs::read(fresh.join("github/legacy/main.txt")).unwrap(),b"Git archive payload");
+    assert_eq!(fs::read(fresh.join("ci/legacy/run.txt")).unwrap(),b"CI archive payload");
+    assert!(git_archive.exists()&&ci_archive.exists());
+}
