@@ -328,7 +328,10 @@ impl Store {
                 let plain = age(&fs::read(&path)?,None,Some(identity))?;
                 let stripe: Protection = serde_json::from_slice(&plain)?;
                 if stripe.id != id || stripe.members.is_empty() ||
-                    stripe.members.len() > crate::parity::DATA {
+                    stripe.members.len() > crate::parity::DATA ||
+                    stripe.stripe.info.len() != crate::parity::TOTAL ||
+                    stripe.stripe.shard_size == 0 ||
+                    stripe.stripe.shard_size > 32 * 1024 * 1024 {
                     return Err("Invalid authenticated stripe metadata".into());
                 }
                 found.push(stripe);
@@ -496,12 +499,11 @@ impl Store {
                 .join(&group.id[..2]).join(&group.id);
             for i in 0..crate::parity::PARITY {
                 let path = folder.join(format!("{i}.age"));
-                let validation = fs::symlink_metadata(&path)
-                    .map_err(|e| e.into())
-                    .and_then(|m: std::fs::Metadata| -> Res<Vec<u8>> {
-                        if !m.file_type().is_file() { return Err("Unsafe parity file".into()); }
-                        age(&fs::read(&path)?,None,Some(identity))
-                    });
+                let validation: Res<Vec<u8>> = (|| {
+                    let meta = fs::symlink_metadata(&path)?;
+                    if !meta.file_type().is_file() {return Err("Unsafe parity file".into());}
+                    age(&fs::read(&path)?,None,Some(identity))
+                })();
                 let slot=crate::parity::DATA + i;
                 match validation {
                     Ok(bytes) if bytes.len()==group.stripe.shard_size &&
