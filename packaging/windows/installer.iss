@@ -1,6 +1,6 @@
 #define AppName "Multi Backup"
 #define AppVersion "0.1.0"
-#define AppDisplayVersion "0.1.0-r015-rc1"
+#define AppDisplayVersion "0.1.0-r016-rc1"
 #define AppPublisher "Multi Backup contributors"
 #define AppURL "https://github.com/desalvo/multi-backup"
 [Setup]
@@ -10,7 +10,7 @@ AppId={{A17C5D60-3E9C-4BCB-8131-F9BC68FDB2DD}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppDisplayVersion}
-VersionInfoVersion=0.1.0.15
+VersionInfoVersion=0.1.0.16
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 DefaultDirName={autopf}\Multi Backup

@@ -37,7 +37,10 @@ def gui_smoke():
     application=BackupGUI()
     try:
         application.update_idletasks()
-        assert application.start_button.caption == 'Start / resume backup'
+        assert application.start_button.caption == 'Start · Nuovo backup'
+        assert application.resume_button.caption == 'Resume · Riprendi backup'
+        assert callable(application.start_button.command)
+        assert callable(application.resume_button.command)
         assert application.menu_button.caption == 'Hide navigation'
         assert not application.ignore_ci_artifact_errors.get()
         application._startup_security()

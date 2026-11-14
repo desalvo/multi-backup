@@ -73,3 +73,12 @@ User requires standard Mac drag-to-Applications DMG (app and Applications symlin
 ### r015 rendering quality / Rust staged core
 
 User submitted screenshot of badly stair-stepped rounded rectangles and the tiny internal glossy arc. Fix uses render_quality.py 4x supersampled rounded patches/glints, composited into Tk/Pillow PhotoImages. Applied to premium_dashboard.py, ui_widgets.py, sidebar_nav.py; tests/test_render_quality.py must remain in Production Gate. The native Tk text is not rasterized, preserving legibility. Confirm macOS native smoke plus subjective Retina rendering with newly generated screenshots. Rust library is only a policy prototype; the Python application remains shipped, and full Rust GUI/engine migration is explicitly open. Do not claim release completion without all gates and new assets.
+
+
+## r016 handoff — explicit backup actions and local deletion (2026-11-14)
+
+User requested separate Start and Resume buttons, stable backup name on Resume, ability to delete existing backups locally, author/license/version/build at sidebar bottom, and bespoke backup-relevant photography in both hero and sidebar without distortion or unwanted crop.
+
+GitHub: --restart always creates a new cycle and archives previous active state; --resume requires a matching active checkpoint and keeps its name. Dropbox incremental manifest name is stored in a separate active session file for explicit Resume (existing encrypted objects remain immutable and SHA-256 verified). Archive deletion is single local selected .tar.gz.age + sidecars, with exact confirmation and audit, no remote calls, and active-checkpoint / running-job protections.
+
+UI currently uses Tk/Pillow, r015 4x antialias stays unchanged. Build numbers and EN/IT publications must follow r016. Full Rust engine/GUI migration remains OPEN. Test both Mac architectures plus all native packages, and check photographer art visible fully with correct proportions.

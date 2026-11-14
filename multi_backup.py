@@ -56,7 +56,8 @@ class ResumableBackup:
             'include_gh_token', 'metadata_workers', 'purge_obsolete_metadata')}
         cfg['github_user'] = getattr(args,'github_user',None)
         cfg['credentials_dir'] = str(args.credentials_dir or '')
-        self.journal = Journal(self.output / '.state',cfg,restart=args.restart)
+        self.journal = Journal(self.output / '.state',cfg,restart=args.restart,
+                               require_active=args.resume)
         self.cycle_dir = self.output / 'metadata' / 'cycles' / self.journal.cycle
         self.cycle_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.backup = Backup(args, self.staging / '.multi-backup-staging-placeholder')
@@ -612,8 +613,8 @@ def build_parser():
     b.add_argument('--keep-ci-runs',type=int,default=5)
     b.add_argument('--cleanup-ci-dry-run',action='store_true',help='Only simulate Actions deletion; still back up')
     b.add_argument('--dry-run',action='store_true',help='Preview, do not back up or delete GitHub artifacts')
-    b.add_argument('--resume',action='store_true',help='Resume a previous incomplete cycle (default behavior)')
-    b.add_argument('--restart',action='store_true',help='Start new cycle; existing archives are not overwritten')
+    b.add_argument('--resume',action='store_true',help='Require a matching incomplete cycle, preserving its backup name; error if none exists')
+    b.add_argument('--restart',action='store_true',help='Explicit Start: new cycle name, preserving unfinished checkpoints and archives')
     b.add_argument('--purge-obsolete-metadata',action='store_true',help='Prune older per-repo metadata only after success')
     b.add_argument('--metadata-workers',type=int,default=4,help='Parallel GitHub API/download workers (default 4)')
     b.add_argument('--progress',action='store_true',help='Show terminal progress bars')
