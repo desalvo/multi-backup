@@ -136,6 +136,7 @@ pub async fn enforce_gateway(State(state):State<AppState>,request:Request,next:N
     // validating the public TLS connection. The agent has its own bearer +
     // approved Ed25519 proof. Without both, fail closed, not an exemption.
     if request.uri().path()=="/api/agents/poll" ||
+       request.uri().path()=="/api/agents/policy" ||
        request.uri().path()=="/api/agents/upload" {
         use subtle::ConstantTimeEq;
         let value=request.headers().get("x-mb-trusted-https-proxy")
