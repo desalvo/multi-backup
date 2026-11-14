@@ -152,6 +152,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y xvfb xauth pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libgl1-mesa-dri age gh git-lfs
+      - name: Replace third-party banners with original local art
+        run: |
+          python -m pip install 'Pillow>=13,<14'
+          python scripts/create-photo-assets.py
       - name: Compile standalone Rust GUI (no Python / PyInstaller)
         run: |
           cargo build --manifest-path rust-desktop/Cargo.toml --release

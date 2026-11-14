@@ -214,7 +214,7 @@ impl NativeApp {
             },
             active: false, started: Instant::now(),
             last_activity: Instant::now(), progress: None, receiver: None,
-            hero: load_photo(ctx, "backup-hero", include_bytes!("../../assets/hero.jpg")),
+            hero: None,
             logo: load_photo(ctx, "multi-backup-logo", include_bytes!("../../assets/icon-256.png")),
             count: entries.len(), entries, vault_verified: false,
             must_unlock_on_start,
@@ -478,13 +478,53 @@ impl NativeApp {
                 content(ui);
             });
     }
+    /// Original vector hero, independent of stock imagery, URLs and watermarks.
+    fn draw_original_hero(ui: &mut egui::Ui) {
+        let width = ui.available_width();
+        let height = (width / 3.4).clamp(130.0, 270.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
+        let pen = ui.painter_at(rect);
+        pen.rect_filled(rect, 17.0, Color32::from_rgb(16, 32, 76));
+        let step = (width / 16.0).max(8.0);
+        for i in 0..5 {
+            let x = rect.left() + i as f32 * step;
+            let right = rect.right() - i as f32 * step;
+            for dx in [x, right - step * .75] {
+                let rack = egui::Rect::from_min_size(
+                    egui::pos2(dx, rect.top() + 6.0), Vec2::new(step * .74, height - 12.0));
+                pen.rect_filled(rack, 5.0, Color32::from_rgb(12, 26, 60));
+                pen.rect_stroke(rack, 5.0, egui::Stroke::new(1.0, Color32::from_rgb(57, 96, 168)),
+                    egui::StrokeKind::Outside);
+                for j in 0..9 {
+                    let led = egui::pos2(rack.left() + 8.0,
+                        rack.top() + 10.0 + j as f32 * (height - 30.0) / 10.0);
+                    pen.circle_filled(led, 1.7, if j%3==0 {VIOLET}
+                        else {Color32::from_rgb(66, 205, 241)});
+                }
+            }
+        }
+        let card = rect.shrink2(Vec2::new(width * .16, height * .23));
+        pen.rect_filled(card, 18.0, Color32::from_rgb(23, 38, 97));
+        pen.rect_stroke(card, 18.0, egui::Stroke::new(2.0, Color32::from_rgb(85, 205, 247)),
+            egui::StrokeKind::Outside);
+        pen.text(card.center() - Vec2::new(0.0, height * .06),
+            egui::Align2::CENTER_CENTER, "Multi Backup",
+            egui::FontId::proportional((width * .044).clamp(18.0, 39.0)),INK);
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(card.left()+card.width()*.18,card.bottom()-height*.15),
+            Vec2::new(card.width()*.64,8.0));
+        pen.rect_filled(bar, 4.0, Color32::from_rgb(31, 52, 110));
+        pen.rect_filled(egui::Rect::from_min_size(bar.min,
+           Vec2::new(bar.width()*.67,bar.height())),4.0,Color32::from_rgb(58, 207, 231));
+    }
+
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         if let Some(hero) = &self.hero {
             let size = hero.size_vec2();
             let width = ui.available_width();
             let height = (width * size.y / size.x).min(290.0);
             ui.image((hero.id(), Vec2::new((height * size.x/size.y).min(width), height)));
-        }
+        } else { Self::draw_original_hero(ui); }
         ui.heading(RichText::new("Multi Backup").size(33.0).color(INK));
         ui.label(RichText::new("I tuoi dati, sempre al sicuro — backup cifrati e ripristino")
             .color(MUTED));
