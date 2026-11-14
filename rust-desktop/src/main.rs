@@ -96,6 +96,37 @@ fn default_vault_path() -> PathBuf {
             .display().to_string()));
     base.join("multi-backup/keys/default.agevault")
 }
+/// Read-only migration of the old app's non-secret user preferences.
+/// No settings file is modified by merely opening the Rust preview.
+fn read_legacy_settings() -> Result<serde_json::Value, String> {
+    let path = default_vault_path().parent()
+        .and_then(|dir| dir.parent())
+        .ok_or("Invalid protected settings location")?
+        .join("settings.json");
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+            return Ok(serde_json::Value::Null),
+        Err(error) => return Err(format!("Cannot read legacy settings: {error}")),
+    };
+    if !meta.file_type().is_file() || meta.len() > 128 * 1024 {
+        return Err("Unsafe or oversized legacy settings file".into());
+    }
+    let input = std::fs::File::open(path).map_err(|e|e.to_string())?;
+    let data: serde_json::Value =
+        serde_json::from_reader(input).map_err(|e|e.to_string())?;
+    if !data.is_object() { return Err("Invalid legacy settings JSON object".into()); }
+    Ok(data)
+}
+fn imported_provider(preferences: &serde_json::Value) -> String {
+    if let Some(list) = preferences["enabled_backends"].as_array() {
+        for item in list {
+            if item == "github" { return "github".into(); }
+            if item == "dropbox" { return "dropbox".into(); }
+        }
+    }
+    "github".into()
+}
 fn archive_catalog(root: &Path) -> Vec<PathBuf> {
     if !root.is_dir() { return Vec::new(); }
     let mut result = Vec::new();
@@ -148,17 +179,38 @@ impl NativeApp {
         });
         let vault_path = default_vault_path();
         let must_unlock_on_start = std::fs::symlink_metadata(&vault_path).is_ok();
+        let migrated = read_legacy_settings();
+        let prefs = migrated.as_ref().unwrap_or(&serde_json::Value::Null);
+        let output = prefs["output_directory"].as_str()
+            .filter(|s| !s.is_empty() && s.len() < 4096)
+            .unwrap_or_else(|| "").to_owned();
+        let default_output_path = if output.is_empty() { default_output() } else { output };
+        let age_recipient = prefs["default_recipient"].as_str()
+            .filter(|v|v.starts_with("age1") && v.len() >= 24 && v.len() < 256)
+            .unwrap_or("").to_owned();
+        let max_runs = prefs["backup_ci_runs"].as_u64()
+            .filter(|v| (1..=1000).contains(v)).unwrap_or(5);
+        let update_channel = match prefs["update_channel"].as_str() {
+            Some("stable") => "stable", Some("early-release") => "early-release",
+            _ => "stable",
+        };
+        let provider = imported_provider(prefs);
         let fields = Fields {
-            output: default_output(),
+            output: default_output_path,
+            recipient: age_recipient,
             vault_path: vault_path.display().to_string(),
-            max_runs: "5".into(),
+            max_runs: max_runs.to_string(),
             ..Fields::default()
         };
         let entries = archive_catalog(Path::new(&fields.output));
         Self {
             fields, page: Page::Dashboard, sidebar: true, about: false,
-            provider: "github".into(),
-            status: "Nessun backup attivo".into(),
+            provider,
+            status: match migrated {
+                Ok(serde_json::Value::Null) => "Nessun backup attivo".into(),
+                Ok(_) => "Impostazioni r018 importate in sola lettura".into(),
+                Err(error) => format!("Impostazioni legacy non importate: {error}"),
+            },
             active: false, started: Instant::now(),
             last_activity: Instant::now(), progress: None, receiver: None,
             hero: load_photo(ctx, "backup-hero", include_bytes!("../../assets/hero.jpg")),
@@ -168,7 +220,7 @@ impl NativeApp {
             session_identity: None,
             smoke_frames: if smoke { Some(0) } else { None },
             remote_confirm: None,
-            update_channel: "early-release".into(),
+            update_channel: update_channel.into(),
             update_info: None,
         }
     }
