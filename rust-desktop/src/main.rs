@@ -696,7 +696,33 @@ impl eframe::App for NativeApp {
     }
 }
 
+/// Bundled native helpers must be discoverable even when the app is launched
+/// from Finder or Windows Explorer, where the usual shell PATH is absent.
+/// Only our installed application directories are prepended.
+fn configure_bundled_helpers() {
+    let Ok(executable) = std::env::current_exe() else { return };
+    let Some(parent) = executable.parent() else { return };
+    #[cfg(target_os = "macos")]
+    let candidate = parent.parent().map(|contents| contents.join("Resources/bin"));
+    #[cfg(target_os = "windows")]
+    let candidate = Some(parent.join("bin"));
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let candidate = Some(parent.join("bin"));
+    let Some(candidate) = candidate else { return };
+    if !candidate.is_dir() { return; }
+    // A signed application owns this folder; reject a symlink placed over it.
+    if std::fs::symlink_metadata(&candidate)
+        .is_ok_and(|meta| meta.file_type().is_symlink()) { return; }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths = vec![candidate];
+    paths.extend(std::env::split_paths(&current));
+    if let Ok(joined) = std::env::join_paths(paths) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
 fn main() -> eframe::Result {
+    configure_bundled_helpers();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
         println!("{VERSION}"); return Ok(());
