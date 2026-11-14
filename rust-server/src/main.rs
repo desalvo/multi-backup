@@ -35,6 +35,8 @@ struct AppConfig {
     oidc: Option<OidcConfig>,
     pending_oidc: Mutex<HashMap<String,Pending>>,
     sessions: Mutex<HashMap<String, Session>>,
+    failed_logins: Mutex<HashMap<String, (Instant,u32)>>,
+    last_smtp_test: Mutex<Option<Instant>>,
 }
 #[derive(Clone)]
 struct Session { csrf: String, until: Instant, user: String }
@@ -47,14 +49,26 @@ struct Export { backup_id: String, selection: Option<String>, selections: Option
 fn random_token() -> String {
     let mut bytes=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut bytes);hex::encode(bytes)
 }
-fn audit(state:&AppConfig,event:&str) {
+fn audit_actor(state:&AppConfig,event:&str,actor:&str) {
     if let Some(parent)=state.audit.parent(){let _=fs::create_dir_all(parent);}
     if let Ok(mut log)=OpenOptions::new().create(true).append(true).open(&state.audit) {
-        let line=json!({"time":chrono::Utc::now().to_rfc3339(),"event":event,"user":state.name});
+        let line=json!({"time":chrono::Utc::now().to_rfc3339(),
+            "event":event,"user":actor});
         let _=writeln!(log,"{}",line);
         let _=log.sync_data();
     }
 }
+fn audit(state:&AppConfig,event:&str){audit_actor(state,event,"system");}
+fn oidc_cookie_state(headers:&HeaderMap)->Option<String>{
+    let cookie=headers.get(header::COOKIE)?.to_str().ok()?;
+    let state=cookie.split(';').find_map(|item|
+        item.trim().strip_prefix("mb_oidc_state="))?;
+    if (16..=512).contains(&state.len()) &&
+       state.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-'||b==b'_'){
+        Some(state.to_string())
+    }else{None}
+}
+
 fn session(headers:&HeaderMap,state:&AppConfig)->Option<(String,Session)> {
     let cookie=headers.get(header::COOKIE)?.to_str().ok()?;
     let token=cookie.split(';').find_map(|part|
@@ -98,6 +112,19 @@ async fn login_page(State(state):State<AppState>)->Response {
 async fn do_login(State(state):State<AppState>,headers:HeaderMap,
                   Form(login):Form<Login>)->Response{
     if !same_origin(&headers,&state.0){return secure_headers(StatusCode::FORBIDDEN);}
+    if login.username.is_empty()||login.username.len()>128||login.password.len()>1024 {
+        return secure_headers(StatusCode::BAD_REQUEST);
+    }
+    {
+        let Ok(mut failed)=state.0.failed_logins.lock() else {
+            return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
+        };
+        failed.retain(|_,(then,_)|then.elapsed()<Duration::from_secs(900));
+        if failed.get(&login.username).is_some_and(|(_,count)|*count>=5) {
+            return secure_headers(StatusCode::TOO_MANY_REQUESTS);
+        }
+        if failed.len()>1024 {return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
+    }
     let local=PasswordHash::new(&state.0.password_hash).ok()
         .map(|hash|Argon2::default().verify_password(
             login.password.as_bytes(),&hash).is_ok()).unwrap_or(false)
@@ -112,8 +139,15 @@ async fn do_login(State(state):State<AppState>,headers:HeaderMap,
         }else{false}
     }else{false};
     if !local&&!ldap_valid {
-        audit(&state.0,"login_failed");
+        if let Ok(mut failed)=state.0.failed_logins.lock() {
+            let item=failed.entry(login.username.clone()).or_insert((Instant::now(),0));
+            item.1=item.1.saturating_add(1);
+        }
+        audit_actor(&state.0,"login_failed",&login.username);
         return secure_headers((StatusCode::UNAUTHORIZED,Html("Invalid credentials")));
+    }
+    if let Ok(mut failures)=state.0.failed_logins.lock(){
+        failures.remove(&login.username);
     }
     let token=random_token();
     let csrf=random_token();
@@ -126,7 +160,7 @@ async fn do_login(State(state):State<AppState>,headers:HeaderMap,
         user:login.username.clone()
     });
     drop(sessions);
-    audit(&state.0,if local{"login_local_success"}else{"login_ldaps_success"});
+    audit_actor(&state.0,if local{"login_local_success"}else{"login_ldaps_success"},&login.username);
     let secure=if state.0.origin.starts_with("https://"){"; Secure"}else{""};
     let cookie=format!("mb_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800{secure}");
     let mut response=Redirect::to("/").into_response();
@@ -151,9 +185,13 @@ async fn oidc_start(State(state):State<AppState>)->Response{
         if entries.len()>=100{return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
         entries.insert(csrf,pending);
     }
-    secure_headers(Redirect::temporary(&url))
+    // Bind this OIDC state to the initiating browser, preventing login CSRF.
+    let cookie=format!("mb_oidc_state={csrf}; Path=/oidc; Secure; HttpOnly; SameSite=Lax; Max-Age=600");
+    let mut response=Redirect::temporary(&url).into_response();
+    if let Ok(value)=cookie.parse(){response.headers_mut().insert(header::SET_COOKIE,value);}
+    secure_headers(response)
 }
-async fn oidc_callback(State(state):State<AppState>,
+async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     axum::extract::Query(params):axum::extract::Query<OidcReturn>)->Response{
     let Some(config)=state.0.oidc.clone() else {
         return secure_headers(StatusCode::NOT_FOUND);
@@ -162,6 +200,10 @@ async fn oidc_callback(State(state):State<AppState>,
     let Some(state_param)=params.state.filter(|s|s.len()>=16&&s.len()<=512) else {
         return secure_headers(StatusCode::UNAUTHORIZED);
     };
+    if oidc_cookie_state(&headers).as_deref()!=Some(state_param.as_str()) {
+        audit(&state.0,"oidc_browser_state_mismatch");
+        return secure_headers(StatusCode::UNAUTHORIZED);
+    }
     let Some(code)=params.code.filter(|s|!s.is_empty()&&s.len()<=8192) else {
         return secure_headers(StatusCode::UNAUTHORIZED);
     };
@@ -194,10 +236,14 @@ async fn oidc_callback(State(state):State<AppState>,
             user:format!("oidc:{subject}")
         });
     }
-    audit(&state.0,"login_oidc_success");
-    let cookie=format!("mb_session={cookie_id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800; Secure");
+    audit_actor(&state.0,"login_oidc_success",&format!("oidc:{subject}"));
+    let session_cookie=format!("mb_session={cookie_id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800; Secure");
     let mut response=Redirect::to("/").into_response();
-    if let Ok(value)=cookie.parse(){response.headers_mut().insert(header::SET_COOKIE,value);}
+    if let Ok(value)=session_cookie.parse(){
+        response.headers_mut().append(header::SET_COOKIE,value);
+    }
+    response.headers_mut().append(header::SET_COOKIE,
+        "mb_oidc_state=; Path=/oidc; HttpOnly; Secure; SameSite=Lax; Max-Age=0".parse().unwrap());
     secure_headers(response)
 }
 
@@ -244,7 +290,7 @@ async fn export(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<Ex
     let selections=req.selections.unwrap_or_else(||req.selection.into_iter().collect());
     let result=store.restore_many(identity,&req.backup_id,&selections,&dir)
         .map_err(|_|(StatusCode::BAD_REQUEST,Json(json!({"error":"restore_failed_integrity_or_selection"}))))?;
-    audit(&state.0,"selective_export_completed");
+    audit_actor(&state.0,"selective_export_completed",&auth.user);
     Ok(Json(json!({"files":result,"server_directory":dir.to_string_lossy()})))
 }
 async fn smtp_status(State(state):State<AppState>,headers:HeaderMap)
@@ -259,6 +305,17 @@ async fn smtp_test(State(state):State<AppState>,headers:HeaderMap)
     if !same_origin(&headers,&state.0)||
         headers.get("x-csrf-token").and_then(|s|s.to_str().ok())!=Some(auth.csrf.as_str()){
         return Err((StatusCode::FORBIDDEN,Json(json!({"error":"csrf_rejected"}))));
+    }
+    if auth.user!=state.0.name {
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"admin_required"}))));
+    }
+    {
+        let mut last=state.0.last_smtp_test.lock().map_err(|_|(
+            StatusCode::INTERNAL_SERVER_ERROR,Json(json!({"error":"state_unavailable"}))))?;
+        if last.is_some_and(|then|then.elapsed()<Duration::from_secs(60)) {
+            return Err((StatusCode::TOO_MANY_REQUESTS,Json(json!({"error":"smtp_test_rate_limited"}))));
+        }
+        *last=Some(Instant::now());
     }
     let cfg=state.0.smtp.clone().ok_or_else(||(
         StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"smtp_not_configured"}))))?;
@@ -283,7 +340,7 @@ async fn logout(State(state):State<AppState>,headers:HeaderMap)->Response {
         if same_origin(&headers,&state.0) &&
             headers.get("x-csrf-token").and_then(|x|x.to_str().ok())==Some(s.csrf.as_str()) {
             if let Ok(mut sessions)=state.0.sessions.lock(){sessions.remove(&token);}
-            audit(&state.0,"logout");
+            audit_actor(&state.0,"logout",&s.user);
             let mut result=Redirect::to("/login").into_response();
             result.headers_mut().insert(header::SET_COOKIE,
                 "mb_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".parse().unwrap());
@@ -330,6 +387,8 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         name,password_hash:hash,origin,root,exports,identity,audit,smtp,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
+        failed_logins:Mutex::new(HashMap::new()),
+        last_smtp_test:Mutex::new(None),
     }));
     let app=Router::new().route("/healthz",get(health))
         .route("/login",get(login_page).post(do_login))
@@ -347,4 +406,19 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let listener=tokio::net::TcpListener::bind(bind.parse::<SocketAddr>()?).await?;
     axum::serve(listener,app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod security_tests{
+    use super::*;
+    #[test]
+    fn oidc_browser_binding_rejects_missing_or_untrusted_cookie(){
+        let mut headers=HeaderMap::new();
+        assert!(oidc_cookie_state(&headers).is_none());
+        headers.insert(header::COOKIE,
+            "extra=a; mb_oidc_state=abcdefgh12345678; more=x".parse().unwrap());
+        assert_eq!(oidc_cookie_state(&headers).as_deref(),Some("abcdefgh12345678"));
+        headers.insert(header::COOKIE,"mb_oidc_state=../../".parse().unwrap());
+        assert!(oidc_cookie_state(&headers).is_none());
+    }
 }

@@ -202,3 +202,8 @@ multi-backup-auth must contain admin-hash, age-identity and, when enabled,
 the optional oidc-client-secret and smtp-password keys. For production,
 role-based authorization, audit integrity, abuse controls and live provider
 interoperability remain explicit acceptance requirements.
+
+
+### Security hardening (r024 development)
+
+The OIDC state is now bound to the initiating browser using a short-lived Secure, HttpOnly, SameSite=Lax cookie; callbacks with missing/different state are rejected. Local/LDAPS passwords have a bounded 5-failure/15-minute per-account lockout. The SMTP test action is restricted to the local administrator and limited to one invocation per 60 seconds. Audit events now record the authenticated actor rather than attributing every action to the local admin. These controls still require penetration tests, proxy-aware rate limiting, durable shared session storage and operational OIDC/LDAPS/SMTP verification for production.
