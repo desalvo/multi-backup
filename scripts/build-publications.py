@@ -117,7 +117,10 @@ class Book(BaseDocTemplate):
         c.setFont('DejaVu',10);c.drawString(20*mm,42*mm,('Sicuro  •  Incrementale  •  Multipiattaforma' if self.lang=='IT'
                                                        else 'Secure  •  Incremental  •  Cross-platform'))
         c.setFont('DejaVu',8);c.setFillColor(colors.HexColor('#b9dbf6'))
-        c.drawString(20*mm,17*mm,f'RELEASE CANDIDATE 1  |  {self.lang}  |  NOVEMBER 2026')
+        publication_label=(f'R018 DISTRIBUTED + R038 RUST DEV PREVIEW  |  {self.lang}'
+                           if self.kind=='manual' else
+                           f'RELEASE CANDIDATE 1  |  {self.lang}  |  NOVEMBER 2026')
+        c.drawString(20*mm,17*mm,publication_label)
         c.restoreState()
 
 
