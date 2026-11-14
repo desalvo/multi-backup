@@ -6,16 +6,16 @@
 
 This file is a machine-auditable checklist of required evidence; a green
 compilation, local test suite, or prototype Docker image does not certify the
-complete backup appliance. Keep the working r018 on main untouched.
+complete backup appliance. Preserve the working r018 Python/Tk release assets while the merged Rust code remains experimental.
 
 | Gate | Requirement for certification | Verified evidence/status |
 | --- | --- | --- |
-| Production gate | Python/Rust tests, Ruff/Bandit, dependency audits | PASS on 43606951658; repeat on latest head |
+| Production gate | Python/Rust tests, Ruff/Bandit, dependency audits | PASS on feature head 860d390a, run 43640869549 (19/19 required verification jobs, 0 failed) |
 | Storage v1 | Dedup, age, parity, fault injection, verify and restore | Code/test added; not formally qualified |
 | Portable ZIP64 | Integrity-checked multi-volume export/import and retry | Code/test added; needs large-volume qualification |
 | Logical browse | GitHub, LFS, CI, metadata, Dropbox under ONE backup | Rust manifest and responsive web prototype; provider E2E pending |
 | Complete native Rust | No Python runtime in installer or provider actions | Rust preview built in prior revisions; complete parity not proven |
-| Desktop platform CI | Mac ARM/Intel, Windows, EL8/9/10, Ubuntu | FAIL on 43606951658; follow-up build pending |
+| Desktop platform CI | Mac ARM/Intel, Windows, EL8/9/10, Ubuntu, Debian 12/13 AMD64/ARM64 | PASS on feature head 860d390a, run 43640869549; local installed-app and live-provider qualification still pending |
 | Production app signature | Apple Developer ID + notarization, Windows Authenticode, signed RPM repo | Credentials/hardware validation unavailable |
 | Registry | Multi-arch Docker Hub with SBOM/provenance, architecture runtime tests | OCI build works, push unverified/not configured |
 | Kubernetes | Helm/Kustomize render, PVC, TLS, NGINX/HAProxy, wizard, upgrades, backup persistence | Config added; deployment and upgrade acceptance pending |
