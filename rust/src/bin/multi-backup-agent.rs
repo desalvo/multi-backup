@@ -1,7 +1,8 @@
 //! Multi Backup unattended Rust agent (AFS first, extensible per-plugin).
 //! No inbound listener. Pull = outbound TLS poll for approved local profiles;
 //! push = locally initiated signed TLS upload. No Python or shell evaluation.
-use multi_backup_core::{afs_volume::{self,VolumeJob,Execution},agent_protocol as wire};
+use multi_backup_core::{afs_volume::{self,VolumeJob,Execution},
+    agent_protocol as wire,execution_policy::{ExecutionLimits,ThrottledReader}};
 use base64::{engine::general_purpose::STANDARD as B64,Engine as _};
 use serde::{Serialize,Deserialize};
 use serde_json::{json,Value};
@@ -22,6 +23,7 @@ struct Config {
     agent_id:String,user:String,server_url:String,
     signing_key:PathBuf,token_file:PathBuf,sequence_file:PathBuf,
     profiles_dir:PathBuf,spool_dir:PathBuf,
+    #[serde(default)] limits:ExecutionLimits,
 }
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +42,8 @@ struct UploadManifest<'a> {
     volume:&'a str,
     encrypted_bytes:u64,
     recipient:&'a str,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pull_job_id:Option<&'a str>,
 }
 fn err<T:ToString>(value:T)->String{value.to_string()}
 fn arguments(args:&[String])->Res<BTreeMap<String,String>>{
@@ -119,7 +123,8 @@ fn init(opts:&BTreeMap<String,String>)->Res<()>{
         server_url:server_url.into(),signing_key:key,
         token_file:parent.join("agent-server-token.txt"),
         sequence_file:parent.join("agent-sequence.txt"),
-        profiles_dir:profiles,spool_dir:spool};
+        profiles_dir:profiles,spool_dir:spool,
+        limits:ExecutionLimits::default()};
     atomic_private(&location,&serde_json::to_vec_pretty(&cfg).map_err(err)?)?;
     println!("{}",serde_json::to_string_pretty(&json!({
         "agent_id":agent_id,"user":user,"public_key":public,
@@ -134,6 +139,7 @@ fn load(opts:&BTreeMap<String,String>)->Res<Config>{
        !wire::valid_tls_endpoint(&c.server_url){
         return Err("Invalid agent identity or HTTPS server endpoint".into());
     }
+    c.limits.validate()?;
     Ok(c)
 }
 fn profile(config:&Config,id:&str)->Res<AgentProfile>{
@@ -190,7 +196,9 @@ fn signed_headers(config:&Config,method:&str,route:&str,
     ])
 }
 fn request(config:&Config,method:&str,route:&str,body:Option<&Path>,
-           metadata:&[u8])->Res<Value>{
+           metadata:&[u8],limits:&ExecutionLimits)->Res<Value>{
+    limits.validate()?;
+    limits.check_host()?;
     if !wire::valid_tls_endpoint(&config.server_url){
         return Err("Refusing non-HTTPS agent connection".into());
     }
@@ -209,11 +217,14 @@ fn request(config:&Config,method:&str,route:&str,body:Option<&Path>,
     let mut r=agent.request(method,&endpoint);
     for (key,value) in headers {r=r.set(&key,&value);}
     let response=if let Some(path)=body{
-        r.set("Content-Type","application/octet-stream").send(File::open(path).map_err(err)?)
+        r.set("Content-Type","application/octet-stream")
+            .send(ThrottledReader::new(File::open(path).map_err(err)?,
+                limits.clone())?)
     }else{r.call()}.map_err(err)?;
     response.into_json::<Value>().map_err(err)
 }
-fn age_encrypt_to_spool(config:&Config,p:&AgentProfile)->Res<PathBuf>{
+fn age_encrypt_to_spool(config:&Config,p:&AgentProfile,limits:&ExecutionLimits)->Res<PathBuf>{
+    limits.validate()?;limits.check_host()?;
     fs::create_dir_all(&config.spool_dir).map_err(err)?;
     let ciphertext=tempfile::Builder::new().prefix("pending-afs-")
         .suffix(".age").tempfile_in(&config.spool_dir).map_err(err)?;
@@ -235,7 +246,7 @@ fn age_encrypt_to_spool(config:&Config,p:&AgentProfile)->Res<PathBuf>{
     // The pinned configuration names the agent; locally it has no need
     // for a network listener and executes only its own allowlisted vos command.
     job.execution=Execution::Local;
-    let dump=afs_volume::stream_dump_to(&job,&mut stdin);
+    let dump=afs_volume::stream_dump_limited(&job,&mut stdin,limits);
     drop(stdin);
     let output=copy.join().map_err(|_|"Encrypted pipeline worker failed")?
         .map_err(err)?;
@@ -245,17 +256,18 @@ fn age_encrypt_to_spool(config:&Config,p:&AgentProfile)->Res<PathBuf>{
     ciphertext.keep().map_err(|e|err(e.error))?;
     Ok(target)
 }
-fn push(config:&Config,profile_id:&str,force:bool)->Res<()>{
+fn push(config:&Config,profile_id:&str,force:bool,limits:&ExecutionLimits,
+        pull_job_id:Option<&str>)->Res<()>{
     let p=profile(config,profile_id)?;
     if !p.enable_push&&!force {return Err("This agent profile has push disabled".into());}
-    let encrypted=age_encrypt_to_spool(config,&p)?;
+    let encrypted=age_encrypt_to_spool(config,&p,limits)?;
     let id=hex::encode(rand::random::<[u8;32]>());
     let size=fs::metadata(&encrypted).map_err(err)?.len();
     let manifest=UploadManifest{backup_id:&id,profile_id:&p.id,provider:"afs",
         cell:&p.job.cell,volume:&p.job.volume,encrypted_bytes:size,
-        recipient:&p.recipient};
+        recipient:&p.recipient,pull_job_id};
     let meta=serde_json::to_vec(&manifest).map_err(err)?;
-    match request(config,"POST","/api/agents/upload",Some(&encrypted),&meta){
+    match request(config,"POST","/api/agents/upload",Some(&encrypted),&meta,limits){
         Ok(result)=>{
             fs::remove_file(encrypted).map_err(err)?;
             println!("{}",result);
@@ -270,20 +282,48 @@ fn push(config:&Config,profile_id:&str,force:bool)->Res<()>{
 fn poll(config:&Config,once:bool,interval:u64)->Res<()>{
     if !(10..=3600).contains(&interval){return Err("Poll seconds must be 10..3600".into());}
     loop{
-        match request(config,"GET","/api/agents/poll",None,b""){
+        match request(config,"GET","/api/agents/poll",None,b"",&config.limits){
             Ok(json)=>{
                 if json["approved"]!=true {return Err("Agent is not approved by server".into());}
+                let server_limits:ExecutionLimits=serde_json::from_value(
+                    json.get("limits").cloned().ok_or(
+                        "Server poll omitted mandatory resource limits")?
+                    ).map_err(err)?;
+                let effective=ExecutionLimits::strictest(&server_limits,&config.limits)?;
                 if let Some(jobs)=json["jobs"].as_array(){
+                    let mut ready=Vec::new();
                     for job in jobs{
                         let id=job["profile_id"].as_str().ok_or("Missing profile")?;
-                        let p=profile(config,id)?;
-                        let body=fs::read(config.profiles_dir.join(format!("{id}.json"))).map_err(err)?;
+                        let id=id.to_owned();
+                        let p=profile(config,&id)?;
+                        let body=fs::read(config.profiles_dir.join(format!("{id}.json")))
+                            .map_err(err)?;
                         if wire::hex_sha(&body)!=job["profile_sha256"].as_str().unwrap_or(""){
                             return Err("Server job differs from locally approved profile".into());
                         }
+                        let task=job["job_id"].as_str().ok_or("Missing pull lease ID")?;
+                        if !wire::valid_id(task){return Err("Invalid remote pull ID".into());}
                         let _=p;
-                        push(config,id,true)?;
+                        ready.push((id,task.to_owned()));
                     }
+                    // Distinct AFS volumes are independent streams. Bounded
+                    // parallel workers cannot split an individual vos dump.
+                    // Each upload carries its own signed nonce and a lease ID.
+                    let max=effective.max_concurrent_jobs as usize;
+                    std::thread::scope(|scope|->Res<()>{
+                        for group in ready.chunks(max){
+                            let mut handles=Vec::new();
+                            for (id,task) in group{
+                                let l=effective.clone();
+                                handles.push(scope.spawn(move||
+                                    push(config,id,true,&l,Some(task))));
+                            }
+                            for worker in handles{
+                                worker.join().map_err(|_|"Agent worker panicked")??;
+                            }
+                        }
+                        Ok(())
+                    })?;
                 }
             },
             Err(e)=>eprintln!("Agent poll failed (no job will run): {e}"),
@@ -318,10 +358,13 @@ fn run()->Res<()>{
         }
         "run"=>{
             let cfg=load(&opts)?;let p=profile(&cfg,required(&opts,"--profile")?)?;
-            let outfile=age_encrypt_to_spool(&cfg,&p)?;
+            let outfile=age_encrypt_to_spool(&cfg,&p,&cfg.limits)?;
             println!("Encrypted standalone AFS volume dump: {}",outfile.display());Ok(())
         }
-        "push"=>push(&load(&opts)?,required(&opts,"--profile")?,false),
+        "push"=>{
+            let cfg=load(&opts)?;
+            push(&cfg,required(&opts,"--profile")?,false,&cfg.limits,None)
+        },
         "poll"=>{
             let interval=opts.get("--poll-seconds").map(|x|x.parse::<u64>().map_err(err))
                 .transpose()?.unwrap_or(60);
