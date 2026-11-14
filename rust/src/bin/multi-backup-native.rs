@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault};
+use multi_backup_core::{chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -10,6 +10,10 @@ fn usage() -> &'static str {
     "Multi Backup Rust archive CLI (EUPL-1.2)\n\
      Usage:\n\
        multi-backup-native --version\n\
+       multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
+       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
+       multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
+       multi-backup-native storage restore --root DIR --identity IDENTITY --id HASH --destination NEW_DIR [--selection PATH]\n\
        multi-backup-native archive create --source DIR --output FILE.tar.gz.age --recipient age1... [--prefix multi-backup]\n\
        multi-backup-native archive list --archive FILE.tar.gz.age --identity AGE_KEY [--json]\n\
        multi-backup-native archive verify --archive FILE.tar.gz.age --identity AGE_KEY\n\
@@ -91,6 +95,59 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "storage" {
+        if password_stdin { return Err("Storage uses a separately supplied age identity".into()); }
+        let root = Path::new(required(&flags, "--root")?);
+        match command {
+            "init" => {
+                accepted(&flags, &["--root","--recipient","--chunk-mib"])?;
+                let chunk_mib = flags.get("--chunk-mib").copied().unwrap_or("4").parse::<usize>()?;
+                let bytes = chunk_mib.checked_mul(1024*1024).ok_or("Invalid chunk size")?;
+                chunk_store::Store::init(root, required(&flags,"--recipient")?, bytes)?;
+                println!("Initialized immutable age/Zstandard storage; legacy archives untouched");
+            }
+            "backup" => {
+                accepted(&flags, &["--root","--identity","--label","--sources-json"])?;
+                let identity = Path::new(required(&flags, "--identity")?);
+                let store = chunk_store::Store::open(root, identity)?;
+                let sources_file = std::fs::File::open(required(&flags, "--sources-json")?)?;
+                let values: Vec<serde_json::Value> = serde_json::from_reader(sources_file)?;
+                if values.is_empty() { return Err("Sources JSON must be nonempty".into()); }
+                let sources: Vec<chunk_store::Source> = values.iter().map(|value| {
+                    let namespace = value["namespace"].as_str().ok_or("Missing namespace")?;
+                    let path = value["directory"].as_str().ok_or("Missing directory")?;
+                    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(chunk_store::Source {
+                        namespace: namespace.to_owned(), directory: path.into(),
+                    })
+                }).collect::<Result<_,_>>()?;
+                let snapshot = store.backup(identity, required(&flags,"--label")?, &sources)?;
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            }
+            "list" => {
+                accepted(&flags, &["--root","--identity"])?;
+                let identity = Path::new(required(&flags, "--identity")?);
+                let snapshots = chunk_store::Store::open(root, identity)?.list(identity)?;
+                if json {println!("{}", serde_json::to_string_pretty(&snapshots)?);}
+                else {
+                    for backup in &snapshots {
+                        println!("{} {} ({} logical files)",backup.id,backup.label,backup.entries.len());
+                    }
+                }
+            }
+            "restore" => {
+                accepted(&flags, &["--root","--identity","--id","--selection","--destination"])?;
+                let identity = Path::new(required(&flags, "--identity")?);
+                let count = chunk_store::Store::open(root, identity)?.restore(
+                    identity,required(&flags,"--id")?,
+                    flags.get("--selection").copied(),
+                    Path::new(required(&flags,"--destination")?))?;
+                println!("Restored {} verified files to a fresh directory",count);
+            }
+            _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
+
     if family == "updates" {
         if password_stdin { return Err("No credentials accepted for update checks".into()); }
         accepted(&flags, if command == "stage" {
