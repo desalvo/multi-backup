@@ -1,6 +1,6 @@
 # Multi Backup development status
 
-**Current version:** 0.1.0-r016-rc1  
+**Last existing working release:** 0.1.0-r018-rc1 (Python/Tk); **main development baseline:** Rust-native r037 preview  
 **Repository:** https://github.com/desalvo/multi-backup  
 **Baseline:** migrated from desalvo/github-backup 0.1.0-r001; new project namespace and plugin architecture.
 
@@ -552,3 +552,13 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
   age-based cleanup. Output plugin-level capacity is partially supported
   for pre-mounted filesystems; cloud API quotas/namespace index
   persistence still require integration and live verification.
+
+
+## r038 integration / RC-preparation checkpoint (2026-11-14)
+
+- PR [#9](https://github.com/desalvo/multi-backup/pull/9), containing Rust-native development r019-r037 and the native CLI acceptance matrix, **squash-merged to main** as commit `b7e757d9378d2503b57fa43267577a3a55f60fd2`.
+- Its exact premerge feature head `860d390a0de6655ceafa6f7ea3eaeb376a1bf046` passed [Actions run 43640869549](https://github.com/desalvo/multi-backup/actions/runs/43640869549): **19 of 19 verification jobs successful, 0 failed; 2 release/registry publication jobs correctly skipped on PR**. All 17 nonexpired preview artifact groups were present. This confirms CI tests/builds, not live-provider or installer usability certification.
+- Mandatory compiled CLI restore regression `rust/tests/native_cli_restore_matrix.rs` runs against Linux, macOS ARM/Intel, Windows and Debian 12/13 AMD64/ARM64; it tests encrypted archive create/verify/byte-for-byte restore, wrong-key/sidecar corruption rejection, no overwrite, namespace restore and protected-backup deletion refusal.
+- The merge commit deliberately omits `[full-ci]` and does not request public early release or stable publication. The previous working r018 early-release assets must remain available, and experimental server/plugin/mount features must remain opt-in, not advertised production-ready.
+- The next main-branch CI for this integration/documentation snapshot must be observed independently; the green premerge PR is not proof that follow-up commits passed.
+- **Remaining RC acceptance:** real authenticated GitHub+Dropbox backups/restores (CI/LFS and interruptions), installed native GUI/user visual and access checks, legacy migration recovery, Apple Developer ID/notarization, Windows Authenticode/RPM signatures, update/rollback, mounted WebDAV server hardening, scheduler and protected GC certification, live provider plugin adapters and independent security assessment. No stable tag or promoted Docker image is authorized on these results alone.
