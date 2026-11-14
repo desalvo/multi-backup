@@ -3,7 +3,7 @@
 //! openidconnect; access only for explicitly allowed stable subject IDs.
 use openidconnect::{
     core::{CoreAuthenticationFlow,CoreClient,CoreProviderMetadata},
-    reqwest,AuthorizationCode,ClientId,ClientSecret,CsrfToken,IssuerUrl,
+    reqwest,AccessTokenHash,AuthorizationCode,ClientId,ClientSecret,CsrfToken,IssuerUrl,
     Nonce,PkceCodeChallenge,PkceCodeVerifier,RedirectUrl,Scope,TokenResponse
 };
 use std::{collections::HashSet,env,fs,path::PathBuf,time::{Duration,Instant}};
@@ -90,7 +90,13 @@ impl OidcConfig {
             .request_async(&http).await?;
         let token=response.id_token().ok_or("Missing OIDC identity token")?;
         let nonce=Nonce::new(pending.nonce);
-        let claims=token.claims(&client.id_token_verifier(),&nonce)?;
+        let verifier=client.id_token_verifier();
+        let claims=token.claims(&verifier,&nonce)?;
+        if let Some(expected)=claims.access_token_hash(){
+            let actual=AccessTokenHash::from_token(response.access_token(),
+                token.signing_alg()?,token.signing_key(&verifier)?)?;
+            if &actual!=expected {return Err("OIDC access token hash mismatch".into());}
+        }
         let subject=claims.subject().as_str().to_string();
         if !self.allowed_subjects.contains(&subject){
             return Err("OIDC subject not authorized for Multi Backup".into());

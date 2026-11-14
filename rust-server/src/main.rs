@@ -195,7 +195,7 @@ async fn oidc_callback(State(state):State<AppState>,
         });
     }
     audit(&state.0,"login_oidc_success");
-    let cookie=format!("mb_session={cookie_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800; Secure");
+    let cookie=format!("mb_session={cookie_id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800; Secure");
     let mut response=Redirect::to("/").into_response();
     if let Ok(value)=cookie.parse(){response.headers_mut().insert(header::SET_COOKIE,value);}
     secure_headers(response)
