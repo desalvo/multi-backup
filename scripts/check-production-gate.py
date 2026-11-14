@@ -36,6 +36,13 @@ def validate():
     assert {(x['distro'],int(x['el'])) for x in el_matrix}=={
         ('rocky',8),('rocky',9),('rocky',10),('alma',8),('alma',9),('alma',10)
     }, 'Rust-only RPM builds must cover all six Rocky/Alma platforms'
+    assert jobs['rust-linux-debian-native-preview']['needs']==['production-gate']
+    deb_matrix=jobs['rust-linux-debian-native-preview']['strategy']['matrix']['include']
+    assert {(int(x['version']),x['arch']) for x in deb_matrix}=={
+        (12,'amd64'),(12,'arm64'),(13,'amd64'),(13,'arm64')
+    }, 'Debian 12/13 AMD64/ARM64 matrix must be complete'
+    assert 'package-rust-debian-preview.sh' in str(jobs['rust-linux-debian-native-preview']['steps'])
+    assert (ROOT/'scripts/package-rust-debian-preview.sh').is_file()
     assert 'multi-backup-rust.spec' in str(jobs['rust-linux-rpm-native-preview']['steps']), 'Native Rust RPM spec missing'
     mac_matrix=jobs['rust-macos-native-preview']['strategy']['matrix']['include']
     assert {x['arch'] for x in mac_matrix}=={'arm64','x86_64'}, 'Both native Mac architectures are mandatory'
@@ -59,22 +66,27 @@ def validate():
         'production-gate','macos-smoke','publications-smoke',
         'rust-server-validation','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
-        'rust-linux-rpm-native-preview'
+        'rust-linux-rpm-native-preview','rust-linux-debian-native-preview'
     ], 'Native release cannot bypass Rust-only cross-platform acceptance'
     assert jobs['publish-container']['needs']==[
         'production-gate','rust-server-validation','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
-        'rust-linux-rpm-native-preview','publications-smoke'
+        'rust-linux-rpm-native-preview','rust-linux-debian-native-preview','publications-smoke'
     ], 'Docker Hub publication cannot bypass Rust-only cross-platform acceptance'
     assert 'ENABLE_STABLE_RUST' in jobs['native-release']['if']
     assert 'ENABLE_STABLE_RUST' in jobs['publish-container']['if']
     assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
     assert 'workflow_call' in native['on'] and len(native['on'])==1, 'Native workflow must not publish independently'
     release=native['jobs']
-    for name in ('macos','windows','linux-rpm'):
+    for name in ('macos','windows','linux-rpm','linux-deb'):
         assert 'qualify' in release[name]['needs'],f'{name} skipped release qualification'
-    assert {'qualify','macos','windows','linux-rpm'}.issubset(set(release['publish']['needs']))
+    assert {'qualify','macos','windows','linux-rpm','linux-deb'}.issubset(set(release['publish']['needs']))
     assert {'qualify','macos','windows','linux-rpm'}.issubset(set(release['rpm-repositories']['needs']))
+    release_deb_matrix=release['linux-deb']['strategy']['matrix']['include']
+    assert {(int(x['version']),x['arch']) for x in release_deb_matrix}=={
+        (12,'amd64'),(12,'arm64'),(13,'amd64'),(13,'arm64')
+    }, 'Release must package every supported Debian target'
+    assert "'*.deb'" in str(release['publish']['steps'])
     assert 'if' in release['rpm-repositories'] and 'early-release' in release['rpm-repositories']['if']
     gate_steps='\n'.join(str(x.get('run','')) for x in jobs['production-gate']['steps'])
     for token in ('ruff check','bandit','pip_audit -r requirements.txt','pip_audit -r requirements-docs.txt',

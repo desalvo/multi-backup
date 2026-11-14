@@ -94,7 +94,7 @@ jobs:
 
   publish-container:
     name: Push Multi Backup OCI image to Docker Hub
-    needs: [production-gate, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, publications-smoke]
+    needs: [production-gate, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
     runs-on: ubuntu-24.04
     if: >-
       github.event_name != 'pull_request' &&
@@ -298,6 +298,52 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  rust-linux-debian-native-preview:
+    name: Rust Debian ${{ matrix.version }} ${{ matrix.arch }} DEB
+    needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {version: 12, suite: bookworm, arch: amd64, runner: ubuntu-24.04}
+          - {version: 12, suite: bookworm, arch: arm64, runner: ubuntu-24.04-arm}
+          - {version: 13, suite: trixie, arch: amd64, runner: ubuntu-24.04}
+          - {version: 13, suite: trixie, arch: arm64, runner: ubuntu-24.04-arm}
+    container:
+      image: debian:${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust and Debian packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl git git-lfs gh age \
+            build-essential pkg-config dpkg-dev file libx11-dev libxi-dev libxcursor-dev \
+            libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev libssl-dev
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+      - name: Build and install native Debian package
+        shell: bash
+        env:
+          DEBIAN_VERSION: ${{ matrix.version }}
+          DEBIAN_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          source "$HOME/.cargo/env"
+          bash scripts/package-rust-debian-preview.sh
+          apt-get install -y ./packages/*.deb
+          multi-backup-native --version
+          multi-backup-rust --self-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-only-debian-${{ matrix.version }}-${{ matrix.arch }}-deb-preview
+          path: packages/*
+          retention-days: 14
+          if-no-files-found: error
+
   publications-smoke:
     name: Native GUI screenshots and EN/IT PDF publication smoke
     needs: [production-gate]
@@ -368,7 +414,7 @@ jobs:
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)
-    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview]
+    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&

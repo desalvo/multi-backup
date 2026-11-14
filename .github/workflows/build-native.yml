@@ -282,9 +282,55 @@ jobs:
             docs/screenshots/*.png
           retention-days: 30
 
+  linux-deb:
+    name: Rust Debian ${{ matrix.version }} ${{ matrix.arch }} DEB
+    needs: [qualify]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {version: 12, suite: bookworm, arch: amd64, runner: ubuntu-24.04}
+          - {version: 12, suite: bookworm, arch: arm64, runner: ubuntu-24.04-arm}
+          - {version: 13, suite: trixie, arch: amd64, runner: ubuntu-24.04}
+          - {version: 13, suite: trixie, arch: arm64, runner: ubuntu-24.04-arm}
+    container:
+      image: debian:${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust and Debian packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl git git-lfs gh age \
+            build-essential pkg-config dpkg-dev file libx11-dev libxi-dev libxcursor-dev \
+            libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev libssl-dev
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+      - name: Build and install native Debian package
+        shell: bash
+        env:
+          DEBIAN_VERSION: ${{ matrix.version }}
+          DEBIAN_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          source "$HOME/.cargo/env"
+          bash scripts/package-rust-debian-preview.sh
+          apt-get install -y ./packages/*.deb
+          multi-backup-native --version
+          multi-backup-rust --self-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-debian-${{ matrix.version }}-${{ matrix.arch }}-deb-preview
+          path: packages/*
+          retention-days: 14
+          if-no-files-found: error
+
   publish:
     name: Publish ${{ needs.qualify.outputs.channel }} releases
-    needs: [qualify, macos, windows, linux-rpm, publications]
+    needs: [qualify, macos, windows, linux-rpm, linux-deb, publications]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -298,11 +344,12 @@ jobs:
         shell: bash
         run: |
           mkdir release
-          find collected -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.rpm' -o -name '*.zip' \) -exec cp '{}' release/ \;
+          find collected -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.rpm' -o -name '*.deb' -o -name '*.zip' \) -exec cp '{}' release/ \;
           cp collected/native-publications/manuals/*.pdf collected/native-publications/brochures/*.pdf release/
           test $(find release -name '*.pdf' | wc -l) -eq 4
           test $(find release -name '*.dmg' | wc -l) -ge 2
           test $(find release -name '*.rpm' | wc -l) -ge 6
+          test $(find release -name '*.deb' | wc -l) -ge 4
           test $(find release -name '*.exe' | wc -l) -ge 1
           sha256sum release/* > release/SHA256SUMS
           python scripts/make-release-manifest.py release "${{ needs.qualify.outputs.channel }}" "${{ github.sha }}"
