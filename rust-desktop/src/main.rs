@@ -201,6 +201,11 @@ impl NativeApp {
         if self.active { return; }
         let source = self.fields.selected_archive.clone();
         let identity = self.fields.identity.clone();
+        let secret = self.session_identity.clone();
+        if source.trim().is_empty() || (identity.trim().is_empty() && secret.is_none()) {
+            self.status = "Per il ripristino remoto seleziona l'archivio e sblocca il vault".into();
+            return;
+        }
         let repo = self.fields.remote_repo.clone();
         let path = self.fields.remote_file.clone();
         let (tx, rx) = mpsc::channel();
@@ -212,13 +217,21 @@ impl NativeApp {
         thread::spawn(move || {
             let _ = tx.send(Event::Status(format!("Ripristino remoto {} richiesto…", provider)));
             let done = if provider == "github" {
-                remote_restore::github_new_repository(Path::new(&source),
-                    Path::new(&identity), &repo, true)
-                    .map_err(|e|e.to_string())
+                (if let Some(secret) = &secret {
+                    remote_restore::github_new_repository_from_memory(
+                        Path::new(&source), secret, &repo, true)
+                } else {
+                    remote_restore::github_new_repository(Path::new(&source),
+                        Path::new(&identity), &repo, true)
+                }).map_err(|e|e.to_string())
             } else {
-                remote_restore::dropbox_new_file(Path::new(&source),
-                    Path::new(&identity), &path)
-                    .map(|r|r["path_display"].as_str().unwrap_or(&path).to_owned())
+                (if let Some(secret) = &secret {
+                    remote_restore::dropbox_new_file_from_memory(
+                        Path::new(&source), secret, &path)
+                } else {
+                    remote_restore::dropbox_new_file(Path::new(&source),
+                        Path::new(&identity), &path)
+                }).map(|r|r["path_display"].as_str().unwrap_or(&path).to_owned())
                     .map_err(|e|e.to_string())
             };
             match done {

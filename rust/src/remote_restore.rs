@@ -33,12 +33,35 @@ fn checked_command(command: &str, args: &[&str]) -> RestoreResult<()> {
     if !status.success() { return Err(err("Remote GitHub restore command failed")); }
     Ok(())
 }
+enum Identity<'a> {
+    File(&'a Path),
+    Memory(&'a [u8]),
+}
+impl<'a> Identity<'a> {
+    fn extract(self, archive_path: &Path, destination: &Path) -> RestoreResult<()> {
+        match self {
+            Self::File(file) => { archive::extract(archive_path, file, destination)?; },
+            Self::Memory(secret) => {
+                archive::extract_from_memory(archive_path, secret, destination)?;
+            },
+        }
+        Ok(())
+    }
+}
 pub fn github_new_repository(archive_path: &Path, identity: &Path,
+                             target: &str, private: bool) -> RestoreResult<String> {
+    github_new_repository_with(archive_path, Identity::File(identity), target, private)
+}
+pub fn github_new_repository_from_memory(archive_path: &Path, secret: &[u8],
+                                         target: &str, private: bool) -> RestoreResult<String> {
+    github_new_repository_with(archive_path, Identity::Memory(secret), target, private)
+}
+fn github_new_repository_with(archive_path: &Path, identity: Identity<'_>,
                              target: &str, private: bool) -> RestoreResult<String> {
     github_slug(target)?;
     let temp = TempDir::new()?;
     let extracted = temp.path().join("decoded");
-    archive::extract(archive_path, identity, &extracted)?;
+    identity.extract(archive_path, &extracted)?;
     let mut matches = Vec::new();
     for found in walkdir::WalkDir::new(&extracted).follow_links(false)
         .max_depth(12).into_iter().filter_map(Result::ok)
@@ -133,10 +156,18 @@ impl DropboxWriter {
 }
 pub fn dropbox_new_file(archive_path: &Path, identity: &Path,
                         target: &str) -> RestoreResult<Value> {
+    dropbox_new_file_with(archive_path, Identity::File(identity), target)
+}
+pub fn dropbox_new_file_from_memory(archive_path: &Path, secret: &[u8],
+                                    target: &str) -> RestoreResult<Value> {
+    dropbox_new_file_with(archive_path, Identity::Memory(secret), target)
+}
+fn dropbox_new_file_with(archive_path: &Path, identity: Identity<'_>,
+                        target: &str) -> RestoreResult<Value> {
     dropbox_target(target)?;
     let temp = TempDir::new()?;
     let extracted = temp.path().join("decoded");
-    archive::extract(archive_path, identity, &extracted)?;
+    identity.extract(archive_path, &extracted)?;
     let files = walkdir::WalkDir::new(&extracted).follow_links(false)
         .into_iter().filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())

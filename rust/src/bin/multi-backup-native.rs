@@ -27,6 +27,7 @@ fn usage() -> &'static str {
        multi-backup-native github backup --output-dir PRIVATE_DIR --recipient age1KEY [--max-runs 5]\n\
        multi-backup-native github resume --output-dir PRIVATE_DIR --recipient age1KEY [--max-runs 5]\n\
        multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
+       multi-backup-native restore github --archive ARCHIVE --vault PROTECTED.agevault --target OWNER/NEW --confirm CREATE-NEW [--password-stdin]\n\
        multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
        multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native vault create --file NEW.agevault [--password-stdin]\n\
@@ -135,7 +136,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("Vault {command} authenticated for recipient {recipient}; private identity not exported");
         return Ok(());
     }
-    if password_stdin && family != "archive" {
+    if password_stdin && family != "archive" && family != "restore" {
         return Err("--password-stdin requires vault or protected archive".into());
     }
     if family == "journal" {
@@ -196,28 +197,55 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
     if family == "restore" {
-        if password_stdin || json { return Err("Unsupported remote restore flags".into()); }
+        if json { return Err("Unsupported remote restore JSON flag".into()); }
         if required(&flags, "--confirm")? != "CREATE-NEW" {
             return Err("Remote restore requires explicit --confirm CREATE-NEW".into());
         }
+        let plain = flags.get("--identity").copied();
+        let protected = flags.get("--vault").copied();
+        if plain.is_some() == protected.is_some() {
+            return Err("Specify exactly one --identity or --vault".into());
+        }
+        if password_stdin && protected.is_none() {
+            return Err("--password-stdin requires encrypted --vault".into());
+        }
+        let secret = if let Some(file) = protected {
+            let password = if password_stdin {
+                let mut buffer = Zeroizing::new(Vec::new());
+                io::stdin().take(1026).read_to_end(&mut *buffer)?;
+                let line = std::str::from_utf8(&buffer)?;
+                Zeroizing::new(line.trim_end_matches(['\r', '\n']).to_owned())
+            } else {
+                Zeroizing::new(rpassword::prompt_password("Vault password: ")?)
+            };
+            Some(vault::unlock_identity(Path::new(file), &password)?)
+        } else { None };
         let from = Path::new(required(&flags, "--archive")?);
-        let identity = Path::new(required(&flags, "--identity")?);
         match command {
             "github" => {
-                accepted(&flags, &["--archive", "--identity", "--target", "--visibility", "--confirm"])?;
+                accepted(&flags, &["--archive", "--identity", "--vault", "--target", "--visibility", "--confirm"])?;
                 let target = required(&flags, "--target")?;
                 let visibility = flags.get("--visibility").copied().unwrap_or("private");
                 if visibility != "private" && visibility != "public" {
                     return Err("Visibility must be private or public".into());
                 }
-                let url = remote_restore::github_new_repository(
-                    from, identity, target, visibility == "private")?;
+                let url = if let Some(secret) = &secret {
+                    remote_restore::github_new_repository_from_memory(
+                        from, secret, target, visibility == "private")?
+                } else {
+                    remote_restore::github_new_repository(
+                        from, Path::new(plain.unwrap()), target, visibility == "private")?
+                };
                 println!("New GitHub repository restored: {url}");
             },
             "dropbox" => {
-                accepted(&flags, &["--archive", "--identity", "--path", "--confirm"])?;
+                accepted(&flags, &["--archive", "--identity", "--vault", "--path", "--confirm"])?;
                 let path = required(&flags, "--path")?;
-                let result = remote_restore::dropbox_new_file(from, identity, path)?;
+                let result = if let Some(secret) = &secret {
+                    remote_restore::dropbox_new_file_from_memory(from, secret, path)?
+                } else {
+                    remote_restore::dropbox_new_file(from, Path::new(plain.unwrap()), path)?
+                };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
             _ => return Err(usage().into()),
