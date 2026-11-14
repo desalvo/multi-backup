@@ -85,7 +85,7 @@ def main() -> None:
         "docs/PLUGIN_API.md", "docs/RC_CERTIFICATION_MATRIX.md",
     ]:
         body = read(path)
-        for link in re.findall(r"\\]\\(([^)]+)\\)", body):
+        for link in re.findall(r"\]\(([^)]+)\)", body):
             value = link.split("#", 1)[0]
             if not value or value.startswith(("https://", "http://", "mailto:", "#")):
                 continue
