@@ -295,8 +295,10 @@ impl Store {
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
         }
-        fs2::FileExt::unlock(&lock)?;
+        // Keep the store lock until parity for the new manifest is committed:
+        // garbage collection must never observe a valid but unprotected backup.
         self.protect(identity, &snapshot.id)?;
+        fs2::FileExt::unlock(&lock)?;
         Ok(snapshot)
     }
     pub fn load(&self, identity: &Path, id: &str) -> Res<LogicalBackup> {
@@ -352,6 +354,9 @@ impl Store {
     /// the SAME logical backup, with a single atomic fresh destination.
     pub fn restore_many(&self, identity: &Path, id: &str, selections:&[String],
                    dest: &Path) -> Res<usize> {
+        // In-flight restore is a live reader; hold the GC/purge lock for its
+        // entire verified chunk stream and atomic new-directory publication.
+        let _reader_guard=self.app_lock()?;
         if dest.exists(){return Err("Never overwrite a restore target".into());}
         if selections.len()>1000||selections.iter().any(|s|!safe_path(s)){
             return Err("Invalid file/folder selection".into());
