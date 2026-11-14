@@ -10,7 +10,7 @@ adminUser: admin
 existingSecret: multi-backup-auth
 publicOrigin: https://multi-backup.example.org
 ingress:
-  enabled: true
+  enabled: false  # Hardened: expose only through private authenticated gateway
   className: nginx
   host: multi-backup.example.org
   tlsSecretName: multi-backup-tls
@@ -19,6 +19,16 @@ storage:
   existingClaim: ""
   size: 100Gi
   storageClassName: ""
+protection:
+  hardenedMode: true
+  # Gateway and offline recovery credential are separate 256-bit secrets.
+  # Require the operator to provision private-gate and recovery-secret keys.
+  authorizedReaders: ""
+  readonlyVault: true
+  networkPolicy:
+    enabled: false
+    gatewayNamespaceLabels: {}
+    gatewayPodLabels: {}
 resources:
   requests: {cpu: 250m, memory: 256Mi}
   limits: {cpu: "2", memory: 2Gi}

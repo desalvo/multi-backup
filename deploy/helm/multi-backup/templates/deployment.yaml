@@ -11,6 +11,7 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: multi-backup, app.kubernetes.io/instance: "{{ .Release.Name }}"}
     spec:
+      automountServiceAccountToken: false
       securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: server
@@ -22,6 +23,12 @@ spec:
             - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: {{ .Values.publicOrigin | quote }}}
             - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: /run/secrets/admin-hash}
             - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: /run/secrets/age-identity}
+            - {name: MULTI_BACKUP_HARDENED_MODE, value: {{ .Values.protection.hardenedMode | quote }}}
+            - {name: MULTI_BACKUP_AUTHORIZED_READERS, value: {{ .Values.protection.authorizedReaders | quote }}}
+            {{- if .Values.protection.hardenedMode }}
+            - {name: MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE, value: /run/secrets/private-gate}
+            - {name: MULTI_BACKUP_RECOVERY_SECRET_FILE, value: /run/secrets/recovery-secret}
+            {{- end }}
             - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
             - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
           {{- if .Values.auth.dav.enabled }}
@@ -55,7 +62,13 @@ spec:
             {{- end }}
           {{- end }}
           volumeMounts:
+            {{- if .Values.protection.readonlyVault }}
+            - {name: data, mountPath: /data/backups, subPath: backups, readOnly: true}
+            - {name: data, mountPath: /data/exports, subPath: exports}
+            - {name: data, mountPath: /data/audit, subPath: audit}
+            {{- else }}
             - {name: data, mountPath: /data}
+            {{- end }}
             - {name: credentials, mountPath: /run/secrets, readOnly: true}
             - {name: temp, mountPath: /tmp}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}

@@ -1,0 +1,26 @@
+{{- if .Values.protection.networkPolicy.enabled }}
+{{- if not .Values.protection.networkPolicy.gatewayNamespaceLabels }}
+{{- fail "A trusted gateway namespace label selector is required for NetworkPolicy" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-private-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: multi-backup
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+{{ toYaml .Values.protection.networkPolicy.gatewayNamespaceLabels | indent 16 }}
+          {{- if .Values.protection.networkPolicy.gatewayPodLabels }}
+          podSelector:
+            matchLabels:
+{{ toYaml .Values.protection.networkPolicy.gatewayPodLabels | indent 16 }}
+          {{- end }}
+      ports: [{protocol: TCP, port: 8080}]
+{{- end }}

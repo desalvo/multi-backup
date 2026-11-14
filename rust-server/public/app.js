@@ -88,9 +88,18 @@ async function exportPaths(paths,id=activeBackup){
   if(!id){return;}
   const state=document.getElementById("result");
   state.textContent="Ricostruzione e verifica in corso...";
-  const response=await fetch("/api/export",{method:"POST",credentials:"same-origin",
-    headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
-    body:JSON.stringify({backup_id:id,selections:paths})});
+  const approval=document.getElementById("recovery-authorization");
+  const recoveryCode=approval.value.trim();
+  approval.value="";
+  const headers={"Content-Type":"application/json","X-CSRF-Token":csrf};
+  if(recoveryCode)headers["X-Multi-Backup-Recovery-Authorization"]=recoveryCode;
+  let response;
+  try {
+    response=await fetch("/api/export",{method:"POST",credentials:"same-origin",
+      headers,body:JSON.stringify({backup_id:id,selections:paths})});
+  } finally {
+    headers["X-Multi-Backup-Recovery-Authorization"]="";
+  }
   const body=await response.json();
   state.textContent=response.ok?("Ripristinati "+body.files+" file in "+body.server_directory):
     ("Errore: "+body.error);
