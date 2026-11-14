@@ -612,3 +612,9 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - Reconciled earlier inconsistent current-tense statements in `CHUNK_STORAGE_V1.md`, `BACKUP_PROTECTION.md`, `MAINTENANCE_POLICY.md`, `PLUGIN_API.md`, `RELEASE_CHANNELS.md`, `SECURITY.md` and `RUST_PORT_INVENTORY.md`. Historical milestones remain explicit rather than being erased.
 - Expanded bilingual PDF manual source with four explicitly labelled r038 experimental chapters per language. PDF output still must be regenerated and checked by CI; existing PDF binary may remain historic until regenerated.
 - Release policy unchanged: r018 is last distributed; Rust r038 remains a draft PR until current-head CI, real recovery tests, installer signoff and security tests pass. No merge, stable tag, Docker publication or user-data GC performed by documentation changes.
+
+## r038 — Audit documentazione e parità automatica (14 novembre 2026)
+
+- Documentazione: nuovi manuali operativi Rust IT/EN, inventario delle funzionalità, indice documentale e controllo di coerenza CI. Aggiornato generatore PDF bilingue con sezioni Rust e avvertenze sulla GUI Python/Tk storica.
+- Implementazione: repack automatico delle stripe 8+2 miste durante GC confermata, nuovi shard age verificati, indice successore committato ultimo, mantenimento del predecessore fino a grace 48h. Previste riprese da preparazioni non committate.
+- Test: roundtrip del purge, GC, protezione, repack, interruzione prima del commit; CI corrente in attesa di certificazione. Restano fault-injection di produzione, multiwriter, restore account reali e aggiornamenti firmati. Nessun merge o rilascio.
