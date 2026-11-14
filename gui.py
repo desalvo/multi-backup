@@ -160,6 +160,11 @@ class BackupGUI(tk.Tk):
                         padding=3)
         style.map('TCheckbutton', background=[('active', PAGE_BG)],
                   foreground=[('active', '#FFFFFF')])
+        style.configure('Panel.TCheckbutton', background=PANEL_BG,
+                        foreground='#F4F7FF', font=('Helvetica Neue', 10),
+                        padding=3)
+        style.map('Panel.TCheckbutton', background=[('active', PANEL_BG)],
+                  foreground=[('active', '#FFFFFF')])
         style.configure('TLabelframe', background=PAGE_BG,
                         borderwidth=1)
         style.configure('TLabelframe.Label', background=PAGE_BG,
@@ -955,6 +960,7 @@ class BackupGUI(tk.Tk):
                      fg='#C8D8F8',bg=PANEL_BG).pack(anchor='w',padx=16)
             var=tk.BooleanVar(value=backend in self.cfg['enabled_backends']);self.plugin_vars[backend]=var
             check=ttk.Checkbutton(frame,text='Enabled',variable=var,
+                                  style='Panel.TCheckbutton',
                                   command=lambda b=backend,v=var:self._set_backend(b,v.get()))
             check.pack(anchor='e',padx=16)
         ttk.Label(page,text='Dropbox uses MULTI_BACKUP_DROPBOX_TOKEN or the operating-system keyring. Credentials are never stored in plain settings.',
