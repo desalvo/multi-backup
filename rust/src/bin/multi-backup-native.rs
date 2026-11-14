@@ -17,6 +17,9 @@ fn usage() -> &'static str {
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
+       multi-backup-native storage protect-backup --root DIR --identity IDENTITY --id HASH\n\
+       multi-backup-native storage unprotect-backup --root DIR --identity IDENTITY --id HASH --confirm-id HASH\n\
+       multi-backup-native storage delete-backup --root DIR --identity IDENTITY --id HASH --confirm-id HASH\n\
        multi-backup-native storage migrate-legacy --root DIR --identity IDENTITY --label NAME --archives-json SOURCES.json\n\
        multi-backup-native storage export-legacy --root DIR --identity IDENTITY --id HASH --destination NEW.tar.gz.age\n\
        multi-backup-native storage export-zip --root DIR --identity IDENTITY --id HASH --destination NEW_DIR [--volume-mib 2048]\n\
@@ -209,12 +212,45 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 accepted(&flags, &["--root","--identity"])?;
                 let identity = Path::new(required(&flags, "--identity")?);
                 let snapshots = chunk_store::Store::open(root, identity)?.list(identity)?;
-                if json {println!("{}", serde_json::to_string_pretty(&snapshots)?);}
-                else {
+                if json {
+                    let values:Vec<_>=snapshots.iter().map(|backup|{
+                        let mut value=serde_json::to_value(backup)?;
+                        if let Some(obj)=value.as_object_mut(){
+                            obj.insert("protected".into(),serde_json::json!(backup.protected));
+                        }
+                        Ok::<_,Box<dyn std::error::Error+Send+Sync>>(value)
+                    }).collect::<Result<_,_>>()?;
+                    println!("{}",serde_json::to_string_pretty(&values)?);
+                } else {
                     for backup in &snapshots {
-                        println!("{} {} ({} logical files)",backup.id,backup.label,backup.entries.len());
+                        println!("{} {} {} ({} logical files)",
+                            if backup.protected {"[PROTECTED]"}else{"[UNPROTECTED]"},
+                            backup.id,backup.label,backup.entries.len());
                     }
                 }
+            }
+            "protect-backup" => {
+                accepted(&flags,&["--root","--identity","--id"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let id=required(&flags,"--id")?;
+                let changed=chunk_store::Store::open(root,key)?.protect_backup(key,id)?;
+                println!("Backup {id}: {}",if changed {"protected"}else{"already protected"});
+            }
+            "unprotect-backup" => {
+                accepted(&flags,&["--root","--identity","--id","--confirm-id"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let id=required(&flags,"--id")?;
+                let changed=chunk_store::Store::open(root,key)?.unprotect_backup(
+                    key,id,required(&flags,"--confirm-id")?)?;
+                println!("Backup {id}: {}",if changed {"protection removed"}else{"not protected"});
+            }
+            "delete-backup" => {
+                accepted(&flags,&["--root","--identity","--id","--confirm-id"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let id=required(&flags,"--id")?;
+                chunk_store::Store::open(root,key)?.delete_backup(
+                    key,id,required(&flags,"--confirm-id")?)?;
+                println!("Deleted logical manifest {id}; shared ciphertext chunks preserved for safe GC");
             }
             "relocate" => {
                 accepted(&flags,&["--root","--identity","--destination","--dry-run"])?;
