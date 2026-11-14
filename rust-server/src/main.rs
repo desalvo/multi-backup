@@ -502,11 +502,11 @@ mod audit_tests {
             json!({"event":"login_success","user":"alice"})
         ];
         let (total,page)=paginate_audit(rows.clone(),&AuditFilter{
-            offset:0,limit:Some(1),query:Some("alice".into())});
+            offset:Some(0),limit:Some(1),query:Some("alice".into())});
         assert_eq!(total,2);
         assert_eq!(page[0]["event"],"login_success");
         let (total,page)=paginate_audit(rows,&AuditFilter{
-            offset:1,limit:Some(1),query:None});
+            offset:Some(1),limit:Some(1),query:None});
         assert_eq!(total,3);
         assert_eq!(page[0]["event"],"backup_restore");
     }
