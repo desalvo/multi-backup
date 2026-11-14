@@ -1,8 +1,8 @@
 //! Explicit, compiled plugin dispatcher for verified *local* filesystem jobs.
-//! Only POSIX->POSIX is enabled as a development preview. Unsupported
-//! combinations must fail closed: the catalog is not an executable driver.
+//! POSIX->POSIX and read-only mounted NFS/SMB/SSHFS/GPFS sources to POSIX
+//! are enabled as development previews. Untested roles always fail closed.
 //! This layer will be extended with native per-provider adapters.
-use crate::{chunk_store::{LogicalBackup, Source, Store}, plugins::{self, Mode}};
+use crate::{chunk_store::{LogicalBackup, Source, Store}, plugins::{self, Mode, GpfsAccess}, mount_probe};
 use std::{fs, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -23,23 +23,42 @@ fn regular_identity(identity: &Path) -> Result<std::path::PathBuf> {
     Ok(fs::canonicalize(identity)?)
 }
 
-fn local_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
-    // Validate registered directional roles, not just string equality.
+fn supported_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
+    // Verify registry roles before granting the narrow preview implementation.
     plugins::plan(mode, input, output)?;
-    if input != "posix" || output != "posix" {
-        return Err(format!("No native generic executor for {input} -> {output}; only POSIX -> POSIX preview is enabled").into());
+    let supported = match mode {
+        Mode::Backup => output == "posix" && matches!(input,
+            "posix" | "nfs" | "smb" | "sshfs" | "gpfs"),
+        Mode::Restore => input == "posix" && output == "posix",
+    };
+    if !supported {
+        return Err(format!("No native generic executor for {input} -> {output}; operation denied").into());
     }
     Ok(())
 }
 
-/// Back up one real, local directory into a previously initialized encrypted
-/// chunk store. Never recurse into the store or capture an age private key.
-/// Source snapshots/ACLs/xattrs are NOT yet production-qualified.
+/// Back up a local directory or an independently mounted, read-only snapshot.
+/// External mounted sources require explicit operator attestation and exact
+/// mount-type evidence; this does not itself prove a snapshot or ACL fidelity.
 pub fn backup(input: &str, output: &str, source: &Path, root: &Path,
               identity: &Path, label: &str, namespace: &str,
-              top_namespace: &str) -> Result<LogicalBackup> {
-    local_pair(Mode::Backup, input, output)?;
+              top_namespace: &str, snapshot_attested: bool,
+              gpfs_access: Option<GpfsAccess>) -> Result<LogicalBackup> {
+    supported_pair(Mode::Backup, input, output)?;
     let source = regular_directory(source)?;
+    if input == "posix" {
+        if gpfs_access.is_some() || snapshot_attested {
+            return Err("POSIX source does not accept remote mount/snapshot claims".into());
+        }
+    } else {
+        if !snapshot_attested {
+            return Err("Mounted source requires explicit --source-snapshot-attested".into());
+        }
+        let mount = mount_probe::probe(input, &source, gpfs_access)?;
+        if mount.rw_mount_option {
+            return Err("Mounted input must be read-only for native preview backup".into());
+        }
+    }
     let root = regular_directory(root)?;
     let identity = regular_identity(identity)?;
     if source.starts_with(&root) || root.starts_with(&source) {
@@ -64,7 +83,7 @@ pub fn backup(input: &str, output: &str, source: &Path, root: &Path,
 /// store. The restore parent must exist and cannot be part of the store.
 pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
                id: &str, destination: &Path, selection: Option<&str>) -> Result<usize> {
-    local_pair(Mode::Restore, input, output)?;
+    supported_pair(Mode::Restore, input, output)?;
     let root = regular_directory(root)?;
     let identity = regular_identity(identity)?;
     if fs::symlink_metadata(destination).is_ok() {
@@ -96,10 +115,13 @@ mod tests {
     use super::*;
     #[test]
     fn unimplemented_providers_refuse_execution() {
-        assert!(local_pair(Mode::Backup, "github", "posix").is_err());
-        assert!(local_pair(Mode::Backup, "nfs", "posix").is_err());
-        assert!(local_pair(Mode::Backup, "posix", "anti-ransomware-vault").is_err());
-        assert!(local_pair(Mode::Restore, "posix", "github").is_err());
-        assert!(local_pair(Mode::Backup, "posix", "posix").is_ok());
+        assert!(supported_pair(Mode::Backup, "github", "posix").is_err());
+        assert!(supported_pair(Mode::Backup, "nfs", "posix").is_ok());
+        assert!(supported_pair(Mode::Backup, "smb", "posix").is_ok());
+        assert!(supported_pair(Mode::Backup, "gpfs", "posix").is_ok());
+        assert!(supported_pair(Mode::Backup, "sshfs", "posix").is_ok());
+        assert!(supported_pair(Mode::Backup, "posix", "anti-ransomware-vault").is_err());
+        assert!(supported_pair(Mode::Restore, "posix", "github").is_err());
+        assert!(supported_pair(Mode::Backup, "posix", "posix").is_ok());
     }
 }

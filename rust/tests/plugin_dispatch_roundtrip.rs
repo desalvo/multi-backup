@@ -70,7 +70,14 @@ fn posix_pair_encrypts_verifies_and_restores_without_python() {
     // Unsupported generic adapters cannot fall back to a misleading POSIX copy.
     cli(&["plugins","backup","--input","nfs","--output","posix",
         "--source",path(&source),"--root",path(&root),"--identity",path(&key),
-        "--label","not allowed"],false);
+        "--label","no snapshot attestation"],false);
+    // Attestation alone cannot fake an NFS/SMB mount: read-only kernel mount
+    // evidence is independently required before any source bytes are read.
+    for remote in ["nfs","smb","sshfs"] {
+        cli(&["plugins","backup","--input",remote,"--output","posix",
+            "--source",path(&source),"--root",path(&root),"--identity",path(&key),
+            "--label","not a real mount","--source-snapshot-attested"],false);
+    }
     cli(&["plugins","backup","--input","posix","--output","anti-ransomware-vault",
         "--source",path(&source),"--root",path(&root),"--identity",path(&key),
         "--label","not allowed"],false);

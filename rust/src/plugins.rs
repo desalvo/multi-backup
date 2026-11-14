@@ -199,9 +199,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Versioned bucket and multipart ETag/checksum", "Use scoped credentials, multipart resume, optional Object Lock and no overwrite by default"),
     PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PLAN, PLAN,
         "ETag/Last-Modified and explicit collection traversal", "Output capability requires write permissions; server's read-only DAV mount is unrelated"),
-    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PLAN, PLAN,
+    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
         "Mounted filesystem plus server snapshot if available", "Support NFSv3, v4.x; do not assume root or atomic snapshots"),
-    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PLAN, NONE,
+    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, NONE,
         "SMB durable handles or snapshots if available", "Input first; ACL/ADS/Windows path semantics need explicit mapping"),
     PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PLAN, PLAN,
         "CephFS snapshots or quiesced mount", "No cross-filesystem atomicity claim; separate CephFS and RBD plugins"),
@@ -211,7 +211,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PLAN, PLAN,
         "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
         "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
-    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES", DataKind::DistributedFilesystem, PLAN, PLAN,
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES", DataKind::DistributedFilesystem, PREVIEW, PLAN,
         "NFSv3/v4 or SMB3 CES export on an authorized server; consistency proved separately",
         "Use distro open-source NFS/CIFS client; no IBM native client shipped; CES server licensing, permission and snapshot fidelity remain operator responsibilities")
         .with_gpfs_ces(),
@@ -258,7 +258,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
         "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
-    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PLAN, PLAN,
+    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PLAN,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",
         "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport and no overwrite"),
     PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware immutable vault",
@@ -414,12 +414,16 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
     // A generic multi-plugin job requires streaming, verified commit and
     // restore preflight adapters, none of which are ready yet.
     let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready;
-    let preview_executable = source.id == "posix" && destination.id == "posix";
+    let preview_executable = match mode {
+        Mode::Backup => destination.id == "posix" && matches!(source.id,
+            "posix" | "nfs" | "smb" | "gpfs" | "sshfs"),
+        Mode::Restore => source.id == "posix" && destination.id == "posix",
+    };
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
         source_stage, destination_stage, executable, preview_executable,
         reason: if executable { "both adapters are ready" } else if preview_executable {
-            "compiled POSIX native preview available; metadata and production qualification pending"
+            "compiled local or read-only mounted-source preview available; production qualification pending"
         } else {
             "catalog/planning only: one or both generic adapters are not wired or qualified"
         },
@@ -640,10 +644,10 @@ mod tests {
     fn sshfs_source_and_target_are_planned_distinct_from_sftp() {
         let d=find("sshfs").unwrap();
         assert_eq!(d.kind,DataKind::Files);
-        assert_eq!(d.backup_input,Stage::Planned);
+        assert_eq!(d.backup_input,Stage::Preview);
         assert_eq!(d.backup_output,Stage::Planned);
         assert_eq!(d.restore_input,Stage::Planned);
-        assert_eq!(d.restore_output,Stage::Planned);
+        assert_eq!(d.restore_output,Stage::Preview);
         assert_ne!(d.id,find("ssh").unwrap().id);
         let b=plan(Mode::Backup,"sshfs","anti-ransomware-vault").unwrap();
         assert!(b.required_preflight.iter().any(|x|x.contains("SSH host key")));

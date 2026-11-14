@@ -12,7 +12,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
-       multi-backup-native plugins backup --input posix --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--json]\n\
+       multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins restore --input posix --output posix --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--top-namespace PATH]\n\
@@ -71,9 +71,10 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
-        if args[pos] == "--dry-run" {
-            if parsed.insert("--dry-run", "true").is_some() {
-                return Err("Duplicate --dry-run flag".into());
+        if args[pos] == "--dry-run" || args[pos] == "--source-snapshot-attested" {
+            let flag=args[pos].as_str();
+            if parsed.insert(flag,"true").is_some() {
+                return Err(format!("Duplicate {flag} flag"));
             }
             pos += 1;
             continue;
@@ -183,7 +184,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             },
             "backup" => {
                 accepted(&flags, &["--input","--output","--source","--root",
-                                    "--identity","--label","--namespace","--top-namespace"])?;
+                                    "--identity","--label","--namespace","--top-namespace",
+                                    "--source-snapshot-attested","--input-gpfs-access"])?;
                 let snapshot = plugin_executor::backup(
                     required(&flags,"--input")?,required(&flags,"--output")?,
                     Path::new(required(&flags,"--source")?),
@@ -191,7 +193,9 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     Path::new(required(&flags,"--identity")?),
                     required(&flags,"--label")?,
                     flags.get("--namespace").copied().unwrap_or("files"),
-                    flags.get("--top-namespace").copied().unwrap_or(""))?;
+                    flags.get("--top-namespace").copied().unwrap_or(""),
+                    flags.contains_key("--source-snapshot-attested"),
+                    flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?)?;
                 if json { println!("{}",serde_json::to_string_pretty(&snapshot)?); }
                 else {println!("Verified encrypted plugin backup {} ({} files)",
                               snapshot.id,snapshot.entries.len());}
