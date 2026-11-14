@@ -104,8 +104,14 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
         return Err("Refusing to overwrite an existing plugin restore destination".into());
     }
     let store = Store::open(&root, &identity)?;
+    // A single damaged shard may be recoverable from 8+2 parity. Attempt
+    // authenticated parity repair *before* rejecting the restore, and verify
+    // again. Never publish the destination when recovery is incomplete.
     if !store.verify(&identity, id)?.healthy {
-        return Err("Refusing to restore a backup with failed integrity verification".into());
+        store.repair(&identity, id)?;
+        if !store.verify(&identity, id)?.healthy {
+            return Err("Refusing to restore a backup with unrecoverable integrity errors".into());
+        }
     }
     store.restore(&identity, id, selection, &full_destination)
 }
