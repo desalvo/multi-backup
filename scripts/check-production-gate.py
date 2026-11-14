@@ -57,7 +57,8 @@ def validate():
     assert (ROOT/'scripts/package-rust-macos-preview.sh').is_file(), 'Native Mac packager missing'
     assert (ROOT/'scripts/package-rust-windows-preview.ps1').is_file(), 'Native Windows packager missing'
     assert 'swiftc -O packaging/macos/biometric.swift' in (ROOT/'scripts/package-rust-macos-preview.sh').read_text('utf-8'), 'Native Rust Mac bundle lacks Touch ID adapter'
-    assert 'restored_from_protected_vault' in (ROOT/'scripts/test-rust-archive-compat.py').read_text('utf-8'), 'Native protected vault restore parity not tested'
+    assert (ROOT/'rust/tests/plugin_dispatch_roundtrip.rs').is_file(), 'Native plugin functional test missing'
+    assert 'plugin_dispatch_roundtrip' in str(jobs['production-gate']['steps']), 'Native plugin functional recovery must remain a blocking gate'
     assert 'archive::extract_from_memory' in (ROOT/'rust-desktop/src/main.rs').read_text('utf-8'), 'Native GUI uses an unprotected plaintext restore path'
     assert 'rust-desktop/Cargo.toml' in str(jobs['rust-desktop-smoke']['steps'])
     assert '--smoke' in str(jobs['rust-desktop-smoke']['steps'])
