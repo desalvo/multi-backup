@@ -98,3 +98,10 @@ missing coverage, but that check does not certify functional correctness.
 | Blocked | r039 RC readiness | Real Kubernetes 2+ replica failover/fencing, real AFS full/incremental recoveries, signed installers, load/memory benchmarks and security audit required |
 
 The r038 base inventory below is historical for these r039 extensions. The source of truth is [CLUSTER_ORCHESTRATION_R039_IT.md](CLUSTER_ORCHESTRATION_R039_IT.md) and [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHESTRATION_R039_EN.md).
+
+## r039 web administration preview addendum
+
+| Status | Feature | Evidence and limitation |
+| --- | --- | --- |
+| Preview | Shared cluster web dashboard | Admin-only read-only panel with the same PostgreSQL replica health, queue, registered node-local/shared storage and agents on every replica; real 2+ pod UI load balancer testing remains pending |
+| Planned | Complete cluster UI administration | Device enrollment, approval, configuration, per-agent limits, manual queue controls, and local-data cross-pod restore routing require a verified interactive UI and E2E |
