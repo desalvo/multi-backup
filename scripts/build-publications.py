@@ -103,7 +103,9 @@ class Book(BaseDocTemplate):
     def cover(self,c:canvas.Canvas,doc):
         c.saveState()
         # elegant full-bleed photographic hero, tightly cropped from original artistic asset
-        c.drawImage(str(MEDIA/'hero.jpg'),0,H*.27,width=W,height=H*.73,mask='auto')
+        photo = MEDIA / 'backup-hero.jpg'
+        if not photo.is_file():photo = MEDIA / 'hero.jpg'
+        c.drawImage(str(photo),0,H*.27,width=W,height=H*.73,mask='auto',preserveAspectRatio=True,anchor='c')
         c.setFillColor(NAVY);c.rect(0,0,W,H*.33,fill=1,stroke=0)
         c.drawImage(str(MEDIA/'icon-256.png'),W-56*mm,16*mm,width=37*mm,height=37*mm,mask='auto')
         c.setFillColor(colors.white)

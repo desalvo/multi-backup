@@ -21,7 +21,8 @@ def bundle_self_test():
     assert Path(certifi.where()).is_file(), 'Missing frozen CA certificate bundle'
     tls=_verified_https_context()
     assert tls.check_hostname, 'TLS verification must be enabled'
-    for filename in ('hero.jpg', 'multi-backup.png', 'icon-64.png'):
+    for filename in ('backup-hero.jpg', 'backup-sidebar.jpg', 'hero.jpg',
+                     'multi-backup.png', 'icon-64.png'):
         path=Path(asset(filename))
         if not path.is_file():
             raise RuntimeError('Missing bundled image: '+filename)

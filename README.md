@@ -160,3 +160,12 @@ The Backup screen offers **Start - New backup** and **Resume - Continue backup**
 From Archives, choose **Elimina archivio** to remove one explicitly selected local encrypted archive and same-name integrity/metadata companions. Deletion requires an unlocked vault, two-step confirmation including typing the filename, and is blocked while a backup is running or if the archive is referenced by the active GitHub checkpoint. An audit is stored in .state/archive-deletions.jsonl. The command never deletes remote objects or complete backup cycles. Deleting a Dropbox object required by an older manifest can make restoration from that manifest impossible.
 
 The approved dashboard provides separate Start/Resume controls. The sidebar footer lists EUPL-1.2, author Alessandro De Salvo, version and build. Photographic backup storage/server compositions maintain natural aspect ratio with letterboxing as required; they are never stretched to fit.
+
+
+### Photographic artwork generation
+
+The native installers bundle two **local** server-storage photographic composites made specifically for the hero and bottom sidebar. The approved design preserves the source photo's aspect ratio in both the build and the runtime; no cropped or stretched subjects. For an unpackaged source checkout, with network access run:
+
+    python scripts/create-photo-assets.py
+
+This fetches the free-license photo from a pinned Unsplash URL **at build time**. It is not a runtime dependency, and the installed app never contacts Unsplash. For credited artwork details see docs/PHOTO_CREDITS.md. If building without network access, pre-generate the two local JPG assets before invoking the native packaging script.

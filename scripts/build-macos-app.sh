@@ -25,6 +25,7 @@ if [[ "$MAC_ARCH" == x86_64 ]]; then
   export PIP_NO_BINARY=cryptography
 fi
 python -m pip install -r requirements.txt 'pyinstaller>=6.11,<7'
+python scripts/create-photo-assets.py
 if [[ "$MAC_ARCH" == x86_64 ]]; then
   RUST_BINDING="$(python - <<'PY'
 import cryptography.hazmat.bindings._rust as binding

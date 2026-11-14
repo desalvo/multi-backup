@@ -77,10 +77,15 @@ def delete_local_archive(output: Path, archive: Path, *,
     files = deletion_plan(output, archive)
     output = Path(output).expanduser().absolute()
     directory = output / '.state'
+    if directory.is_symlink():
+        raise ArchiveDeletionError('Refusing symbolic-link audit directory')
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     log = directory / 'archive-deletions.jsonl'
     if log.is_symlink():
         raise ArchiveDeletionError('Refusing deletion audit log symlink')
+    # Verify we can open a private, append-only audit file BEFORE any deletion.
+    # Otherwise a permission error might erase a backup without an audit record.
+    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     removed = []
     try:
         for item in files:
@@ -93,12 +98,8 @@ def delete_local_archive(output: Path, archive: Path, *,
                  'requested':archive.relative_to(output).as_posix(),
                  'removed':removed,'complete':len(removed)==len(files),
                  'operation':'local-delete-only'}
-        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        try:
-            with os.fdopen(fd, 'a', encoding='utf-8') as stream:
-                stream.write(json.dumps(event, ensure_ascii=False) + '\n')
-                stream.flush()
-                os.fsync(stream.fileno())
-        except BaseException:
-            raise
+        with os.fdopen(fd, 'a', encoding='utf-8') as stream:
+            stream.write(json.dumps(event, ensure_ascii=False) + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
     return removed
