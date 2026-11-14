@@ -47,6 +47,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Native Windows encrypted restore acceptance failed' }
     cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
     if ($LASTEXITCODE -ne 0) { throw 'Native Windows plugin execution acceptance failed' }
+    cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
+    if ($LASTEXITCODE -ne 0) { throw 'Native Windows incremental chain acceptance failed' }
 } finally {
     $env:PATH = $previousPath
 }
