@@ -1,6 +1,6 @@
 //! Opt-in v1 content-addressed store: one logical backup manifest, encrypted chunks.
 //! This does NOT modify existing tar.gz.age archives. Chunks use HMAC-SHA256 IDs.
-use std::{collections::HashSet, fs::{self, File, OpenOptions}, io::{Read, Write},
+use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{Read, Write},
     path::{Component, Path, PathBuf}, process::{Command, Stdio}};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -1204,6 +1204,10 @@ pub struct GarbageCollectionReport {
     pub orphan_chunk_candidates:usize,
     pub obsolete_stripe_candidates:usize,
     pub blocked_chunks_by_shared_parity:usize,
+    pub mixed_stripes_to_repack:usize,
+    pub repacked_stripes:usize,
+    /// Old repack protection is retained until its new replacement ages past
+    /// the grace boundary. Physical freeing may need a future GC cycle.
     pub reclaimable_bytes:u64,
     pub deleted_chunks:usize,
     pub deleted_stripes:usize,
@@ -1233,6 +1237,23 @@ impl Store {
                 for chunk in &entry.chunks {live.insert(chunk.id.clone());}
             }
         }
+        // The preview is non-mutating. Execution first constructs and checks
+        // durable replacement parity, never deleting an existing shard.
+        let original=self.read_protection(identity)?;
+        let pending_repack=original.iter().filter(|stripe|{
+            let used=stripe.members.iter().filter(|m|live.contains(&m.id)).count();
+            used>0 && used<stripe.members.len()
+        }).count();
+        let repacked=if execute {
+            self.repack_mixed_stripes_locked(identity,&live)?
+        }else{0};
+        if execute {
+            for backup in &backups {
+                if !self.verify(identity,&backup.id)?.healthy {
+                    return Err("Post-repack live backup failed redundancy verification".into());
+                }
+            }
+        }
         let now=std::time::SystemTime::now();
         let min_age=std::time::Duration::from_secs(grace_hours*3600);
         let old_enough=|path:&Path|->Res<bool>{
@@ -1240,14 +1261,36 @@ impl Store {
             if !md.file_type().is_file(){return Err("GC refuses non-regular file".into());}
             Ok(now.duration_since(md.modified()?).is_ok_and(|age|age>=min_age))
         };
-        let stripes=self.read_protection(identity)?;
+        let stripes=self.read_protection_all(identity)?;
+        let active_ids:HashSet<String>=self.read_protection(identity)?
+            .iter().map(|stripe|stripe.id.clone()).collect();
+        let by_id:HashMap<&str,&Protection>=stripes.iter()
+            .map(|stripe|(stripe.id.as_str(),stripe)).collect();
+        let replacements:HashMap<&str,&str>=stripes.iter().filter_map(|stripe|
+            stripe.supersedes.as_deref().map(|old|(old,stripe.id.as_str()))).collect();
         let mut retained_stripe_members=HashSet::new();
         let mut obsolete_stripes=Vec::new();
         let mut recoverable_bytes=0u64;
         for stripe in &stripes {
             let record=self.root.join("stripes").join(format!("{}.json.age",stripe.id));
             let referenced=stripe.members.iter().any(|item|live.contains(&item.id));
-            if referenced || !old_enough(&record)? {
+            let active=active_ids.contains(&stripe.id);
+            let eligible_superseded=if !active {
+                let replacement=replacements.get(stripe.id.as_str())
+                    .ok_or("Superseded parity stripe has no successor")?;
+                let successor=self.root.join("stripes")
+                    .join(format!("{replacement}.json.age"));
+                // Keep old data for at least one full grace period AFTER
+                // durable replacement commit, not only since old object birth.
+                let mature=old_enough(&successor)?;
+                // Process oldest generations before deleting a replacement
+                // which would otherwise strand its own old predecessor.
+                let previous_gone=stripe.supersedes.as_deref()
+                    .is_none_or(|old|!by_id.contains_key(old));
+                mature&&previous_gone
+            }else{false};
+            if (active && referenced)||(!active&&!eligible_superseded)||
+               !old_enough(&record)? {
                 for item in &stripe.members {
                     retained_stripe_members.insert(item.id.clone());
                 }
@@ -1325,6 +1368,8 @@ impl Store {
             orphan_chunk_candidates:candidates.len(),
             obsolete_stripe_candidates:obsolete_stripes.len(),
             blocked_chunks_by_shared_parity:blocked,
+            mixed_stripes_to_repack:pending_repack,
+            repacked_stripes:repacked,
             reclaimable_bytes:recoverable_bytes,
             deleted_chunks:0,deleted_stripes:0,reclaimed_bytes:0,
             grace_hours,
