@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Multi Backup Rust Preview
+Comment=Native encrypted GitHub and Dropbox backup manager
+Exec=multi-backup-rust
+Icon=multi-backup-rust
+Terminal=false
+Categories=Utility;Archiving;
+StartupNotify=true

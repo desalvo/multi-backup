@@ -25,27 +25,76 @@ def validate():
     flow=load('.github/workflows/ci.yml')
     native=load('.github/workflows/build-native.yml')
     jobs=flow['jobs']; assert 'production-gate' in jobs
+    assert (ROOT/'scripts/check-confidential-artifacts.py').is_file()
+    assert (ROOT/'docs/PRIVATE_ARCHITECTURE_WORKFLOW.md').is_file()
     assert 'native-release' in jobs
+    assert (ROOT/'scripts/test-server-gateway-container.sh').is_file()
+    assert 'test-server-gateway-container.sh' in str(jobs['rust-server-validation']['steps']), 'Missing runtime private-gateway security regression'
     assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
     assert jobs['publications-smoke']['needs']==['production-gate'], 'GUI capture must follow the security gate'
+    assert jobs['rust-desktop-smoke']['needs']==['production-gate'], 'Rust-only desktop must follow the security gate'
+    assert jobs['rust-macos-native-preview']['needs']==['production-gate'], 'Rust-only macOS DMGs must follow production gate'
+    assert jobs['rust-windows-native-preview']['needs']==['production-gate'], 'Rust-only Windows setup must follow production gate'
+    assert jobs['rust-linux-rpm-native-preview']['needs']==['production-gate'], 'Rust-only EL RPMs must follow production gate'
+    el_matrix=jobs['rust-linux-rpm-native-preview']['strategy']['matrix']['include']
+    assert {(x['distro'],int(x['el'])) for x in el_matrix}=={
+        ('rocky',8),('rocky',9),('rocky',10),('alma',8),('alma',9),('alma',10)
+    }, 'Rust-only RPM builds must cover all six Rocky/Alma platforms'
+    assert jobs['rust-linux-debian-native-preview']['needs']==['production-gate']
+    deb_matrix=jobs['rust-linux-debian-native-preview']['strategy']['matrix']['include']
+    assert {(int(x['version']),x['arch']) for x in deb_matrix}=={
+        (12,'amd64'),(12,'arm64'),(13,'amd64'),(13,'arm64')
+    }, 'Debian 12/13 AMD64/ARM64 matrix must be complete'
+    assert 'package-rust-debian-preview.sh' in str(jobs['rust-linux-debian-native-preview']['steps'])
+    assert (ROOT/'scripts/package-rust-debian-preview.sh').is_file()
+    assert 'multi-backup-rust.spec' in str(jobs['rust-linux-rpm-native-preview']['steps']), 'Native Rust RPM spec missing'
+    mac_matrix=jobs['rust-macos-native-preview']['strategy']['matrix']['include']
+    assert {x['arch'] for x in mac_matrix}=={'arm64','x86_64'}, 'Both native Mac architectures are mandatory'
+    assert 'package-rust-macos-preview.sh' in str(jobs['rust-macos-native-preview']['steps']), 'Native Mac DMG packaging missing'
+    assert 'package-rust-windows-preview.ps1' in str(jobs['rust-windows-native-preview']['steps']), 'Native Windows installer packaging missing'
+    assert 'multi-backup-rust-preview-ubuntu24-x64.tar.gz' in str(jobs['rust-desktop-smoke']['steps']), 'Native Linux preview archive missing'
+    assert (ROOT/'packaging/windows/rust-native-preview.iss').is_file(), 'Native Windows installer definition missing'
+    assert (ROOT/'scripts/package-rust-macos-preview.sh').is_file(), 'Native Mac packager missing'
+    assert (ROOT/'scripts/package-rust-windows-preview.ps1').is_file(), 'Native Windows packager missing'
+    assert 'swiftc -O packaging/macos/biometric.swift' in (ROOT/'scripts/package-rust-macos-preview.sh').read_text('utf-8'), 'Native Rust Mac bundle lacks Touch ID adapter'
+    assert 'restored_from_protected_vault' in (ROOT/'scripts/test-rust-archive-compat.py').read_text('utf-8'), 'Native protected vault restore parity not tested'
+    assert 'archive::extract_from_memory' in (ROOT/'rust-desktop/src/main.rs').read_text('utf-8'), 'Native GUI uses an unprotected plaintext restore path'
+    assert 'rust-desktop/Cargo.toml' in str(jobs['rust-desktop-smoke']['steps'])
+    assert '--smoke' in str(jobs['rust-desktop-smoke']['steps'])
+
     doc_steps='\\n'.join(str(step.get('run','')) for step in
                         jobs['publications-smoke']['steps'])
     assert 'scripts/capture-ui.py' in doc_steps and 'scripts/build-publications.py' in doc_steps
     assert 'docs/screenshots/about.png' in doc_steps, 'About screenshot validation missing'
     assert jobs['native-release']['needs']==[
-        'production-gate','macos-smoke','publications-smoke'
-    ], 'Native release must wait for gate, app startup and documentation screenshots'
+        'production-gate','macos-smoke','publications-smoke',
+        'rust-server-validation','rust-desktop-smoke',
+        'rust-macos-native-preview','rust-windows-native-preview',
+        'rust-linux-rpm-native-preview','rust-linux-debian-native-preview'
+    ], 'Native release cannot bypass Rust-only cross-platform acceptance'
+    assert jobs['publish-container']['needs']==[
+        'production-gate','rust-server-validation','rust-desktop-smoke',
+        'rust-macos-native-preview','rust-windows-native-preview',
+        'rust-linux-rpm-native-preview','rust-linux-debian-native-preview','publications-smoke'
+    ], 'Docker Hub publication cannot bypass Rust-only cross-platform acceptance'
+    assert 'ENABLE_STABLE_RUST' in jobs['native-release']['if']
+    assert 'ENABLE_STABLE_RUST' in jobs['publish-container']['if']
     assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
     assert 'workflow_call' in native['on'] and len(native['on'])==1, 'Native workflow must not publish independently'
     release=native['jobs']
-    for name in ('macos','windows','linux-rpm'):
+    for name in ('macos','windows','linux-rpm','linux-deb'):
         assert 'qualify' in release[name]['needs'],f'{name} skipped release qualification'
-    assert {'qualify','macos','windows','linux-rpm'}.issubset(set(release['publish']['needs']))
+    assert {'qualify','macos','windows','linux-rpm','linux-deb'}.issubset(set(release['publish']['needs']))
     assert {'qualify','macos','windows','linux-rpm'}.issubset(set(release['rpm-repositories']['needs']))
+    release_deb_matrix=release['linux-deb']['strategy']['matrix']['include']
+    assert {(int(x['version']),x['arch']) for x in release_deb_matrix}=={
+        (12,'amd64'),(12,'arm64'),(13,'amd64'),(13,'arm64')
+    }, 'Release must package every supported Debian target'
+    assert '.deb' in str(release['publish']['steps']), 'DEB release upload collection missing'
     assert 'if' in release['rpm-repositories'] and 'early-release' in release['rpm-repositories']['if']
     gate_steps='\n'.join(str(x.get('run','')) for x in jobs['production-gate']['steps'])
     for token in ('ruff check','bandit','pip_audit -r requirements.txt','pip_audit -r requirements-docs.txt',
-                  'python -m unittest discover','check-production-gate.py'):
+                  'python -m unittest discover','check-production-gate.py','check-confidential-artifacts.py'):
         assert token in gate_steps,f'Production Gate missing {token}'
     build_macos=(ROOT/'scripts/build-macos-app.sh').read_text('utf-8')
     notarize=(ROOT/'scripts/notarize-macos.sh').read_text('utf-8')
@@ -119,5 +168,7 @@ def validate():
 if __name__=='__main__':
     try:validate()
     except (KeyError, ValueError, AssertionError, OSError) as ex:
+        import traceback
+        traceback.print_exc()
         print(f'Production Gate policy: FAIL ({ex})',file=sys.stderr)
         sys.exit(1)

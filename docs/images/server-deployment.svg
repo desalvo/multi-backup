@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" role="img" aria-label="Deploy Multi Backup in Kubernetes con ingress HTTPS, autenticazione, PVC e secret">
+<defs><linearGradient id="bg"><stop stop-color="#0b1b3b"/><stop offset="1" stop-color="#403079"/></linearGradient></defs>
+<rect width="1200" height="470" rx="24" fill="url(#bg)"/><text x="45" y="63" font-family="sans-serif" font-size="29" fill="#fff" font-weight="bold">Multi Backup · deployment server</text>
+<g fill="#1b356e" stroke="#79daee" stroke-width="2">
+<rect x="40" y="160" width="230" height="135" rx="15"/><rect x="342" y="160" width="240" height="135" rx="15"/>
+<rect x="664" y="135" width="276" height="170" rx="15"/><rect x="1000" y="100" width="165" height="95" rx="15"/>
+<rect x="1000" y="230" width="165" height="95" rx="15"/></g>
+<g font-family="sans-serif" fill="#f1f8ff" text-anchor="middle">
+<text x="155" y="207" font-size="22">Browser</text><text x="155" y="239" font-size="18">Desktop / Mobile</text>
+<text x="460" y="205" font-size="22">Ingress HTTPS</text><text x="460" y="237" font-size="18">NGINX / HAProxy</text>
+<text x="802" y="185" font-size="22" font-weight="bold">Rust web server</text><text x="802" y="220" font-size="17">Argon2 · CSRF · audit</text><text x="802" y="253" font-size="17">Browser backup logico</text>
+<text x="1083" y="142" font-size="19">PVC</text><text x="1083" y="167" font-size="15">Chunk + manifests</text>
+<text x="1083" y="272" font-size="19">Secrets</text><text x="1083" y="298" font-size="15">age identity</text></g>
+<g stroke="#75e0f5" stroke-width="5" fill="none"><path d="M270 225h60"/><path d="M582 225h71"/><path d="M940 185h47"/><path d="M940 263h47"/></g>
+<g fill="#75e0f5"><path d="M332 225l-15-10v20z"/><path d="M655 225l-15-10v20z"/><path d="M988 185l-15-10v20z"/><path d="M988 263l-15-10v20z"/></g>
+<text x="44" y="415" fill="#bfcfeb" font-family="sans-serif" font-size="18">Replica singola · secrets read-only · PVC RWO · TLS all'ingress</text>
+</svg>

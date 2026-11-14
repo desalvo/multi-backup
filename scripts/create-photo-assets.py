@@ -1,101 +1,103 @@
 #!/usr/bin/env python3
-"""Produce bespoke, aspect-preserving photographic backgrounds for Multi Backup.
-
-Build-time only: the installed app never requests images from the network.
-The licensed source is a free Unsplash photo of actual data-center servers.
-Hero and sidebar compositions use full-image CONTAIN, never stretch/crop.
+"""Generate original Multi Backup artwork. No network, stock photos or third-party logos.
+Artwork is programmatically composed for this project and may be dedicated to CC0
+where copyright protection applies. Pillow is a build-time dependency only.
 """
 from __future__ import annotations
-
-import io
 import os
-from pathlib import Path
-import ssl
 import tempfile
-import urllib.request
-
-from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / 'assets'
-SOURCE_URL = (
-    'https://images.unsplash.com/photo-1506399558188-acca6f8cbf41'
-    '?fm=jpg&w=1800&q=82'
-)
-MAX_BYTES = 9 * 1024 * 1024
+ASSETS = ROOT / "assets"
+SCALE = 2
 
 
-def fetch_source():
-    """Download a fixed HTTPS Unsplash free-license image at build time only."""
-    request = urllib.request.Request(
-        SOURCE_URL, headers={
-            'User-Agent': 'MultiBackup-assets/1.0 (+https://github.com/desalvo/multi-backup)',
-            'Accept': 'image/jpeg'})
-    with urllib.request.urlopen(
-            request, timeout=30, context=ssl.create_default_context()) as response:  # nosec B310 - fixed HTTPS photo URL
-        if not response.url.startswith('https://images.unsplash.com/'):
-            raise RuntimeError('Unexpected photo redirect or provider')
-        data = response.read(MAX_BYTES + 1)
-    if len(data) > MAX_BYTES:
-        raise RuntimeError('Photographic source exceeds safe size limit')
-    if not data.startswith(b'\xff\xd8\xff'):
-        raise RuntimeError('Unsplash returned something other than a JPEG')
-    with Image.open(io.BytesIO(data)) as photo:
-        photo.load()
-        if not 640 <= photo.width <= 12000 or not 320 <= photo.height <= 8000:
-            raise RuntimeError('Unexpected photographic source dimensions')
-        return photo.convert('RGB').copy()
-
-
-def compose(source, size, *, sidebar=False):
-    """Create two custom canvases without losing any portion of source photo."""
-    w, h = size
-    result = Image.new('RGB',size,(12,26,62))
-    photo = ImageOps.contain(source, (w if sidebar else round(w * .68), h),
-                             method=Image.Resampling.LANCZOS)
-    photo = ImageEnhance.Color(photo).enhance(1.16)
-    x = (w - photo.width)//2 if sidebar else w - photo.width
-    y = (h - photo.height)//2
-    result.paste(photo,(x,y))
-    tint = Image.new('RGBA',size,(0,0,0,0))
-    pen=ImageDraw.Draw(tint)
-    for xpos in range(w):
-        portion=xpos/max(1,w-1)
-        if sidebar:
-            opacity=int(50 * (1-portion) + 18)
-        else:
-            opacity=int(236 * (1-portion)**2.1)
-        pen.line((xpos,0,xpos,h),fill=(12,23,62,opacity))
-    pen.rectangle((0,h-20,w,h),fill=(11,23,59,45))
-    return Image.alpha_composite(result.convert('RGBA'),tint).convert('RGB')
-
-
-def save_atomic(image, target):
-    target.parent.mkdir(parents=True,exist_ok=True)
-    fd, filename = tempfile.mkstemp(prefix='.photo-',suffix='.jpg',
-                                    dir=target.parent)
-    os.close(fd)
-    tmp=Path(filename)
+def font(size: int):
     try:
-        image.save(tmp,'JPEG',quality=85,progressive=True,optimize=True,subsampling=0)
-        os.replace(tmp,target)
+        return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def generate(size: tuple[int, int], sidebar: bool = False) -> Image.Image:
+    w, h = size
+    W, H = w * SCALE, h * SCALE
+    canvas = Image.new("RGB", (W, H))
+    ink = ImageDraw.Draw(canvas)
+    for y in range(H):
+        f = y / max(1, H - 1)
+        ink.line((0, y, W, y),
+                 fill=(int(10 + 12*f), int(21 + 10*f), int(53 + 28*f)))
+    # Original illuminated server aisles, rendered entirely from primitives.
+    edge = max(16, W // 90)
+    bays = 5 if sidebar else 8
+    for aisle in range(2):
+        for i in range(bays):
+            base_x = i * int(W * (0.44 / bays))
+            x = base_x if aisle == 0 else W - base_x - int(W * .44 / bays) + 2
+            top = edge + int(i * H * .006)
+            bottom = H - edge - int(i * H * .008)
+            rack_width = max(8, int(W * .43 / bays) - edge // 3)
+            ink.rounded_rectangle((x, top, x+rack_width, bottom),
+                                  radius=max(3, edge//4),
+                                  fill=(13, 24, 57), outline=(48, 74, 135), width=2*SCALE)
+            for slot in range(8):
+                sy = top + int((bottom - top) * (slot + 1) / 10)
+                ink.rounded_rectangle((x + edge//2, sy,
+                                       x + rack_width - edge//2, sy + 5*SCALE),
+                                      radius=2*SCALE, fill=(29, 43, 85))
+                ink.ellipse((x+edge//2,sy,x+edge//2+3*SCALE,sy+3*SCALE),
+                            fill=(30, 194, 239) if slot % 3 else (131, 96, 255))
+    # Intentionally overlay a central translucent navy glass panel so every
+    # text glyph is legible. No source photograph is cropped or watermarked.
+    pw = int(W * (.84 if sidebar else .65))
+    ph = int(H * .54)
+    left, top = (W-pw)//2, (H-ph)//2
+    ink.rounded_rectangle((left, top, left+pw, top+ph),
+                          radius=20*SCALE, fill=(19, 30, 83),
+                          outline=(75, 204, 245), width=3*SCALE)
+    ink.arc((left+18*SCALE, top+17*SCALE, left+65*SCALE, top+64*SCALE),
+            start=200, end=510, fill=(78, 224, 255), width=5*SCALE)
+    title_size = int((30 if sidebar else 70) * SCALE)
+    title = "Multi Backup"
+    f = font(title_size)
+    box = ink.textbbox((0,0), title, font=f)
+    width = box[2]-box[0]
+    ink.text(((W-width)//2, top+int(ph*.28)), title, font=f,
+             fill=(240, 247, 255), stroke_width=0)
+    # Encrypted deduplicated blocks, and a cyan active transfer indicator.
+    progress_y = top+int(ph*.78)
+    px0 = left+int(pw*.15)
+    px1 = left+int(pw*.85)
+    ink.rounded_rectangle((px0, progress_y, px1, progress_y+8*SCALE),
+                          radius=4*SCALE, fill=(38, 51, 112))
+    ink.rounded_rectangle((px0, progress_y, px0+int((px1-px0)*.67),
+                           progress_y+8*SCALE),
+                          radius=4*SCALE, fill=(43, 216, 239))
+    return canvas.resize((w, h), Image.Resampling.LANCZOS)
+
+
+def save_atomic(picture: Image.Image, destination: Path):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, path = tempfile.mkstemp(prefix=".original-art-", suffix=".jpg",
+                                dir=destination.parent)
+    os.close(fd)
+    try:
+        picture.save(path, "JPEG", quality=87, optimize=True, progressive=True)
+        os.replace(path, destination)
     finally:
-        tmp.unlink(missing_ok=True)
+        Path(path).unlink(missing_ok=True)
 
 
 def main():
-    hero=ASSETS/'backup-hero.jpg'
-    sidebar=ASSETS/'backup-sidebar.jpg'
-    if hero.is_file() and sidebar.is_file():
-        with Image.open(hero) as photo:photo.verify()
-        with Image.open(sidebar) as photo:photo.verify()
-        print('Existing bespoke photographic assets verified')
-        return
-    source=fetch_source()
-    save_atomic(compose(source,(1600,420)),hero)
-    save_atomic(compose(source,(436,260),sidebar=True),sidebar)
-    print('Generated photographic hero/sidebar from licensed server-storage source')
+    # Always regenerate: never silently reuse copyrighted/old Unsplash assets.
+    save_atomic(generate((1600, 420)), ASSETS / "backup-hero.jpg")
+    save_atomic(generate((436, 260), sidebar=True), ASSETS / "backup-sidebar.jpg")
+    save_atomic(generate((1600, 420)), ASSETS / "hero.jpg")
+    print("Generated original offline Multi Backup imagery; no remote sources")
 
 
-if __name__=='__main__':
+if __name__ == "__main__":
     main()

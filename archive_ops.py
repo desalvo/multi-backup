@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -14,6 +15,49 @@ from checkpoint import sha256
 
 class ArchiveError(RuntimeError):
     pass
+
+
+def _bundled_rust_archive():
+    """Return only the trusted, embedded Rust archive executable.
+
+    Source checkouts deliberately use the legacy Python archive reader for
+    differential compatibility fixtures; installed Mac/Windows applications
+    use the tested native path by default.
+    """
+    if not getattr(sys, 'frozen', False):
+        return None
+    binary = Path(sys.executable).resolve()
+    if sys.platform == 'darwin':
+        candidate = binary.parent.parent / 'Resources' / 'bin' / 'multi-backup-native'
+    elif os.name == 'nt':
+        candidate = binary.parent / 'bin' / 'multi-backup-native.exe'
+    else:
+        return None
+    if candidate.is_file() and not candidate.is_symlink():
+        return candidate
+    return None
+
+
+def _rust_archive_command(action, path, identity, destination=None):
+    program = _bundled_rust_archive()
+    if program is None:
+        return None
+    command = [str(program), 'archive', action,
+               '--archive', str(Path(path).absolute()),
+               '--identity', str(Path(identity).absolute())]
+    if action == 'list':
+        command.append('--json')
+    elif action == 'extract':
+        command.extend(['--destination', str(Path(destination).absolute())])
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                timeout=3600, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ArchiveError('Rust archive helper unavailable: ' + str(exc)) from exc
+    if result.returncode:
+        raise ArchiveError('Rust archive verification/extraction failed: ' +
+                           result.stderr[-1200:])
+    return result.stdout
 
 
 def _safe_member(member):
@@ -53,6 +97,15 @@ def open_encrypted_archive(path: Path, identity: Path | None = None):
 
 
 def list_members(path: Path, identity: Path, *, limit=250000):
+    native = _rust_archive_command('list', path, identity)
+    if native is not None:
+        try:
+            result = json.loads(native)
+        except (ValueError, TypeError) as exc:
+            raise ArchiveError('Invalid native Rust archive inventory') from exc
+        if not isinstance(result, list) or len(result) > limit:
+            raise ArchiveError('Native Rust archive inventory exceeds limit')
+        return result
     entries = []
     with open_encrypted_archive(path, identity) as archive:
         for index, m in enumerate(archive):
@@ -88,6 +141,14 @@ def read_member(path: Path, identity: Path, name: str, *, max_bytes=1024*1024):
 
 def extract_archive(path: Path, identity: Path, destination: Path, *, max_members=500000,
                     max_bytes=100 * 1024**3):
+    # Rust performs an atomic, non-overwriting restore when the destination
+    # does not yet exist; retain the Python legacy path for explicitly
+    # precreated destinations and custom caller limits.
+    if (not Path(destination).exists() and max_members == 500000 and
+            max_bytes == 100 * 1024**3):
+        native = _rust_archive_command('extract', path, identity, destination)
+        if native is not None:
+            return Path(destination).resolve()
     dest = destination.resolve()
     dest.mkdir(parents=True, exist_ok=True, mode=0o700)
     total = 0

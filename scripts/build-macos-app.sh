@@ -28,6 +28,9 @@ python -m pip install -r requirements.txt 'pyinstaller>=6.11,<7'
 python scripts/create-photo-assets.py
 cargo build --manifest-path rust/Cargo.toml --release
 [[ -s rust/target/release/libmulti_backup_core.dylib ]] || exit 1
+[[ -s rust/target/release/multi-backup-native ]] || {
+  echo 'Missing native Rust archive executable' >&2; exit 1;
+}
 if [[ "$MAC_ARCH" == x86_64 ]]; then
   RUST_BINDING="$(python - <<'PY'
 import cryptography.hazmat.bindings._rust as binding
@@ -79,6 +82,7 @@ swiftc -O -framework Security -framework LocalAuthentication \
 install -m 644 LICENSE "$APP/Contents/Resources/LICENSE"
 install -m 644 README.md "$APP/Contents/Resources/README.md"
 install -m 755 dist/multi-backup "$APP/Contents/MacOS/multi-backup"
+install -m 755 rust/target/release/multi-backup-native "$APP/Contents/Resources/bin/multi-backup-native"
 for tool in age age-keygen gh git-lfs; do
   # Follow Homebrew symlinks: distributable real executables, never shims.
   install -m 755 "$(command -v "$tool")" "$APP/Contents/Resources/bin/$tool"
@@ -112,6 +116,7 @@ plutil -lint "$APP/Contents/Info.plist"
 "$APP/Contents/MacOS/Multi Backup" --self-test
 "$APP/Contents/MacOS/multi-backup" --version
 "$APP/Contents/Resources/bin/age" --version
+"$APP/Contents/Resources/bin/multi-backup-native" --version
 "$APP/Contents/Resources/bin/age-keygen" --version
 "$APP/Contents/Resources/bin/gh" --version
 "$APP/Contents/Resources/bin/git-lfs" version

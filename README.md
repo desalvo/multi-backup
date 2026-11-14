@@ -170,3 +170,114 @@ The native installers bundle two **local** server-storage photographic composite
     python scripts/create-photo-assets.py
 
 This fetches the free-license photo from a pinned Unsplash URL **at build time**. It is not a runtime dependency, and the installed app never contacts Unsplash. For credited artwork details see docs/PHOTO_CREDITS.md. If building without network access, pre-generate the two local JPG assets before invoking the native packaging script.
+
+### Rust desktop previews — installation tests
+
+The r020 PR CI builds standalone **Python-free** Rust desktop previews alongside the r018 compatibility installers: single-app ad-hoc signed macOS DMGs (Apple Silicon / Intel), Windows x64 Inno Setup installer and ZIP, and an Ubuntu 24.04 x64 archive. These are **not signed stable releases**; real-account provider parity, Mac notarization, Windows code-signing and EL8/9/10 RPM builds remain open.
+
+The r020 Rust desktop now keeps the age identity only in zeroizing memory after vault unlock, supports authenticated local and remote restore without a plaintext key file, bundles a Mac Touch ID adapter (hardware certification pending), and includes Python-free preview RPM build jobs for Rocky/AlmaLinux EL8–10. These previews are not signed stable installers. See [native migration acceptance inventory](docs/RUST_PORT_INVENTORY.md).
+
+The native Rust GUI now enforces vault unlock at startup using the exact legacy OS-specific application settings location, supports native read-only update discovery and verified (never auto-installed) download staging, and requires a vault before starting backups. The r020 branch remains a preview requiring real-account functional parity and production trust qualification.
+
+
+## Experimental r021 chunk store and Rust server (draft PR #9)
+
+A separate, opt-in Rust storage format can create **one logical backup**
+containing GitHub repositories, CI, metadata and Dropbox namespaces. Objects
+are HMAC-addressed, zstd-compressed and individually encrypted with age, with
+optional/automatic 8+2 Reed–Solomon parity and selective restore to new paths.
+Existing tar.gz.age backups and Python release builds are left untouched.
+
+Rust native CLI: storage init / backup / list / protect / repair / restore.
+The experimental Rust web server has responsive read-only browsing, authenticated
+selective export to a fresh server-side directory, Argon2id local login,
+CSRF checks and append-only audit. Dockerfile, Compose, Helm, Kustomize and a
+compiled Kustomize wizard are included **as development artifacts**, not as a
+production-certified/public image. LDAP/OIDC/SMTP, ZIP volumes, storage
+conversion, live mounts, GUI configuration and provider parity remain open.
+
+- [Storage architecture, object diagram, repair and migration](docs/CHUNK_STORAGE_V1.md)
+- [Server deployment, identity/security and registry CI](docs/SERVER_DEPLOYMENT.md)
+- [Original visual asset provenance](docs/PHOTO_CREDITS.md)
+
+**Do not merge the draft or publish a stable image without successful
+production gate, cross-platform restored data verification and secret setup.**
+
+
+### Rust storage v1 — certified behavior vs development-only functionality
+
+The new experimental branch supports keyed deduplicated age+zstd chunks,
+an encrypted logical manifest across ALL provider namespaces, 8+2 erasure
+protection, read-only verification, ZIP64 portable-volume export/import,
+multi-file and folder restore, and streaming migration of **multiple legacy
+tar.gz.age archives into one logical backup**. Migration does not delete
+the old archives, and no plaintext full tar staging file is created.
+
+Commands (from the Rust binary, not the legacy Python launcher):
+
+```bash
+# Storage must already exist and be decryptable with the identity.
+multi-backup-native storage verify --root ~/Multi-Backups --identity /keys/age.txt --id BACKUP_ID
+multi-backup-native storage export-zip \
+  --root ~/Multi-Backups --identity /keys/age.txt \
+  --id BACKUP_ID --destination ~/backup-portable --volume-mib 2048
+multi-backup-native storage import-zip \
+  --root ~/imported-storage --identity /keys/age.txt --bundle ~/backup-portable
+
+# JSON array includes all legacy parts of ONE backup cycle:
+# [{"namespace":"github","archive":"/path/repo.tar.gz.age"},
+#  {"namespace":"ci","archive":"/path/ci.tar.gz.age"},
+#  {"namespace":"metadata","archive":"/path/metadata.tar.gz.age"}]
+multi-backup-native storage migrate-legacy \
+  --root ~/Multi-Backups --identity /keys/age.txt \
+  --label "Imported legacy cycle" --archives-json sources.json
+```
+
+Only the future full qualification suite can warrant complete certification:
+signed installers, production identity vault compatibility, real provider
+backup+restore, signed/verified releases, TLS/OIDC/LDAP/SMTP integration,
+live filesystem mounts and migration/upgrade rollback are still missing.
+See [certification matrix](docs/RC_CERTIFICATION_MATRIX.md).
+
+
+### r023 development: storage UI and server identity backends
+
+Rust native desktop includes a Storage chunk section for one logical backup
+per cycle, with encrypted chunk verification, selective restore, ZIP64
+import/export, migration and non-destructive relocation. It currently
+requires an external age identity file, pending vault memory integration.
+
+Server optional authentication: local Argon2id, LDAPS, and OIDC
+authorization-code/PKCE. SMTP(S) can send a session/CSRF-protected test email.
+No external providers are enabled by default; see SERVER_DEPLOYMENT.md
+and RC_CERTIFICATION_MATRIX.md for required secrets and acceptance tests.
+
+
+### Experimental read-only live mount
+
+The Rust web server can optionally expose one logical backup as a read-only WebDAV volume over HTTPS, mapping all provider namespaces into the same virtual tree. Enable using auth.dav.enabled in Helm and a separate dav-password Secret (32+ characters). Default disabled. This is an experimental OS WebDAV mount, not a FUSE/WinFsp filesystem driver. See docs/SERVER_DEPLOYMENT.md.
+
+
+**Reverse compatibility:** the Rust Storage chunk page and CLI can export a complete logical v1 backup to one age-encrypted legacy tar.gz.age stream. Existing source data is never overwritten. The multipart ZIP64 format remains the preferred portable transport.
+
+
+## Debian 12 / 13 native Rust packages (experimental)
+
+The Production CI and early-release workflow now build and install verified
+native Rust **.deb** packages on Debian 12 Bookworm (LTS) and Debian 13 Trixie
+(stable), for **amd64** and **arm64**. Each binary is compiled on the target
+architecture and Debian runtime, and packaging checks the exact executables,
+desktop entry, license, runtime library dependencies and SHA-256.
+The package is named multi-backup-rust and installs the GUI executable
+multi-backup-rust and CLI multi-backup-native. These are preview artifacts;
+signatures and independent recovery certification are not yet complete.
+
+## Private anti-ransomware architecture handoff
+
+See docs/PRIVATE_ARCHITECTURE_WORKFLOW.md for the offline AES-256-encrypted
+PDF workflow. The diagram source and any actual topology, credentials, keys
+or infrastructure parameters must remain **outside this public repo**.
+GitHub CI rejects plaintext/private artifacts under docs/private. The
+operator chooses the PDF password locally; no password is sent to CI or
+ChatGPT. No encrypted final PDF can be committed until the operator has
+created and validated it with their chosen password.

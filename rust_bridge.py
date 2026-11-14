@@ -45,6 +45,9 @@ def _native_core():
             lib.multi_backup_ci_should_schedule.argtypes = [
                 ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64]
             lib.multi_backup_ci_should_schedule.restype = ctypes.c_uint32
+            lib.multi_backup_dropbox_hash.argtypes = [
+                ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t]
+            lib.multi_backup_dropbox_hash.restype = ctypes.c_int
             return lib
         except (OSError, AttributeError):
             continue
@@ -98,4 +101,30 @@ def native_ci_should_schedule(completed, pending, target, workers):
             return None
         return bool(lib.multi_backup_ci_should_schedule(*values))
     except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def native_dropbox_content_hash(source):
+    """Stream a file through the bundled Rust Dropbox 4-MiB hash kernel.
+
+    Return None only if native support is absent or the file is unavailable;
+    Python will re-verify and never accept an unverified download.
+    """
+    import os
+    lib = _native_core()
+    if lib is None:
+        return None
+    try:
+        raw = os.fsencode(str(source))
+        buffer = ctypes.create_string_buffer(65)
+        code = lib.multi_backup_dropbox_hash(
+            raw, ctypes.cast(buffer, ctypes.c_void_p), 65)
+        if code != 0:
+            return None
+        result = buffer.value.decode('ascii')
+        if len(result) != 64 or any(ch not in '0123456789abcdef'
+                                   for ch in result):
+            return None
+        return result
+    except (OSError, UnicodeError, ValueError, TypeError):
         return None

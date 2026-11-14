@@ -1,15 +1,253 @@
-# Plugin architecture / API
+# Multi Backup plugin architecture — Rust native contract v1
 
-The public plugin registry is `backends.available()`. Each `BackendDescriptor` exposes a stable identifier, display title, description, capabilities, `default_enabled`, and a `handler` callback. A plugin is selected using `multi-backup backup --backend <id>` and its availability is controlled by `multi-backup plugin enable/disable <id>`; the state is also adjustable in the GUI. Plugins are not automatically discovered from untrusted Python source directories, to prevent code injection.
+The **source** and **destination** of each backup are plugins. A restore reverses
+the direction of the same two plugins. Four separate capabilities are
+advertised for each plugin: `backup_input`, `backup_output`,
+`restore_input`, `restore_output`. A plugin's *registration* is not a
+claim of implementation, live-account interoperability or release readiness.
 
-## GitHub backend
+## Rust contract and discovery
 
-Runs the inherited `ResumableBackup` engine from `multi_backup.py`: hashed checkpoints, per-repository metadata and CI archives, immutable encrypted Git snapshots, account-level recovery metadata, and optional dry-run or real CI artifact cleanup. Deletion is guarded by a dynamic dependency scan and is only performed when expressly enabled. Run status and aggregate cleanup reports are available through CLI progress events.
+The authoritative, static, auditable registry is `rust/src/plugins.rs`.
+The existing legacy Python registry (`backends.available()`) and native
+`github backup` / `dropbox backup` commands remain functional and unchanged;
+they are **not** dynamically executed by the new planner. Plugin IDs are stable
+and independent of OS. No arbitrary local DLL, script, shell command or
+downloaded plugin package is ever discovered/executed.
 
-## Dropbox backend (RC)
+```bash
+multi-backup-native plugins list --json
+multi-backup-native plugins list --role input --mode backup --json
+multi-backup-native plugins list --role output --mode restore
+multi-backup-native plugins plan --input github --output posix --mode backup --json
+multi-backup-native plugins plan --input posix --output github --mode restore --json
+```
 
-Enabled only on demand. Credentials from `MULTI_BACKUP_DROPBOX_TOKEN` or OS keyring. Dropbox v2 APIs used: `files/list_folder`, `files/list_folder/continue` and `files/download`. All are **read-only**. An object key is `SHA256(file-id + NUL + revision)`; each encrypted archive is persisted under `dropbox/objects/<prefix>/`. A checksum verified on next run lets the plugin reuse the exact encrypted object, reducing storage and network usage. An encrypted manifest records the current contents of the selected folder. No local retention or remote purge operations exist in this plugin. External Dropbox team sharing policy, Apps and account settings are not included in this first RC.
+`plugins plan` is **read-only**. It rejects unknown IDs, unsupported
+directional roles and invalid modes; `executable=false` until both generic
+adapters are certified. `preview` means a *separate dedicated native
+operation* exists, not that the unified connector is wired. `planned` means
+only the interface specification/catalogue exists. `unsupported` is an
+explicitly forbidden role. `ready` is reserved for live-tested, qualified
+native adapters (none currently declared).
 
-## Plugin security contract
+## Responsibilities of the two plugin families
 
-Plugins must explicitly state destructive capabilities, never store raw credentials in logs/checkpoints/manifests, use safe path validation, require explicit opt-in for destructive actions, publish only atomically after successful encryption, and remain testable with mocked APIs. Proposed future plugins (S3, WebDAV, OneDrive) must follow these same rules. In production, all external plugins should be distributed as signed packages; dynamic execution of arbitrary files is not enabled.
+**Input plugin** (backup source / restore destination):
+- Produce an authoritative point-in-time source inventory and stable object
+  IDs, normalized paths and source-specific consistency token.
+- Read source data via bounded streams to the authenticated encryption core;
+  never stage entire plaintext backups in a world-readable directory.
+- Describe all recoverable metadata (owner, mode, ACL, xattrs, sparse extents,
+  symlinks, storage identifiers, database roles, VM/cluster configuration).
+- Restore only after validated destination identity/role, explicit approvals
+  for destructive actions, conflict policy, object integrity verification and
+  a safety checkpoint; default is **create-new**, not overwrite.
+
+**Output plugin** (backup destination / restore source):
+- Accept **encrypted** chunks/objects and authenticated manifests only; the
+  output layer must never receive age private keys or plaintext credentials
+  for a source provider.
+- Use a durable two-phase upload: begin → stream/verify chunks →
+  publish signed/encrypted logical manifest **last**. Aborted uploads remain
+  uncommitted and invisible as complete backups.
+- Expose immutable/append-only/versioning capabilities, object checksum,
+  retries, constrained parallelism and resume tokens. A remote deletion must
+  never be implied by backup retention or failed resume.
+- Restore by enumerating verified manifests/chunks to the local decrypting
+  core; one user backup remains **one logical backup**, not multiple objects
+  shown as independent backups.
+
+The common engine eventually composes any eligible input with any eligible
+output; plugins are allowed to specialize metadata but cannot circumvent the
+encryption, audit, retention, vault or two-phase commit rules. Runtime
+orchestration is **not implemented by this catalog commit**.
+
+## Security / platform boundaries
+
+- Credentials are per-plugin, least privilege, stored in OS keyring/secret
+  store; no secrets in manifests, Git, logs, plugin metadata, CLI arguments,
+  or private handoff. Always explicit account/path/tenant scope.
+- POSIX/NFS/SMB/CephFS metadata and snapshot semantics differ. NFS supports
+  v3 and later, but consistency may require a storage-side snapshot.
+- RBD is **Ceph RADOS Block Device** and operates on image snapshots/diffs,
+  not pathname traversal.
+- Proxmox plugin includes VE configs, VM, CT, volumes and PBS inventory/restore.
+  Kubernetes includes OpenShift/OKD, API objects, CRDs, CSI snapshots and
+  guarded etcd scope. VMware/oVirt require hypervisor-specific snapshot APIs.
+- MySQL/MariaDB and PostgreSQL require application-consistent backup plus
+  binlog/WAL and point-in-time restore gates; raw copied data directories
+  alone are not sufficient evidence of recoverability.
+- Never assume cloud API scopes include passwords/secret values: record
+  missing non-exportable material for manual recreation during recovery.
+- No write-capable plugin automatically executes deletions, overwrites,
+  VM starts/stops, Kubernetes replacement or database import. Preflight and
+  operator-approved restore plan required.
+- Preserve provenance and public manifests for safe external contributions;
+  independently signed/sandboxed plugin distribution is a future gate.
+
+## Required acceptance before flipping a provider from Planned to Ready
+
+Provider-specific mock + fault injection; invalid/replayed credentials;
+checkpoint/restart; remote throttling and dropped sessions; large file/hash
+verification; backup and restore to **new** target; metadata/snapshot
+consistency; multi-OS packager validation; real service API access using a
+test account; negative tests for overwrite/delete and cross-tenant isolation.
+S3/CEPH WORM requires independent, external verification that an ingest
+principal cannot rewrite a committed object or shorten retention. No vendor
+adapter should reach Ready based on a compile-only green CI.
+
+## SAN block transports and anti-ransomware vault (r030)
+
+The canonical native catalog additionally declares `iscsi`, `fc`, and
+`nvmeof` as **both** backup input and output, with symmetric restore
+roles. These are storage *transports* to a LUN/namespace and not substitutes
+for the `rbd` Ceph volume driver or POSIX filesystem copy. Their
+`safety=snapshot_block_device` metadata identifies non-negotiable
+preflight requirements: stable WWID/NGUID and LUN/NSID identity, multipath
+reconciliation, a verifiable snapshot boundary or application quiesce,
+bounded block-stream validation and safe detach/cleanup. Restore and backup
+output write operations are always blocked until the operator has a new,
+empty, isolated target with independent approval. Current stage: **Planned**.
+
+`anti-ransomware-vault` is **backup output only** and **restore input
+only**, exposing `safety=immutable_recovery_vault`. It accepts ciphertext
+plus authenticated manifest, with independent append-only ingest and a
+separate read-only recovery principal. WORM/Object Lock, enforced retention,
+external audit and multi-party approval are mandatory before Ready. The
+current Rust content-addressed store does not by itself meet those conditions:
+**this is an interface and acceptance contract, not a working WORM service**.
+
+Counts: **21 input + 11 output = 32 backup-role definitions** across 22
+plugin IDs, reversed for restore. See `docs/PLUGIN_MATRIX.md` for status
+and the 0% generic-adapter certification baseline.
+
+## r031 — GlusterFS and LVM over iSCSI / FC
+
+New provider `glusterfs` is registered for backup input/output and the
+inverse restore roles. Use a mounted Gluster client, never brick-path
+manipulation. Snapshot consistency and preservation of volume metadata,
+GFID, extended attributes and ACL require explicit validation against
+replica/disperse configurations; heal/split-brain and durable commit must
+be tested before enabling writes.
+
+The `iscsi` and `fc` plugins now advertise five *optional* typed
+`lvm_modes` in JSON: `local`, `cluster-local`,
+`shared-exclusive`, `ha-exclusive`, `cluster-shared`.
+Raw LUN is represented by an omitted profile. CLI `plugins plan` accepts
+`--input-lvm` and `--output-lvm` independently, and refuses to apply
+LVM modes to non-iSCSI/FC plugins. A shared or clustered LVM profile adds
+read-only preflight requirements for WWID, PV/VG/LV identity, device
+ownership, snapshot consistency, single-writer fencing or distributed
+locking, and quorum. An output/restore target must be a *new empty isolated*
+LUN/VG. The planner does NOT acquire locks or perform any block operation.
+
+Compatibility note: Proxmox supports LVM over iSCSI and FC, including
+shared storage under the correct cluster lock model, but LVM snapshots,
+VM volume chains and cluster-aware filesystems differ. A successful
+capability plan does not establish crash/application consistency.
+
+## r032 — Lustre, Storage Scale/GPFS, HDFS, AFS, Alfresco and cloud repositories
+
+The registry now includes 30 plugin IDs and 29 backup source / 21 backup
+destination roles (reversed for restore). `google-drive` and `onedrive`
+are now also *planned* destinations. New two-way plugins: `lustre`,
+`gpfs`, `hdfs`, `afs`, `alfresco`, `owncloud`, `nextcloud`.
+All are static, never dynamically imported from arbitrary plugin folders.
+
+New `DataKind` values `distributed_filesystem` and
+`document_repository` distinguish namespace/volume consistency and
+document metadata. Declarative `access_gate` is either
+`external_protocol_or_mounted_client`, `licensed_external_client` or
+`oauth_scope_review`. A gate lists prerequisites in `plugins plan`;
+it never downloads a third-party driver, requests OAuth consent or
+activates a mount automatically.
+
+- IBM Storage Scale licensing: operator-provided and separately installed
+  authorized client; backup/transfer entitlements must be verified.
+- OpenAFS: external IPL-licensed client, AFS cell/VLDB volume identity,
+  backup/RO snapshots, chained full/incremental dumps, separate ACL
+  preservation and create-new-volume recovery.
+- Lustre: external mounted client, layout/stripe and snapshot consistency.
+- HDFS: SWebHDFS, Kerberos and secure redirect policy.
+- Alfresco: REST/CMIS documents, versions, model, permissions and links.
+- OwnCloud/Nextcloud: independent DAV/OCS compatibility and revision tests.
+- Google Drive/OneDrive: OAuth tenant/scope consent and create-new encrypted
+  object output; no overwrite or silently upgraded OAuth scope.
+
+Licensing compatibility for *redistributed binaries* needs an independent
+review before packaging any vendor code. Multi Backup itself remains
+EUPL-1.2 and is deliberately not shipping vendor runtimes in this commit.
+All providers are `planned`, not implemented or approved for production.
+
+## r034 — GPFS via CES (NFS/SMB), SSHFS as an independent plugin
+
+GPFS uses operator-mounted open-protocol exports, not IBM native GPFS
+client code. `GpfsAccess` supports `ces-nfs` or `ces-smb`; CLI
+`plugins plan` accepts independent optional `--input-gpfs-access` and
+`--output-gpfs-access`. The licensed server exposes the share, while the
+client may use OS-maintained NFS/CIFS components without GPFS Client licensing.
+Check the actual IBM licensing agreement and CES server entitlement.
+
+SSHFS is **distinct from SSH/SFTP/SCP**. This plugin declares input/output
+via an already mounted, updated SSHFS/FUSE client supplied separately by
+the operating system. SSHFS is GPL-2.0; Multi Backup does not distribute or
+statically link this package. Enforce SSH host key pinning and do not accept
+insecure directport options or symlink traversal; remote snapshot consistency
+requires server-side support.
+
+`plugins probe --plugin gpfs|sshfs --mount DIR [--access ces-nfs|ces-smb]`
+is a new Linux read-only mount evidence endpoint; it checks
+`/proc/self/mountinfo` and exact filesystem type, redacting remote source
+details. The returned `rw_mount_option` is only a kernel flag, never proof
+of actual remote write permissions, verified identity or successful backup.
+It launches no client or mount command, accesses no user data or remote
+credentials, and does not certify a generic adapter.
+
+## r036 — user-controlled protection of individual backup instances
+
+- Native content-addressed logical backups can be **protected/unprotected**
+  explicitly. Protection state is an age-encrypted per-backup marker, not
+  8+2 parity and not the WORM vault. `Store::load/list` now surfaces
+  protection status, with corrupted marker fail-closed.
+- New CLI commands `storage protect-backup/unprotect-backup/delete-backup`.
+  Unprotect and delete require exact full ID confirmation. Protected backup
+  deletion is rejected. Manifest deletion deliberately does **not** remove
+  shared ciphertext chunks/parity pending a safe, independently verified GC.
+- Desktop Storage displays a protected lock and offers Protect, confirmed
+  Unprotect and confirmed Delete only when unprotected.
+- ZIP64 transport and full-storage relocation carry the encrypted hold,
+  preserving the protected status across imports or copies.
+- Legacy encrypted `.tar.gz.age` archives gained a separate per-archive
+  protection marker with CLI `archive protect/unprotect`, and deletion
+  is blocked while protected. Mutation uses an exclusive root lock.
+- The policy-only retention planner honors an explicit `protected` flag
+  regardless of age or default 30-day expiry. Autonomous recurring
+  retention and GC remain **not implemented**; no automatic deletion has
+  been enabled by this change.
+- Added integration/unit tests for shared chunks, protected ZIP import,
+  corrupt holds, wrong-ID rejection and protected legacy archive deletion.
+- No claim of immutable hardware WORM protection or completed remote plugin
+  enforcement; independent vault and provider certification remain pending.
+
+## r036 — Oracle live RMAN and user-protected backup semantics
+
+The source catalog adds `oracle` as a **planned backup input** and inverse
+restore destination. The driver must invoke the *operator's locally
+licensed* Oracle RMAN online backup for an ARCHIVELOG database; capture
+a recoverable SCN, archived redo, datafile/backup pieces and controlfile/
+SPFILE while the service stays available. No copying live Oracle files
+as a substitute for an application-consistent operation, and no
+redistribution of Oracle binaries. Extra-cost RMAN compression,
+encryption or standby options must remain disabled without the required
+entitlements; Multi Backup uses its own encryption layer.
+
+**Every output adapter must implement explicit backup protection
+independently of retention:** a user-protected logical backup is not
+deletable, even after 30 days, until the authenticated user explicitly
+removes the hold. Generic output adapters must read that state before
+manual deletion, policy sweep, retention shortening, or chunk GC.
+The local chunk-store and legacy archive path now have protection
+enforcement; remote providers still need their own tested enforcement.
+WORM/Object Lock on an independent vault is a separate and stronger
+safety property. See `docs/BACKUP_PROTECTION.md`.

@@ -1,0 +1,60 @@
+replicaCount: 1
+image:
+  repository: desalvo/multi-backup
+  tag: early-release
+  pullPolicy: IfNotPresent
+service:
+  port: 8080
+adminUser: admin
+# Must be an existing Secret with admin-hash and age-identity keys.
+existingSecret: multi-backup-auth
+publicOrigin: https://multi-backup.example.org
+ingress:
+  enabled: false  # Hardened: expose only through private authenticated gateway
+  className: nginx
+  host: multi-backup.example.org
+  tlsSecretName: multi-backup-tls
+  annotations: {}
+storage:
+  existingClaim: ""
+  size: 100Gi
+  storageClassName: ""
+protection:
+  hardenedMode: true
+  # Gateway and offline recovery credential are separate 256-bit secrets.
+  # Require the operator to provision private-gate and recovery-secret keys.
+  authorizedReaders: ""
+  readonlyVault: true
+  networkPolicy:
+    enabled: false
+    gatewayNamespaceLabels: {}
+    gatewayPodLabels: {}
+resources:
+  requests: {cpu: 250m, memory: 256Mi}
+  limits: {cpu: "2", memory: 2Gi}
+
+# External identity providers and SMTP are disabled until configured.
+auth:
+  dav:
+    enabled: false
+    user: mount
+  ldap:
+    enabled: false
+    url: ""
+    userDnTemplate: ""
+    requiredGroupDn: ""
+    allowedUsers: ""
+    groupMemberAttribute: member
+  oidc:
+    enabled: false
+    issuer: ""
+    clientId: ""
+    allowedSubjects: ""
+  smtp:
+    enabled: false
+    host: ""
+    port: 587
+    tls: starttls
+    from: ""
+    to: ""
+    username: ""

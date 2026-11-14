@@ -48,7 +48,22 @@ for attempt in 1 2 3 4; do
   sleep "$((attempt * 3))"
 done
 [[ "$created" == 1 ]] || exit 1
-hdiutil verify "$DMG"
+# DiskImages can return a transient busy/unavailable error immediately
+# after a successful create on GitHub macOS runners. Verify the same immutable
+# DMG again rather than treating transient helper contention as corruption.
+verified=0
+for attempt in 1 2 3 4; do
+  if hdiutil verify "$DMG" >"$TMP/hdiutil-verify.log" 2>&1; then
+    verified=1; break
+  fi
+  cat "$TMP/hdiutil-verify.log" >&2
+  if ! grep -Eqi 'Resource temporarily unavailable|Resource busy' "$TMP/hdiutil-verify.log" || [[ "$attempt" == 4 ]]; then
+    echo 'Mac DMG verification failed; not treating nontransient errors as success' >&2
+    exit 1
+  fi
+  sleep "$((attempt * 3))"
+done
+[[ "$verified" == 1 ]] || exit 1
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT" -quiet
 COUNT="$(find "$MOUNT" -mindepth 1 -maxdepth 1 ! -name '.DS_Store' ! -name '.Trashes' ! -name '.fseventsd' | wc -l | tr -d ' ')"
 [[ "$COUNT" == 2 && -d "$MOUNT/Multi Backup.app" &&

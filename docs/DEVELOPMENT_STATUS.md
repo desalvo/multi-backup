@@ -207,3 +207,348 @@ The r016 PR initial complete-visual run #43534898468 passed Production Gate and 
 ### r018 actual-GUI visual QA polish
 
 - Headless screenshot job `43541311109` generated real r018 dashboard/Backup/About screenshots and EN/IT PDFs successfully; macOS ARM64 DMG passed its native launch/install smoke. R018 photo/header/sidebar/gradient control appearance was inspected. Refined About to use the correctly proportioned dedicated sidebar photograph (no cropping/stretching); made the navigation scrollbar narrow and navy, reduced button labels to avoid crowding the rounded borders. Add non-finite numeric guard for progress-colour calculations in both native and fallback paths. Gate now checks Rust binary embedding for Mac/Windows. Mac Intel and final later-commit CI still require successful completion before merge.
+
+## r019 — Rust-native encrypted archive interoperability (2026-11-14)
+
+- Added `rust/src/archive.rs` and independent `multi-backup-native` Rust CLI. It can create gzip/tar archives encrypted directly with age, verify optional SHA-256 sidecars, list and fully authenticate members, and restore with strict normalized paths, member/size limits, duplicate rejection, link/special-type rejection and an atomic empty destination. It never writes an unencrypted whole archive. Existing Python archives remain the schema; archive bytes differ due gzip/tar metadata but the contents and structure must agree.
+- Added a genuinely encrypted Rust↔Python interoperability test (real age keypair, Python-generated archive read/restored in Rust, Rust-generated archive verified/restored by Python), plus unsafe traversal and checksum mutation negative tests. Production Gate now installs `age` and fails unless both round-trips work. The Rust CLI is included as a helper in Mac and Windows native packages; Linux packaging of the helper remains open.
+- **NOT yet a full migration.** The Python/Tk GUI, GitHub/Dropbox transfer clients, checkpoint journals and vault remain the production path; cryptography is performed by the existing `age` executable invoked from Rust. Do not disable Python, repoint default backup/restore or claim stable until every workflow's functional and security parity is certified on real providers and all native OS installers.
+
+Validation requested: Rust cargo test/build, Python 3.11–3.13, dependency/security audit, real age/tar cross-language tests, Mac ARM64/Intel GUI smoke and native helper, Windows installer, Rocky/Alma RPM compatibility. No claims of full green until confirmed.
+
+### Additional native components (r019)
+
+- Read-only Rust `checkpoint audit` parses the existing schema-1 active.json, checks exact cycle format, configuration fingerprint structure and SHA-256/size of all saved step outputs, rejects symlinks and never modifies resume state. The real Python Journal fixture is audited before and after simulated corruption.
+- Rust `dropbox hash` implements the documented SHA-256 of concatenated 4-MiB block SHA-256 digests; it is actually used by the Dropbox Python plugin through a restricted, packaged C ABI when present. Python fallback and unit tests compare empty, small, full-block and boundary+1 files. Dropbox network transport remains Python.
+
+### Read-only Rust vault interoperability (r019)
+
+- The independent Rust CLI can authenticate the existing encrypted identity vault schema v1 with scrypt N=32768/r=8/p=1 and AES-256-GCM, verifying recipient-bound AAD and the age private identity syntax in RAM. It never prints, writes, caches or exports the secret; derived keys/private identity use memory zeroization. Passwords are read from the terminal without echo or from an explicitly requested stdin pipe, never argv.
+- Real parity test: Python seals a newly generated age identity into an ephemeral vault, Rust unlocks it with the correct password and rejects a bad password. The existing production Python vault remains unchanged and recovery import/export, Touch ID, migration and key rotation still require a separately audited Rust implementation.
+
+### Complete compatible vault management surface in native Rust (r019)
+
+- Expanded the native vault CLI to create new protected age identities without plaintext staging, verify schema-1 vaults, export independently password-encrypted recovery copies, import recovery copies to new vault locations, and change passwords atomically with encrypted rollback. Source and destination overwrite protections, 0600 file permissions, scrypt/AES-GCM AAD and zeroized key/private data are retained. Password input is via non-echo terminal or explicitly opted-in stdin, never argv.
+- The real age/Python parity test now exercises Rust-created vaults read by Python, Rust recovery export/import read by Python and a Rust password change that invalidates the old password without changing the recovered private age identity.
+- This covers password-based vault file operations only. Platform-specific macOS Touch ID/Keychain, Windows biometrics, migration of existing insecure plaintext identities and in-place recovery of damaged vaults remain guarded by their current Python/Swift implementations until native parity is certified.
+
+### Production native archive route on installed apps (r019)
+
+- The existing Python archive browsing and local extraction API now delegates to the bundled Rust executable in installed macOS/Windows applications only. It uses an explicit trusted local helper path (never arbitrary PATH execution), returns the same list-member JSON, and raises errors on native failures rather than silently returning to a weaker path. New, absent restore destinations are published atomically by Rust; compatibility callers using an existing destination or nonstandard size limits retain Python behavior. Source checkout tests deliberately retain the independent Python parser to avoid circular parity tests.
+- The production GUI, plugin transfer implementations, complete checkpoint authoring and native Rust UI remain open; integrating a validated Rust helper into the Python GUI is a transitional migration, not Rust-only delivery.
+
+## r020 checkpoint writer (native Rust)
+
+Rust `journal` now supports start/restart/resume, signed SHA-256 step records and finalization with an exclusive lock and atomic JSON persistence. The exact canonical Python JSON configuration hash (including Unicode escapes) is reproduced, so archived Python v1 checkpoint sessions are not silently renamed or invalidated. A cross-runtime regression starts/records in Rust and validates the same checkpoint with the deployed Python Journal, then completes in Rust. The implementation is internal development until the provider transaction paths and crash/power-loss recovery are E2E certified.
+
+### r020 independent native Dropbox backup workflow
+
+A Rust-only network backup implementation now uses pinned Dropbox HTTPS endpoints, TLS validation, bounded retry/pagination and the existing MULTI_BACKUP_DROPBOX_TOKEN environment flow. It downloads only listed immutable file revisions; validates size/ID/rev/Dropbox 4-MiB content hash before encrypting each object; reuses existing ciphertext only if SHA-256 sidecars validate; preserves the Python-compatible objects/XX/SHA.tar.gz.age path, encrypted manifest schema and an explicit Start/Resume session with immutable manifest filename. No Dropbox remote delete/move/write endpoints are present. The native executable supports 'dropbox backup' and 'dropbox resume' without Python. CI can exercise offline integrity/session tests, but real-account E2E and cross-platform packaged network trust remain required before replacing the default production plugin.
+
+### r020 experimental native GitHub backup
+
+Added Rust `github backup` and `github resume` with the authenticated `gh` and `git` executables, explicit journal naming, repository discovery with pagination, safe owner/repo slugs, bare mirror and git fsck, encrypted per-repository snapshots, read-only metadata and successful Actions CI run backfill. Remote cleanup is disabled by design; failure of required CI data blocks a falsely successful backup. Native provider output is a new source-compatible encrypted archive layout, but an exact replacement for all r018 GitHub metadata fields and retention rules is **not yet certified**. The r018 engine stays the default and can recover every existing archive.
+
+### r020 native Rust GUI prototype, not a Tk wrapper
+
+A separate Rust-only desktop project now exists under `rust-desktop/` using egui/eframe. It loads the existing project photographic banner and logo, provides the dark/violet layout, hamburger, About, operational provider selection, Start/Resume, local archive inventory, age verification/new-destination extraction, protected vault creation/unlock/recovery/password change and live job status. It calls compiled `multi_backup_core` functions directly, not Python. The CI will build the standalone Linux executable and actually open/close a window in an Xvfb software-GL environment. It is an **experimental preview**, not yet approved to replace the r018 pixel-accurate Tk interface: remote restore, automatic update, provider event progress and extensive accessibility tests remain pending.
+
+### r020 explicit native remote restoration
+
+The compiled Rust core now has dedicated, opt-in remote restore commands. A GitHub mirror archive can be restored only into a fresh owner/new-repo using gh repo create and git push --mirror (plus LFS push); an encrypted Dropbox object can be restored to a new absolute file path with strict add-only semantics using bounded 8MiB upload sessions and verified content hash. Both operations require --confirm CREATE-NEW in the native CLI; the standalone Rust GUI has an additional explicit confirmation modal. Neither path is invoked by automatic backup or local archive browsing. External live-account recovery is unverified and must be separately qualified.
+
+### r020 Rust archive deletion
+
+The native CLI/GUI now preserves the guarded *local-only* deletion workflow: exact archive filename typed confirmation, catalog confinement, symlink rejection, active GitHub/Dropbox checkpoint protection, only ciphertext and same-directory metadata companions, and append-only fsynced JSONL audit. No remote delete method is invoked. Unit tests assert refusal of out-of-root, wrong confirmation and deletions during an operation. Full GUI acceptance remains pending.
+
+## r020 — Native Rust-only preview packaging, three operating systems
+
+- Native Rust desktop binaries now have separate runnable preview packaging without Python/Tk/PyInstaller. The Rust entrypoint resolves helpers in a trusted app-local bin folder for Finder/Explorer launches.
+- macOS: the new packager builds Apple Silicon and Intel app bundles, native age/gh/git-lfs helpers, icon and Info.plist, ad-hoc signs, creates a single-app DMG, mounts and tests it. Preview is not Developer ID notarized and must not replace stable.
+- Windows: the preview packager creates a Rust executable, CLI and native helpers as a ZIP and a per-user Inno Setup installer plus SHA-256 checksums; not production signed.
+- Ubuntu 24.04: CI creates a tar.gz with GUI, CLI and native helpers and smoke-tests the packaged GUI with Xvfb/software GL.
+- None of the Rust preview packaging jobs publish releases. Actual platform installs, Rocky/Alma RPMs, provider E2E, security audits and upgrade/rollback still require qualification.
+
+### r020 private vault identity in memory — no plaintext identity file
+
+The native GUI now keeps a Zeroizing<age-identity> allocation shared through Arc only for the current application session after a successful vault password unlock. Vault identity paths are never written to plaintext temporary files for local verify/restore: Rust sends the decrypted private identity into age's supported `-i -` stdin pipe, with the encrypted archive a separate named input, and fully authenticates the returned stream. The CLI also supports `archive list/verify/extract --vault PROTECTED.agevault --password-stdin`; integration tests decrypt and restore a real Python-generated encrypted archive directly from a protected vault, and refuse an incorrect password. This covers local restore; remote-provider identity reuse and Touch ID enrollment are still separate acceptance items.
+
+### r020 remote restore with an in-memory protected identity
+
+GitHub fresh-repo mirror restore and Dropbox add-only file restore share the same Rust age reader. Both can now consume the private identity from an already unlocked protected vault via a private stdin pipe without creating a plaintext identity file, or use the external identity-file legacy path. The Rust CLI accepts `restore github|dropbox --vault PROTECTED.agevault` with interactive password or explicit stdin, and the native desktop reuses its zeroizing in-memory session key for all local/remote restores. Explicit remote creation confirmation and existing-data protection remain mandatory.
+
+## r020 native feature closure addendum — 14 November 2026
+
+- **Protected session key:** native Rust desktop now unlocks a schema-1 AES-256-GCM vault once, retains only a `Zeroizing` RAM identity until the app closes and sends the age secret to the child process over `age -i -` standard input. Both local verify/extract and remote CREATE-NEW restore can work without creating or exporting a plaintext key file. Real Python->Rust round-trip with a protected password vault and wrong-password denial is a mandatory gate.
+- **Native provider safeguards:** GitHub mirror fetch now requires all Git LFS objects and aborts when unavailable. Reused Git and metadata ciphertext must have a valid SHA-256 sidecar. Only after finalizing a successful cycle, older distinct snapshots above the default five are deleted locally using the same typed-confirmation audit engine; invalid archives are never automatically deleted. The native summary marks missing metadata as incomplete instead of falsely asserting success. No provider remote delete operation is added.
+- **Rust UI biometry:** Mac preview bundle compiles the Swift Keychain/Touch ID adapter and offers explicit enrollment only after password-based vault authentication, device-biometric unlock and disable. Passwords are exchanged only through local pipes; the Rust vault independently verifies the retrieved password. Hardware Touch ID is unavailable in hosted CI and **physical-device verification remains required**. Windows Hello not yet ported.
+- **RPM qualification:** six additional Python-free Rust-native RPM CI matrix builds now target Rocky Linux and AlmaLinux 8/9/10 directly with each distribution's libc; no Ubuntu-built binary is mislabeled as an EL package. RPMs require native `git`, `git-lfs`, `gh`, `age`, and runtime graphics libraries. RPM builds are in PR CI only, not released or signed.
+- **macOS compatibility smoke flake:** the legacy r018 early-DMG check occasionally returned a transient `hdiutil verify: Resource temporarily unavailable` after successful signing. Added bounded retry only for this exact transient error; corruption/signature errors still fail closed.
+- **Release gate:** no merge, stable tag, package replacement or claim of fully qualified Rust-only software before all six OS builds, real-account GitHub/Dropbox backup and restoration, upgrade/rollback, physical biometry and signing/notarization pass. No Python has been removed from `main`.
+
+## r020 native startup lock and native update workflow (14 November 2026)
+
+- Rust standalone desktop now resolves the same protected vault path as Python 0.1.0 on macOS (`~/Library/Application Support/multi-backup/keys/default.agevault`), Windows (`%APPDATA%/multi-backup/keys/default.agevault`) and Linux (`$XDG_CONFIG_HOME/multi-backup/keys/default.agevault`), independent of the user-selected backup destination. If that vault already exists (including a rejected symlink), startup is locked; only an authenticated password or already enrolled Mac Touch ID can unlock backup UI. For a new installation without a vault, Start/Resume takes the user to the Vault panel and requires generation/unlock rather than permitting unsecured backups. An identity already unlocked for the current application session is held exclusively in a zeroized Rust allocation.
+- Added the new Rust updater module and operational CLI/UI controls. They retrieve the official fixed GitHub Releases endpoint by stable/early-release, select native architecture-specific Rust-only assets, reject non-HTTPS/off-domain URL hops and missing official SHA-256 digests, bound redirects/file sizes and stage the bytes atomically. No downloaded executable is installed/launched automatically. Physical system signing and version-by-version upgrade/rollback remain separate release acceptance tests.
+- Existing r018 Python GUI and archives on `main` have not changed. The r020 feature branch is **not** yet a fully certified replacement: external provider E2E with private authenticated accounts, UI/pixel/accessibility review, physical biometry, signed/notarized distribution and end-to-end upgrade/rollback still fail to have sufficient verified evidence.
+
+
+## r021 experimental Rust storage and server macroarea (2026-11-14)
+
+**Branch:** feature/r019-rust-native-encrypted-archive, PR #9 (draft).
+**Do not promote main r018 or stable.** The following are implemented
+development commits, not qualified stable functionality:
+
+- New opt-in chunk-store v1, keyed content addresses, age/zstd objects,
+  encrypted per-cycle unified manifest, selective new-directory restore.
+- 8+2 encrypted-ciphertext Reed–Solomon parity with authenticated stripe
+  indexes, health repair, checksum checks and quarantine.
+- Rust web server prototype, responsive browser, Argon2id login, sessions,
+  CSRF/origin validation, audit, selective server-side export.
+- Docker image build recipe, Compose, Helm/Kustomize manifests and Rust wizard.
+  GitHub Actions gated Docker Hub publishing is defined but NOT triggered
+  until credentials are configured and main CI passes.
+- Original offline project artwork replaces former Unsplash/imgix source.
+  Legacy brochures/old screenshots require a fresh licensed-asset audit.
+- Rust/Python + end-to-end corruption test source added. Remote CI results,
+  image publication and cross-OS installation still unverified in this cycle.
+
+**Open critical gaps:** full legacy Python-to-Rust feature parity, vault
+in-memory unlock for chunk store and web, CI metadata/preservation policy
+parity, real provider backups, original folder restore, FUSE/WinFsp, ZIP64
+multipart, storage migration/GC, LDAP/SSO, SMTP(S), audit retention and
+security/penetration testing. No numeric overall completion estimate until
+a verified inventory with explicit scope and acceptance gates exists.
+
+
+## r022 — cross-platform native fixes, integrity and portable v1 (2026-11-14)
+
+- Repaired invalid Rust egui drawing syntax and API on the native desktop branch; full native matrix requalification requested.
+- Added storage verify health report with parity checks, ZIP64 encrypted object volumes, transactional import, multi-select restore, and authenticated streaming conversion from legacy age/tar members into unified chunk manifest.
+- Responsive web browser now supports nested folders, search, list/grid and selection across a single logical backup.
+- Publication policy now gates both OCI and native images on the Rust cross-platform matrix, and keeps stable opt-in disabled by default.
+- Never claim completed certification on a compile-only gate; details in docs/RC_CERTIFICATION_MATRIX.md.
+
+
+## r023 — v1 relocation and desktop GUI; SMTP(S), LDAPS, OIDC (2026-11-14)
+
+- Implemented v1 storage relocation to a new directory with dry-run and
+  source/destination SHA-256, age/HMAC and parity verification. The source
+  is never deleted by relocation.
+- Added Rust native GUI storage pane showing ONE logical backup per cycle,
+  selectable virtual files, restore, parity check/repair, ZIP64 portable
+  archive, legacy streaming import and storage relocation.
+- Added optional server SMTP(S) with secret file and authenticated test,
+  optional LDAPS verified TLS and allow-list/group policy, and OIDC code
+  flow with PKCE/state/nonce and explicit authorized subjects.
+- Hardened macOS Rust DMG to include native app and Applications shortcut,
+  and retry only transient DiskImages contention.
+- Outstanding: mount live FUSE/WinFsp; in-memory age vault for new storage;
+  direct GitHub/Dropbox chunk ingest; complete reverse format conversion;
+  production signing; audited user/role model and external IdP acceptance.
+- CI needs requalification on latest head, not older 43615775732 green run.
+
+
+## r024 — on-demand read-only live mount prototype
+
+- Added opt-in WebDAV over HTTPS with separate token, authenticated PROPFIND/GET/HEAD and deny-all mutating requests.
+- Streaming reads authenticated age/HMAC chunk objects without staging plaintext to disk.
+- One backup ID maps to one virtual tree spanning all source namespaces.
+- Helm auth.dav flag defaults OFF. Real macOS/Windows/Linux WebDAV client acceptance and kernel FUSE/WinFsp mounts remain open.
+
+
+## r025 streaming reverse archive conversion
+
+The v1 Store exports a complete unified logical backup to a new encrypted tar.gz.age using age/tar/gzip streaming, authenticated contents and a roundtrip test; no plaintext tar file is staged. Native GUI exposes the action. Tests on real large archives remain part of the release gate.
+
+
+## r027 -- Debian and confidential architecture safeguard (2026-11-14)
+
+- Added native Debian 12/13 AMD64/ARM64 package builder for compiled Rust GUI
+  and CLI. Four .deb CI jobs test installability and use explicit release
+  publication dependencies. Debian packages have SHA-256 sidecar files.
+- Production Gate asserts all four Debian targets and blocks release
+  publishing if the matrix or .deb artifacts are missing. Signing, platform
+  runtime testing and external restore drills remain acceptance gates.
+- Added docs/PRIVATE_ARCHITECTURE_WORKFLOW.md and a CI check that rejects
+  plaintext or non-AES-256-R6 documents under docs/private. Only the named
+  encrypted PDF may be committed; no password, private diagram source or
+  vault topology is kept in Git.
+- The private architecture PDF generator is delivered separately to the
+  operator as an offline kit; the final encrypted PDF has NOT been published
+  because the operator must choose the password on their own computer.
+- Do not mark Debian or the security architecture as production certified
+  until the latest GitHub Actions run passes all required jobs.
+
+
+## r028 — OCI private-gateway boundary regression (2026-11-14)
+
+- Verified the previous PR HEAD `a10a40e8` passes Production CI run 43625695818 (all 19 executed jobs). Draft PR does not push Docker images or publish installers.
+- Server startup now fails closed on public HTTPS origins unless hardened mode is explicitly enabled; its two 256-bit gateway/recovery credentials must be present and **different**, preventing accidental privilege collapse through copied secrets.
+- Added unit regressions for remote-origin downgrade, absent credentials and reused secrets. The OCI validation job additionally starts the actual Rust server and verifies the private-gateway/login/export HTTP boundary.
+- Does not implement immutable WORM, independent key authority, mTLS, multi-person recovery approvals or real-account disaster recovery; no stable certification claim. CI on this new HEAD still requires review.
+
+
+## r029 — bidirectional input/output plugin catalogue (2026-11-14)
+
+- Added a **static Rust role/capability registry** for 18 input providers and 7 output providers, with exact inverse restore roles (7 restore input, 18 restore output). Roles cover GitHub, Dropbox, Google Drive, OneDrive, POSIX, S3 AWS/Ceph, WebDAV, NFSv3+, CIFS/Samba, CephFS, Ceph RADOS Block Device (RBD), Proxmox VE/PBS/VM/CT, Kubernetes/OpenShift/OKD, VMware, oVirt, MySQL/MariaDB, PostgreSQL, SSH/SCP/SFTP.
+- Added read-only `multi-backup-native plugins list/plan` with JSON output and strict role validation; absent/unwired adapters cannot execute or overwrite data.
+- Preserved existing direct Rust GitHub/Dropbox/FS commands and the legacy Python plugin registry. A catalog entry is not an adapter implementation.
+- Added tests for the full 18+7 matrix, inverse role mapping, unknown or unsupported roles, and fail-closed non-executable plans.
+- New public docs `docs/PLUGIN_API.md` and `docs/PLUGIN_MATRIX.md` define consistency contracts, encrypted transfer, restore confirmation, and acceptance gates. No provider credentials or private infrastructure details are committed.
+- **Progress rebaseline:** 25/25 requested plugin role definitions represented; operational generalized provider-pair certification 0/25. The old 57.5% whole-product maturity indicator is not comparable after this scope expansion; recalculate only after an audited expanded inventory, never label this scope as delivered.
+
+## r030 — SAN transports and immutable-vault plugin scope (2026-11-14)
+
+- Expanded static Rust plugin registry with `iscsi`, `fc`, and `nvmeof`
+  in **both** backup input/output roles and `anti-ransomware-vault` as
+  backup output **only**. Restore roles are automatically reversed.
+- Introduced typed safety profiles for BlockTransport, BlockDevice and
+  ProtectedVault to distinguish raw block snapshots and immutable vault
+  operations from filesystem adapters. No direct block-device writes,
+  targets, or dangerous command-line mounts are exposed.
+- Added unit tests for SAN snapshot safety profiles, all role counts,
+  inverse restore mapping, and immutable vault direction rejection.
+- New scope: 21 backup inputs, 11 backup outputs, 11 restore inputs,
+  21 restore outputs, 22 distinct plugin IDs. Catalog 32/32 (100%) by
+  definition; 0/32 unified adapters certified; 0/231 generic backup pairs
+  certified. Previous overall RC percentage is obsolete after expansion.
+- iSCSI/FC/NVMe-oF block transport adapters and WORM vault are Planned,
+  **not implemented**. Safety gates must include storage-consistent snapshots,
+  WWID/NGUID/NSID identification, multipath fencing, restore to new isolated
+  LUNs/namespaces only, independent immutable retention and recovery approval.
+- All source code and public docs remain on GitHub; private architecture
+  and handoff remain solely in approved Dropbox folder.
+
+## r031 — GlusterFS and SAN LVM profiles (2026-11-14)
+
+- Added `glusterfs` as both input and output of backups, with inverse
+  restore roles. Distinct plugin ID; requires mounted Gluster client,
+  topology and consistency verification and preserves GFID/ACL/xattr.
+- iSCSI and FC each support independently configurable optional LVM layouts:
+  `local`, `cluster-local`, `shared-exclusive`, `ha-exclusive`,
+  `cluster-shared`. The raw-LUN mode remains available by omission.
+- New read-only Rust `plugins plan --input-lvm/--output-lvm` validates
+  the profile independently per endpoint and emits snapshot, multipath
+  WWID/PV/VG/LV, cluster quorum, fencing/locking and isolated-new-target
+  acceptance requirements. Misapplied profiles fail closed.
+- Added Rust unit tests for all 5 LVM profiles on both transports,
+  inverse restore mapping, rejection on non-SAN plugins, clustered
+  locking/fencing guardrails and GlusterFS both directions.
+- Updated scope: **23 plugin IDs, 22 backup sources and 12 destinations**,
+  34 backup-role contracts plus 34 inverse restore contracts.
+  Catalogue coverage: 34/34 (100%); unified certified role adapters:
+  0/34 (0%); certified generic provider-pair combinations: 0/264 (0%).
+- Do NOT claim that catalogued SAN LVM, GlusterFS or WORM operations are
+  implemented, or that unsafe live-device writes are supported.
+
+## r032 — AFS and enterprise storage/content plugins (2026-11-14)
+
+- Added **AFS / OpenAFS** as two-way plugin, with AFS cell/volume/VLDB,
+  Kerberos token, backup/readonly snapshots, full/incremental `vos`
+  chain, ACL/mountpoint preservation and restore to **new** volume preflight.
+- Added Lustre, IBM Storage Scale / GPFS, HDFS, Alfresco, ownCloud and
+  Nextcloud as *planned* input/output plugin roles; extended existing
+  Google Drive and OneDrive inputs to also have output roles.
+- Added access-gate metadata to the Rust contract: licensed external
+  client for GPFS, OAuth scope review for Google Drive/OneDrive, and
+  externally installed mounted/API clients for other integrations.
+  No proprietary runtime, kernel module, OpenAFS code, or credentials
+  have been packaged. Vendor license and API rights require acceptance.
+- Plan preflight adds provider-aware AFS volume/ACL/dump-chain rules,
+  HDFS TLS/Kerberos/snapshot, Lustre/GPFS snapshot and storage
+  entitlement, remote document version/permission checks.
+- Added Rust unit tests for all new bidirectional roles, AFS restore
+  isolation, licensing/OAuth gates and fail-closed pairing.
+- New inventory: **30 plugin IDs, 29 backup inputs, 21 backup outputs**
+  and exact inverse restore roles (21 inputs/29 outputs); **50 declared
+  backup roles and 50 inverse**, zero generic pairs certified of 609
+  possibilities. Catalogue definition 50/50 (100%) is *not* product
+  completion. Existing older overall RC percentage must be rebaselined.
+- No unqualified vendor adapter is enabled; latest CI must verify this
+  commit before declaring the new code/test matrix green.
+
+## r034 — SSHFS and open CES GPFS client support (2026-11-14)
+
+- Added bidirectional `sshfs` provider, distinct from `ssh` (SCP/SFTP
+  transfer). Client is an independently installed, patched GNU GPL-2.0
+  SSHFS/FUSE package, not bundled into Multi Backup.
+- Switched GPFS plugin to **CES NFS/SMB profiles** `ces-nfs` and
+  `ces-smb`, using open-source distribution client tools; IBM Storage
+  Scale server/CES nodes retain their own license requirements.
+  Direct native GPFS mount via a free client is not assumed available.
+- Added Rust `mount_probe` module and read-only CLI `plugins probe`,
+  checking Linux exact pre-mounted NFS/CIFS/FUSE.SSHFS mountpoint and
+  filesystem type without mounting, file reads, authentication or writes.
+  Kernel rw flag does not prove access privileges/GPFS provenance.
+- CLI `plugins plan` now supports input/output GPFS CES protocol profiles
+  separately, with preflight for consistent snapshots, ACLs, patched SSHFS,
+  host-key pinning, symlink containment, isolated encrypted-only output.
+  All newly cataloged adapters remain `planned`.
+- Inventory **31 plugin IDs, 30 backup inputs, 22 backup outputs**, reverse
+  restore roles 22/30. Declarative contracts 52/52, certified generic
+  adapter roles 0/52, qualified provider pairs 0/660; rebaseline overall
+  completion before reporting a new product-wide percentage.
+- No change to main/stable. Production CI for this commit must complete.
+
+## r036 — user-controlled protection of individual backup instances
+
+- Native content-addressed logical backups can be **protected/unprotected**
+  explicitly. Protection state is an age-encrypted per-backup marker, not
+  8+2 parity and not the WORM vault. `Store::load/list` now surfaces
+  protection status, with corrupted marker fail-closed.
+- New CLI commands `storage protect-backup/unprotect-backup/delete-backup`.
+  Unprotect and delete require exact full ID confirmation. Protected backup
+  deletion is rejected. Manifest deletion deliberately does **not** remove
+  shared ciphertext chunks/parity pending a safe, independently verified GC.
+- Desktop Storage displays a protected lock and offers Protect, confirmed
+  Unprotect and confirmed Delete only when unprotected.
+- ZIP64 transport and full-storage relocation carry the encrypted hold,
+  preserving the protected status across imports or copies.
+- Legacy encrypted `.tar.gz.age` archives gained a separate per-archive
+  protection marker with CLI `archive protect/unprotect`, and deletion
+  is blocked while protected. Mutation uses an exclusive root lock.
+- The policy-only retention planner honors an explicit `protected` flag
+  regardless of age or default 30-day expiry. Autonomous recurring
+  retention and GC remain **not implemented**; no automatic deletion has
+  been enabled by this change.
+- Added integration/unit tests for shared chunks, protected ZIP import,
+  corrupt holds, wrong-ID rejection and protected legacy archive deletion.
+- No claim of immutable hardware WORM protection or completed remote plugin
+  enforcement; independent vault and provider certification remain pending.
+
+## r036 corrected inventory — Oracle and explicit protection
+
+- `oracle` is registered as a planned consistent-online RMAN input,
+  taking the plugin inventory to 32 plugin IDs, 31 backup input roles and
+  22 backup output roles; restore is the exact reverse (22 / 31).
+  **53** backup role definitions are present, and **682** possible pairs
+  are not yet certified as generic integrated jobs.
+- New user-requested protection is separate from 8+2 parity and WORM:
+  encrypted per-backup hold survives portable transport/relocation,
+  blocks manual logical delete and retention preview. Legacy local
+  archives have their own guarded protection sidecars. The runtime
+  scheduler and safe chunk GC are not yet certified or activated.
+
+## r037 — nested top-level namespaces and retention preview
+
+- The chunk store now offers `Store::backup_in_namespace` and CLI
+  `storage backup --top-namespace PATH`; GUI has an optional namespace
+  field supporting nested segments (e.g. `Rome/Cluster/VM`).
+  Existing `Store::backup` and manifests remain backwards compatible.
+- New manifests store creation Unix time and optional top namespace.
+  Migrated/legacy manifests with unknown timestamps are preserved
+  indefinitely by automatic retention until classified explicitly.
+- Added `Store::preview_retention` and CLI `storage retention-preview`:
+  read-only age-authenticated snapshot load/integrity checks followed by
+  the 30-day retention policy. The protection flag is read directly
+  from encrypted hold state, NEVER trusted from user-provided records.
+- Test checks nested source paths, traversal rejection, future 30-day
+  expiry preview still preserves a protected backup, and restored data
+  under the nested namespace. Rust focused CI `43638279897` passed
+  all 3 jobs for commit `901608a5`; full CI on that revision is pending.
+- Automatic scheduler execution and real mark-and-sweep GC are NOT
+  enabled; protected shared chunks may not be reclaimed by an unsafe
+  age-based cleanup. Output plugin-level capacity is partially supported
+  for pre-mounted filesystems; cloud API quotas/namespace index
+  persistence still require integration and live verification.

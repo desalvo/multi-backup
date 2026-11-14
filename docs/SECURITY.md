@@ -40,3 +40,16 @@ The age private key vault is an authenticated scrypt (N=32768, r=8, p=1)/AES-256
 On macOS, opt-in Touch ID uses a helper with Security.framework device-only Keychain `SecAccessControlCreateWithFlags(..., .biometryCurrentSet)` protection and LocalAuthentication. Biometric templates and Mac login passwords are never handled by Multi Backup. Biometric enrolment changes may invalidate the item; password fallback always works. Unsupported platforms do not claim biometric support.
 
 Updater HTTPS uses trusted certifi CA roots with server certificate chain and hostname checking enabled. GitHub release downloads require a trusted SHA-256 digest, and HTTP redirects remain allowlisted. No insecure SSL verification bypass is accepted. Restore checks the source archive's plugin, never auto-overwrites an existing remote target, and prompts for the service-specific credential only when required. Dropbox write tokens are not saved. Full live-account and platform biometric review remains outstanding.
+
+
+## Confidential design material
+
+This repository is public. Never commit live vault topology, recovery
+phrases, IPs, names, secret files, private diagrams, passphrases or
+unencrypted architecture documents. The separate offline design kit
+can produce an AES-256 R6 PDF using an operator-chosen local password.
+Only the strongly encrypted PDF is allowed under docs/private, checked
+by scripts/check-confidential-artifacts.py in the Production Gate.
+A private repository remains preferable even for ciphertext because
+Git objects are widely copyable and password guessing can be attempted
+offline. Never share the PDF password in chat, commits, CLI arguments or CI.

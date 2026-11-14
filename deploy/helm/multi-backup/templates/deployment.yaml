@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: multi-backup, app.kubernetes.io/instance: "{{ .Release.Name }}"}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: multi-backup, app.kubernetes.io/instance: "{{ .Release.Name }}"}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: MULTI_BACKUP_ADMIN_USER, value: {{ .Values.adminUser | quote }}}
+            - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: {{ .Values.publicOrigin | quote }}}
+            - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: /run/secrets/admin-hash}
+            - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: /run/secrets/age-identity}
+            - {name: MULTI_BACKUP_HARDENED_MODE, value: {{ .Values.protection.hardenedMode | quote }}}
+            - {name: MULTI_BACKUP_AUTHORIZED_READERS, value: {{ .Values.protection.authorizedReaders | quote }}}
+            {{- if .Values.protection.hardenedMode }}
+            - {name: MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE, value: /run/secrets/private-gate}
+            - {name: MULTI_BACKUP_RECOVERY_SECRET_FILE, value: /run/secrets/recovery-secret}
+            {{- end }}
+            - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
+            - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
+          {{- if .Values.auth.dav.enabled }}
+            - {name: MULTI_BACKUP_DAV_USER, value: {{ .Values.auth.dav.user | quote }}}
+            - {name: MULTI_BACKUP_DAV_PASSWORD_FILE, value: /run/secrets/dav-password}
+          {{- end }}
+          {{- if .Values.auth.ldap.enabled }}
+            - {name: MULTI_BACKUP_LDAP_URL, value: {{ .Values.auth.ldap.url | quote }}}
+            - {name: MULTI_BACKUP_LDAP_USER_DN_TEMPLATE, value: {{ .Values.auth.ldap.userDnTemplate | quote }}}
+            {{- if .Values.auth.ldap.requiredGroupDn }}
+            - {name: MULTI_BACKUP_LDAP_REQUIRED_GROUP_DN, value: {{ .Values.auth.ldap.requiredGroupDn | quote }}}
+            {{- end }}
+            - {name: MULTI_BACKUP_LDAP_ALLOWED_USERS, value: {{ .Values.auth.ldap.allowedUsers | quote }}}
+            - {name: MULTI_BACKUP_LDAP_GROUP_MEMBER_ATTRIBUTE, value: {{ .Values.auth.ldap.groupMemberAttribute | quote }}}
+          {{- end }}
+          {{- if .Values.auth.oidc.enabled }}
+            - {name: MULTI_BACKUP_OIDC_ISSUER, value: {{ .Values.auth.oidc.issuer | quote }}}
+            - {name: MULTI_BACKUP_OIDC_CLIENT_ID, value: {{ .Values.auth.oidc.clientId | quote }}}
+            - {name: MULTI_BACKUP_OIDC_ALLOWED_SUBJECTS, value: {{ .Values.auth.oidc.allowedSubjects | quote }}}
+            - {name: MULTI_BACKUP_OIDC_SECRET_FILE, value: /run/secrets/oidc-client-secret}
+          {{- end }}
+          {{- if .Values.auth.smtp.enabled }}
+            - {name: MULTI_BACKUP_SMTP_HOST, value: {{ .Values.auth.smtp.host | quote }}}
+            - {name: MULTI_BACKUP_SMTP_PORT, value: {{ .Values.auth.smtp.port | quote }}}
+            - {name: MULTI_BACKUP_SMTP_TLS, value: {{ .Values.auth.smtp.tls | quote }}}
+            - {name: MULTI_BACKUP_SMTP_FROM, value: {{ .Values.auth.smtp.from | quote }}}
+            - {name: MULTI_BACKUP_SMTP_TO, value: {{ .Values.auth.smtp.to | quote }}}
+            {{- if .Values.auth.smtp.username }}
+            - {name: MULTI_BACKUP_SMTP_USER, value: {{ .Values.auth.smtp.username | quote }}}
+            - {name: MULTI_BACKUP_SMTP_PASSWORD_FILE, value: /run/secrets/smtp-password}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            {{- if .Values.protection.readonlyVault }}
+            - {name: data, mountPath: /data/backups, subPath: backups, readOnly: true}
+            - {name: data, mountPath: /data/exports, subPath: exports}
+            - {name: data, mountPath: /data/audit, subPath: audit}
+            {{- else }}
+            - {name: data, mountPath: /data}
+            {{- end }}
+            - {name: credentials, mountPath: /run/secrets, readOnly: true}
+            - {name: temp, mountPath: /tmp}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 30}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" .Release.Name) .Values.storage.existingClaim }}
+        - name: credentials
+          secret: {secretName: {{ .Values.existingSecret | quote }}, defaultMode: 0440}
+        - name: temp
+          emptyDir: {sizeLimit: 64Mi}
