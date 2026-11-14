@@ -16,6 +16,15 @@ pub const DEFAULT_CHUNK: usize = 4 * 1024 * 1024;
 pub struct ChunkRef { pub id: String, pub sha256: String, pub bytes: usize }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entry { pub path: String, pub bytes: u64, pub chunks: Vec<ChunkRef> }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum BackupKind { #[default] Full, Incremental }
+impl BackupKind {
+    pub fn parse(value:&str)->Result<Self,String>{
+        match value {"full"=>Ok(Self::Full),"incremental"=>Ok(Self::Incremental),
+            _=>Err("Backup mode must be full or incremental".into())}
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogicalBackup {
     pub version: u32, pub id: String, pub label: String, pub entries: Vec<Entry>,
@@ -29,6 +38,12 @@ pub struct LogicalBackup {
     /// Optional nested namespace at the logical backup level.
     #[serde(default)]
     pub top_namespace: String,
+    /// Full snapshots and incrementals both have complete, self-contained
+    /// chunk-reference inventories. Incrementals reuse immutable chunks.
+    #[serde(default)]
+    pub kind: BackupKind,
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: String }
@@ -154,6 +169,14 @@ impl Store {
     pub fn read_chunk_ref(&self,identity:&Path,chunk:&ChunkRef)->Res<Vec<u8>>{
         self.read_chunk(identity,chunk)
     }
+    /// Exact zstd size before age encryption; verifies plaintext integrity.
+    pub(crate) fn compressed_chunk_bytes(&self,key:&Path,chunk:&ChunkRef)->Res<u64>{
+        self.read_chunk(key,chunk)?;
+        let path=self.chunk_path(&chunk.id)?;
+        let metadata=fs::symlink_metadata(&path)?;
+        if !metadata.file_type().is_file(){return Err("Unsafe encrypted chunk".into());}
+        Ok(age(&fs::read(path)?,None,Some(key))?.len() as u64)
+    }
     fn read_chunk(&self, identity: &Path, chunk: &ChunkRef) -> Res<Vec<u8>> {
         if !safe_hash(&chunk.id) || !safe_hash(&chunk.sha256) ||
             chunk.bytes > self.cfg.chunk_bytes { return Err("Invalid chunk reference".into()); }
@@ -193,12 +216,33 @@ impl Store {
     pub fn backup_in_namespace(&self,identity:&Path,label:&str,
                                top_namespace:&str,sources:&[Source])
         ->Res<LogicalBackup> {
+        self.backup_in_namespace_mode(identity,label,top_namespace,sources,
+                                      BackupKind::Full,None)
+    }
+    pub fn backup_in_namespace_mode(&self,identity:&Path,label:&str,
+                               top_namespace:&str,sources:&[Source],
+                               kind:BackupKind,parent_id:Option<&str>)
+        ->Res<LogicalBackup> {
         if !top_namespace.is_empty() && !crate::backup_policy::safe_namespace(top_namespace) {
             return Err("Unsafe top namespace".into());
         }
         if label.len() > 256 || sources.is_empty() { return Err("Invalid label/sources".into()); }
         let lock = OpenOptions::new().create(true).write(true).open(self.root.join(".lock"))?;
         fs2::FileExt::lock_exclusive(&lock)?;
+        match (kind,parent_id){
+            (BackupKind::Full,None)=>{},
+            (BackupKind::Incremental,Some(parent))=>{
+                if !safe_hash(parent){return Err("Invalid incremental parent ID".into());}
+                let previous=self.load(identity,parent)?;
+                if previous.top_namespace!=top_namespace{
+                    return Err("Incremental cannot cross logical namespace".into());
+                }
+                // Detect invalid/missing ancestor or a forged cycle before
+                // committing new lineage. Referenced chunks are independent.
+                crate::backup_chain::ancestors(self,identity,parent)?;
+            }
+            _=>return Err("Full backup cannot have parent; incremental requires parent".into())
+        }
         let mut entries = Vec::new();
         let mut visited = HashSet::new();
         for src in sources {
@@ -245,7 +289,8 @@ impl Store {
             label: label.to_owned(), entries, protected:false,
             created_unix:std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH).map_or(0,|v|v.as_secs()),
-            top_namespace:top_namespace.to_owned()};
+            top_namespace:top_namespace.to_owned(),
+            kind,parent_id:parent_id.map(str::to_owned)};
         let encrypted = age(&serde_json::to_vec(&snapshot)?, Some(&self.cfg.recipient), None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
@@ -265,6 +310,12 @@ impl Store {
         if !value.top_namespace.is_empty() &&
            !crate::backup_policy::safe_namespace(&value.top_namespace) {
             return Err("Invalid manifest top namespace".into());
+        }
+        match (value.kind,value.parent_id.as_deref()){
+            (BackupKind::Full,None)=>{},
+            (BackupKind::Incremental,Some(parent))
+                if safe_hash(parent)&&parent!=id=>{},
+            _=>return Err("Invalid encrypted backup chain metadata".into())
         }
         value.protected = self.is_backup_protected(identity,id)?;
         let mut names = HashSet::new();
@@ -654,7 +705,8 @@ impl Store {
         let mut nonce=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut nonce);
         let snapshot=LogicalBackup{version:1,id:hex::encode(nonce),
             label:label.to_string(),entries,protected:false,
-            created_unix:0,top_namespace:String::new()};
+            created_unix:0,top_namespace:String::new(),
+            kind:BackupKind::Full,parent_id:None};
         let encrypted=age(&serde_json::to_vec(&snapshot)?,
             Some(&self.cfg.recipient),None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)? {
@@ -898,6 +950,10 @@ impl Store {
         if backup.protected {
             return Err("Backup is PROTECTED. Explicitly remove protection first".into());
         }
+        if self.list(identity)?.iter().any(|backup|
+            backup.parent_id.as_deref()==Some(id)){
+            return Err("Backup has dependent increments; use delete-rebase to preserve the chain".into());
+        }
         let manifest=self.manifest_path(id)?;
         if !fs::symlink_metadata(&manifest)?.file_type().is_file(){
             return Err("Unsafe manifest deletion".into());
@@ -905,6 +961,68 @@ impl Store {
         fs::remove_file(manifest)?;
         fs2::FileExt::unlock(&lock)?;
         Ok(())
+    }
+
+    /// Rebase direct descendants before removing a full or incremental.
+    /// Every snapshot already has a complete independent chunk-reference
+    /// inventory, so no plaintext payload or shared chunk is ever modified.
+    /// On failure before parent deletion, the parent remains available.
+    /// Protected children cannot have their chain identity rewritten.
+    pub fn delete_backup_rebase(&self,identity:&Path,id:&str,confirm_id:&str)
+        ->Res<usize>{
+        if id!=confirm_id||!safe_hash(id){
+            return Err("Confirm the complete backup ID before chain rebase".into());
+        }
+        let lock=self.app_lock()?;
+        let target=self.load(identity,id)?;
+        if target.protected{
+            return Err("Protected backup: remove protection explicitly first".into());
+        }
+        let children:Vec<_>=self.list(identity)?.into_iter()
+            .filter(|backup|backup.parent_id.as_deref()==Some(id)).collect();
+        for child in &children {
+            if child.protected{
+                return Err("Protected dependent prevents chain rebase".into());
+            }
+            let verification=crate::backup_chain::verify_chain(self,identity,&child.id,true)?;
+            if !verification.healthy{
+                return Err("Dependent increment failed integrity verification".into());
+            }
+        }
+        let folder=self.root.join("manifests");
+        for child in &children {
+            let mut updated=child.clone();
+            if target.kind==BackupKind::Full {
+                updated.kind=BackupKind::Full;
+                updated.parent_id=None;
+            } else {
+                updated.parent_id=target.parent_id.clone();
+                if updated.parent_id.is_none(){
+                    updated.kind=BackupKind::Full;
+                }
+            }
+            let ciphertext=age(&serde_json::to_vec(&updated)?,
+                Some(&self.cfg.recipient),None)?;
+            let mut temp=NamedTempFile::new_in(&folder)?;
+            temp.write_all(&ciphertext)?;
+            temp.as_file().sync_all()?;
+            let destination=self.manifest_path(&updated.id)?;
+            if !fs::symlink_metadata(&destination)?.file_type().is_file(){
+                return Err("Unsafe descendant manifest during rebase".into());
+            }
+            temp.persist(&destination).map_err(|error|error.error)?;
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&destination,fs::Permissions::from_mode(0o600))?;
+            }
+        }
+        let manifest=self.manifest_path(id)?;
+        if !fs::symlink_metadata(&manifest)?.file_type().is_file(){
+            return Err("Unsafe manifest deletion".into());
+        }
+        fs::remove_file(manifest)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(children.len())
     }
 }
 
