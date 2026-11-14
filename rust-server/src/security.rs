@@ -47,6 +47,34 @@ fn read_token(path: &Path) -> Result<Arc<Zeroizing<Vec<u8>>>, ErrBox> {
     }
     Ok(Arc::new(data))
 }
+// Startup configuration is a security boundary, not a convenience default.
+// A protected deployment needs two genuinely independent credentials and
+// must never silently fall back to the local development security profile.
+fn validate_boundary(
+    hardened: bool, origin: &str,
+    gate: &Option<Arc<Zeroizing<Vec<u8>>>>,
+    recovery: &Option<Arc<Zeroizing<Vec<u8>>>>,
+) -> Result<(), ErrBox> {
+    if !hardened {
+        if origin != "http://127.0.0.1:8080" {
+            return Err("Non-loopback origins require hardened mode".into());
+        }
+        return Ok(());
+    }
+    if !origin.starts_with("https://") {
+        return Err("Hardened mode requires a verified HTTPS public origin".into());
+    }
+    let (Some(gateway), Some(approval)) = (gate, recovery) else {
+        return Err("Hardened mode requires separate private-gate and recovery secrets".into());
+    };
+    // Both files are validated 64-byte hexadecimal tokens by read_token.
+    // Using the same value in two files must not create false independence.
+    if gateway.as_slice().ct_eq(approval.as_slice()).unwrap_u8() == 1 {
+        return Err("Private gateway and recovery credentials must differ".into());
+    }
+    Ok(())
+}
+
 fn env_enabled(key: &str) -> Result<bool, ErrBox> {
     match env::var(key).as_deref() {
         Ok("true"|"1") => Ok(true),
@@ -57,16 +85,11 @@ fn env_enabled(key: &str) -> Result<bool, ErrBox> {
 impl SecurityPolicy {
     pub fn from_env(origin: &str) -> Result<Self, ErrBox> {
         let hardened = env_enabled("MULTI_BACKUP_HARDENED_MODE")?;
-        if hardened && !origin.starts_with("https://") {
-            return Err("Hardened mode requires a verified HTTPS public origin".into());
-        }
         let gate = env::var_os("MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE")
             .map(|p|read_token(Path::new(&p))).transpose()?;
         let recovery = env::var_os("MULTI_BACKUP_RECOVERY_SECRET_FILE")
             .map(|p|read_token(Path::new(&p))).transpose()?;
-        if hardened && (gate.is_none() || recovery.is_none()) {
-            return Err("Hardened mode requires separate private-gate and recovery secrets".into());
-        }
+        validate_boundary(hardened, origin, &gate, &recovery)?;
         let raw = env::var("MULTI_BACKUP_AUTHORIZED_READERS").unwrap_or_default();
         if raw.len() > 16*1024 {return Err("Reader list is oversized".into());}
         let readers: HashSet<_> = raw.split(',').map(str::trim)
@@ -124,6 +147,23 @@ mod tests {
             recovery:Some(Arc::new(Zeroizing::new(vec![b'b';64]))),
             readers:HashSet::from(["oidc:reader-123".into()])
         }
+    }
+    #[test]
+    fn public_origin_never_silently_disables_the_private_gateway() {
+        let p=policy(true);
+        assert!(validate_boundary(true,"https://backup.example.org",&p.gate,&p.recovery).is_ok());
+        assert!(validate_boundary(false,"https://backup.example.org",&p.gate,&p.recovery).is_err());
+        assert!(validate_boundary(false,"http://0.0.0.0:8080",&p.gate,&p.recovery).is_err());
+        assert!(validate_boundary(false,"http://127.0.0.1:8080",&None,&None).is_ok());
+        assert!(validate_boundary(true,"http://127.0.0.1:8080",&p.gate,&p.recovery).is_err());
+    }
+    #[test]
+    fn hardened_mode_requires_two_independent_nonmissing_secrets() {
+        let p=policy(true);
+        assert!(validate_boundary(true,"https://backup.example.org",&None,&p.recovery).is_err());
+        assert!(validate_boundary(true,"https://backup.example.org",&p.gate,&None).is_err());
+        let identical=p.gate.clone();
+        assert!(validate_boundary(true,"https://backup.example.org",&p.gate,&identical).is_err());
     }
     #[test]
     fn rejects_missing_wrong_or_short_gateway_token() {

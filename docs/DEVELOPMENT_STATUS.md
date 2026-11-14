@@ -379,3 +379,11 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
   because the operator must choose the password on their own computer.
 - Do not mark Debian or the security architecture as production certified
   until the latest GitHub Actions run passes all required jobs.
+
+
+## r028 — OCI private-gateway boundary regression (2026-11-14)
+
+- Verified the previous PR HEAD `a10a40e8` passes Production CI run 43625695818 (all 19 executed jobs). Draft PR does not push Docker images or publish installers.
+- Server startup now fails closed on public HTTPS origins unless hardened mode is explicitly enabled; its two 256-bit gateway/recovery credentials must be present and **different**, preventing accidental privilege collapse through copied secrets.
+- Added unit regressions for remote-origin downgrade, absent credentials and reused secrets. The OCI validation job additionally starts the actual Rust server and verifies the private-gateway/login/export HTTP boundary.
+- Does not implement immutable WORM, independent key authority, mTLS, multi-person recovery approvals or real-account disaster recovery; no stable certification claim. CI on this new HEAD still requires review.

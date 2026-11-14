@@ -93,6 +93,8 @@ jobs:
           cargo build --manifest-path rust-server/Cargo.toml --release
       - name: Build server Docker image without publishing
         run: docker build --progress plain --tag multi-backup:test .
+      - name: Exercise private gateway and recovery boundary in a running OCI image
+        run: bash scripts/test-server-gateway-container.sh multi-backup:test
 
   publish-container:
     name: Push Multi Backup OCI image to Docker Hub

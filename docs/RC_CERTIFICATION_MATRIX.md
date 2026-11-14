@@ -103,3 +103,10 @@ passwords, is never disclosed in GitHub Actions, and only encrypted bytes
 are optionally added. The public repository must contain **no private
 diagram source or live topology**. This is a process safeguard, not
 an international security certification or resistance guarantee.
+
+
+## r028 — evidence and remaining security work
+
+- CI run 43625695818 at a10a40e8: Production Gate, OCI compilation, Mac ARM64/Intel DMGs, Windows x64 installer, Ubuntu GUI, Debian 12/13 x AMD64/ARM64 and six Rocky/Alma RPM previews all passed. No official release publishing took place from the draft PR.
+- New security delta: refuse public-origin insecure startup, reject copied gate/recovery keys, verify authentication boundary in a **running** OCI container and require this check in release policy. New CI is required before marking runtime gate verified.
+- Remaining for production: reverse-proxy removal of untrusted gateway headers, enforced private mTLS/CNI network policy, WORM Object Lock, 2-of-3 independent recovery approvals, signed audit, external provider restores and independent penetration test. Unit and container acceptance do not substitute these.

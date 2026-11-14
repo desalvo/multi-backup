@@ -289,3 +289,11 @@ Prefer a separate private GitHub repo over a public encrypted blob.
 Track latest full CI, not previously green SHA; do not merge or label
 stable while Debian packaging, OS signing or complete recovery acceptance
 is incomplete.
+
+
+## r028 — protected server runtime and verified CI (2026-11-14)
+
+- At commit `a10a40e82ab963c090d1845d73bc2e653dc1dd90`, PR #9 Production CI run `43625695818` passed all 19 executable jobs, including both macOS Rust previews, Windows, Ubuntu, four Debian 12/13 combinations and six Rocky/Alma RPMs. Container and native public release jobs were intentionally skipped for the draft PR.
+- Server hardened-mode policy now rejects public origins without explicit hardened mode, and rejects identical private gateway and recovery secrets. Local development remains allowed only at `http://127.0.0.1:8080` without hardened mode.
+- Added black-box running Docker image gateway checks after image build: health probe, missing/wrong/correct gateway token, authentication requirement, and denial of recovery without a user session. No deployment passwords are used.
+- CI result for this **new** commit must be checked; a green older SHA does not certify the patch. Stable promotion, independent WORM retention, mTLS ingress, real provider restores, physical signing and live adversarial tests remain blocked.

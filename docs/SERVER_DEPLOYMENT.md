@@ -239,3 +239,26 @@ platforms before enabling in production.
 ## Paged audit viewer (r026 development)
 
 An administrator-only API GET /api/audit exposes recent JSONL audit entries with offset, limit (default 10, max 100), and event/actor search. The responsive web dashboard includes browsing and a next-page control. Any nonregular/symlinked audit file is rejected. Current storage is append-only JSONL, NOT yet a tamper-evident replicated audit database; ingestion, retention policy, chained signatures, LDAP/OIDC role mapping and archival require further acceptance.
+
+
+## r028 — deployment boundary guardrails
+
+The Rust server deliberately refuses to start when `MULTI_BACKUP_PUBLIC_ORIGIN`
+uses HTTPS and `MULTI_BACKUP_HARDENED_MODE` is not explicitly `true`.
+A non-hardened profile is restricted to the exact development origin
+`http://127.0.0.1:8080` and should be exposed only on the loopback interface.
+For a protected HTTPS deployment, both
+`MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE` and
+`MULTI_BACKUP_RECOVERY_SECRET_FILE` are mandatory, contain **distinct** random
+64-character hex credentials, and must be provisioned in a trusted Secret
+store rather than copied together as one shared token.
+
+The trusted reverse proxy MUST remove user-supplied
+`X-Multi-Backup-Private-Gate` headers and inject its credential only after
+authenticating the calling client. Recovery credentials are not gateway
+credentials and must remain under separate administrative control. Use mTLS
+and a restrictive NetworkPolicy that is actually enforced by the cluster CNI.
+The chart's Ingress remains disabled by default. The running-image smoke
+test in `scripts/test-server-gateway-container.sh` exercises the HTTP gateway
+boundary with disposable CI-only credentials; the test is not a penetration
+test or a substitute for live deployment qualification.

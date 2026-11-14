@@ -28,6 +28,8 @@ def validate():
     assert (ROOT/'scripts/check-confidential-artifacts.py').is_file()
     assert (ROOT/'docs/PRIVATE_ARCHITECTURE_WORKFLOW.md').is_file()
     assert 'native-release' in jobs
+    assert (ROOT/'scripts/test-server-gateway-container.sh').is_file()
+    assert 'test-server-gateway-container.sh' in str(jobs['rust-server-validation']['steps']), 'Missing runtime private-gateway security regression'
     assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
     assert jobs['publications-smoke']['needs']==['production-gate'], 'GUI capture must follow the security gate'
     assert jobs['rust-desktop-smoke']['needs']==['production-gate'], 'Rust-only desktop must follow the security gate'
