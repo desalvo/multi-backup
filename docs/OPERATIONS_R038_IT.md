@@ -6,8 +6,8 @@ Questo manuale descrive le funzionalità effettivamente implementate, quelle di 
 
 ## 1. Prerequisiti e sicurezza
 
-- Utilizzare il **binario compilato** \`multi-backup-native\`, presente nei pacchetti Rust di anteprima. Nessun comando presente qui richiede Python.
-- Installare/avere nel PATH \`age\` e \`age-keygen\`; utilizzare solo dispositivi e cartelle private con spazio sufficiente.
+- Utilizzare il **binario compilato** `multi-backup-native`, presente nei pacchetti Rust di anteprima. Nessun comando presente qui richiede Python.
+- Installare/avere nel PATH `age` e `age-keygen`; utilizzare solo dispositivi e cartelle private con spazio sufficiente.
 - Non conservare mai la chiave privata dentro il backup o la cartella sorgente. Non inserire token/password nelle opzioni CLI, negli script o nella documentazione.
 - Alcune operazioni di mantenimento richiedono conferma esplicita; una procedura sicura parte sempre da **verifica e anteprima**.
 - Eseguire prima una prova di restore completa verso una cartella nuova: un esito di CI verde non equivale a un backup remoto qualificato.
@@ -15,27 +15,27 @@ Questo manuale descrive le funzionalità effettivamente implementate, quelle di 
 
 ## 2. Preparare storage e identità
 
-\`\`\`bash
+```bash
 age-keygen -o /private/keys/multi-backup-age.txt
 # Annotare il recipient pubblico age1... mostrato da age-keygen.
 multi-backup-native storage init --root /private/backup-store \
   --recipient age1SOSTITUIRE_CON_LA_CHIAVE_PUBBLICA --chunk-mib 4
-\`\`\`
+```
 
-Lo storage crea \`.multi-backup-v1/config.json.age\`, \`manifests/\`, \`chunks/\`, \`stripes/\` e \`parity/\` quando necessari. I chunk sono identificati tramite HMAC-SHA256, compressi con zstd e cifrati con age. **Non cancellare manualmente oggetti all'interno dello storage.**
+Lo storage crea `.multi-backup-v1/config.json.age`, `manifests/`, `chunks/`, `stripes/` e `parity/` quando necessari. I chunk sono identificati tramite HMAC-SHA256, compressi con zstd e cifrati con age. **Non cancellare manualmente oggetti all'interno dello storage.**
 
 ## 3. Backup totale e incrementale
 
-Creare un file \`sources.json\` con le sorgenti effettive (esempio):
+Creare un file `sources.json` con le sorgenti effettive (esempio):
 
-\`\`\`json
+```json
 [
   {"namespace":"documents","directory":"/data/documents"},
   {"namespace":"projects","directory":"/data/projects"}
 ]
-\`\`\`
+```
 
-\`\`\`bash
+```bash
 # Backup totale: ottenere FULL_ID dal JSON restituito.
 multi-backup-native storage backup --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt \
@@ -47,25 +47,25 @@ multi-backup-native storage backup --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt \
   --sources-json sources.json --label "Incrementale novembre" \
   --mode incremental --parent FULL_ID
-\`\`\`
+```
 
-Un incrementale conserva l'**inventario completo dei file** in un manifest age, ma condivide i chunk immutabili già esistenti. La catena \`parent_id\` identifica il precedente e risale al totale originario. Il ripristino di un singolo punto usa il suo inventario, senza copiare fisicamente tutta la catena.
+Un incrementale conserva l'**inventario completo dei file** in un manifest age, ma condivide i chunk immutabili già esistenti. La catena `parent_id` identifica il precedente e risale al totale originario. Il ripristino di un singolo punto usa il suo inventario, senza copiare fisicamente tutta la catena.
 
 ## 4. Informazioni e dimensioni
 
-\`\`\`bash
+```bash
 multi-backup-native storage list --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt --json
 multi-backup-native storage info --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt --id BACKUP_ID --json
-\`\`\`
+```
 
-La scheda \`info\` restituisce per il punto selezionato e per ogni predecessore:
+La scheda `info` restituisce per il punto selezionato e per ogni predecessore:
 numero file, byte non compressi, somma delle dimensioni **zstd prima della deduplica**, dimensione dei chunk univoci **zstd dopo deduplica**, byte compressi dei chunk assenti dal predecessore, file aggiunti/modificati e rimossi. Le dimensioni zstd **escludono l'overhead di age, manifest e parità**; non rappresentano quindi lo spazio fisico liberabile da GC. Il rapporto fornisce gli ID di tutta la catena e il totale di riferimento.
 
 ## 5. Verifica e ripristino
 
-\`\`\`bash
+```bash
 # Predefinito: verifica TUTTA la catena fino al totale.
 multi-backup-native storage verify-chain --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt --id INCREMENT_ID
@@ -83,7 +83,7 @@ multi-backup-native storage restore --root /private/backup-store \
 multi-backup-native storage restore --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt --id INCREMENT_ID \
   --selection documents/fatture --destination /restores/solo-fatture
-\`\`\`
+```
 
 La verifica controlla age, SHA-256/HMAC, riferimenti dei chunk e parità. Il restore non sovrascrive destinazioni esistenti, evita link simbolici e nomi di percorso non sicuri. Eseguire un confronto byte-per-byte dei file recuperati prima di eliminare il backup originale.
 
@@ -91,22 +91,22 @@ La verifica controlla age, SHA-256/HMAC, riferimenti dei chunk e parità. Il res
 
 **Purge** = modifica i manifest, non rimuove chunk o parità. L'azione richiede ID completo e conferma.
 
-\`\`\`bash
+```bash
 multi-backup-native storage delete-backup --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt \
   --id BACKUP_DA_ELIMINARE --confirm-id BACKUP_DA_ELIMINARE
-\`\`\`
+```
 
-- Eliminando \`FULL F0 -> INC I1 -> INC I2\` il punto I1, I2 viene ricollegato a F0.
+- Eliminando `FULL F0 -> INC I1 -> INC I2` il punto I1, I2 viene ricollegato a F0.
 - Eliminando F0, il successore diretto I1 viene **promosso a FULL**; gli altri punti mantengono lo stato completo senza duplicare i chunk.
 - Un backup **protetto** non può essere eliminato. Se un successore protetto dovrebbe avere il manifest riscritto, l'operazione è bloccata finché il proprietario non toglie esplicitamente la protezione.
 - In presenza di link danneggiati, verifica fallita o identità errata, **non forzare** la cancellazione: eseguire verifica e recupero. La modifica dei manifest richiede ancora certificazione contro crash/guasti simultanei.
 
 ## 7. Garbage collection e repack automatico 8+2
 
-La **GC è separata dal purge**. Il repack viene eseguito automaticamente durante \`gc-collect\`: se una stripe Reed-Solomon 8+2 contiene chunk attivi e orfani, crea una stripe sostitutiva con **solo gli attivi**. Verifica i due nuovi shard age cifrati e pubblica **per ultimo** l'indice cifrato di sostituzione. Non cancella la vecchia stripe nello stesso istante.
+La **GC è separata dal purge**. Il repack viene eseguito automaticamente durante `gc-collect`: se una stripe Reed-Solomon 8+2 contiene chunk attivi e orfani, crea una stripe sostitutiva con **solo gli attivi**. Verifica i due nuovi shard age cifrati e pubblica **per ultimo** l'indice cifrato di sostituzione. Non cancella la vecchia stripe nello stesso istante.
 
-\`\`\`bash
+```bash
 # Vedere i chunk orfani, le stripe miste e i byte eventualmente recuperabili.
 multi-backup-native storage gc-preview --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt --grace-hours 48
@@ -115,17 +115,17 @@ multi-backup-native storage gc-preview --root /private/backup-store \
 multi-backup-native storage gc-collect --root /private/backup-store \
   --identity /private/keys/multi-backup-age.txt \
   --confirm ERASE-ORPHANS --grace-hours 48
-\`\`\`
+```
 
 **Prima passata:** produce/attiva la nuova parità e mantiene quella precedente come protezione da crash. **Passate successive, oltre il periodo di sicurezza:** solo dopo la maturazione dell'indice sostitutivo rimuovono la vecchia parità e i chunk non più usati. Il grace period predefinito è 48 ore, minimo 24. Una pulizia dopo un'interruzione può recuperare cartelle di parità preparate ma mai confermate, solo se abbastanza vecchie e prive di indice attivo. La funzione è codice r038 in verifica CI: **non considerarla un GC di produzione finché non supera i test con interruzione, alimentazione simulata, carichi reali e multi-OS**.
 
-**Importante:** l'anteprima non è un'azione distruttiva, non effettua repack e il numero di byte immediatamente recuperabili può differire dal recupero totale ottenibile dopo le successive passate. Non cancellare manualmente le directory \`parity/\` e \`stripes/\`.
+**Importante:** l'anteprima non è un'azione distruttiva, non effettua repack e il numero di byte immediatamente recuperabili può differire dal recupero totale ottenibile dopo le successive passate. Non cancellare manualmente le directory `parity/` e `stripes/`.
 
 ## 8. Schedule di backup e verifica
 
-La CLI Rust contiene \`schedule run\` (esecuzione manuale o da cron/launchd/Utilità di pianificazione) e \`schedule daemon\` (polling nel processo). Un job sceglie \`action: "backup"\` con \`backup_mode: "full"|"incremental"\`, oppure \`action: "verify"\` con \`verify_full_chain: true\` per default.
+La CLI Rust contiene `schedule run` (esecuzione manuale o da cron/launchd/Utilità di pianificazione) e `schedule daemon` (polling nel processo). Un job sceglie `action: "backup"` con `backup_mode: "full"|"incremental"`, oppure `action: "verify"` con `verify_full_chain: true` per default.
 
-\`\`\`json
+```json
 {
   "version": 1,
   "jobs": [
@@ -146,14 +146,14 @@ La CLI Rust contiene \`schedule run\` (esecuzione manuale o da cron/launchd/Util
     }
   ]
 }
-\`\`\`
+```
 
-\`\`\`bash
+```bash
 multi-backup-native schedule run --config /private/jobs.json \
   --state /private/schedule-state.json --force
 multi-backup-native schedule daemon --config /private/jobs.json \
   --state /private/schedule-state.json --poll-seconds 60
-\`\`\`
+```
 
 Lo stato è persistito in file con restrizioni su Unix; job con errore non avanzano la data di successo. **Limite attuale:** un job di verifica deve avere un ID noto, e le schedule configurate da GUI non sono ancora persistite/certificate. L'azione GC è ancora manuale, non schedulata. Non avviare più daemon simultanei senza verificare i lock.
 
@@ -161,11 +161,11 @@ Lo stato è persistito in file con restrizioni su Unix; job con errore non avanz
 
 Sono registrati 32 plugin; **cinque coppie di backup** hanno una via operativa Rust in anteprima: POSIX→POSIX, e su Linux NFS/SMB/SSHFS/GPFS CES montati *read-only*→POSIX. Tutte le altre coppie non certificate falliscono senza tentare un backup generico.
 
-Per sorgenti NFS, SMB, SSHFS o GPFS già montate il comando richiede \`--source-snapshot-attested\` e un filesystem read-only riconosciuto; **il flag non certifica uno snapshot backend**. GPFS CES richiede \`--input-gpfs-access ces-nfs|ces-smb\`.
+Per sorgenti NFS, SMB, SSHFS o GPFS già montate il comando richiede `--source-snapshot-attested` e un filesystem read-only riconosciuto; **il flag non certifica uno snapshot backend**. GPFS CES richiede `--input-gpfs-access ces-nfs|ces-smb`.
 
-Il **restore cross-account** distingue provenienza e destinazione: l'account originale non autorizza la scrittura. Per GitHub selezionare un repository nuovo \`owner/nuovo-repo\` e autenticare \`gh\` con un account autorizzato. Per Dropbox fornire un **token di destinazione** tramite \`MULTI_BACKUP_DROPBOX_WRITE_TOKEN\`; con \`--target-account\` viene verificato l'account del token prima dell'upload.
+Il **restore cross-account** distingue provenienza e destinazione: l'account originale non autorizza la scrittura. Per GitHub selezionare un repository nuovo `owner/nuovo-repo` e autenticare `gh` con un account autorizzato. Per Dropbox fornire un **token di destinazione** tramite `MULTI_BACKUP_DROPBOX_WRITE_TOKEN`; con `--target-account` viene verificato l'account del token prima dell'upload.
 
-\`\`\`bash
+```bash
 multi-backup-native restore github --archive /backup/repo.tar.gz.age \
   --identity /private/keys/multi-backup-age.txt \
   --source-account oldowner --target-account newowner \
@@ -177,7 +177,7 @@ multi-backup-native restore dropbox --archive /backup/file.tar.gz.age \
   --identity /private/keys/multi-backup-age.txt \
   --source-account old@example.com --target-account new@example.com \
   --path /cartella/nuovo-file.ext --confirm CREATE-NEW
-\`\`\`
+```
 
 L'esempio di variabile d'ambiente è illustrativo: evitare di inserire token nella history della shell, preferire secret manager/OS keychain e processi che esportano il segreto temporaneamente. **La copia fra account e il restore remoto parziale per qualunque plugin NON sono ancora certificati**. Il restore GitHub attuale crea un repo completo da un mirror, Dropbox carica un file per volta; metadati di account, permessi, integrazioni e segreti non vengono trasferiti implicitamente.
 
