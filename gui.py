@@ -39,6 +39,8 @@ from settings import settings_path
 from sidebar_nav import SIDEBAR_BG, SIDEBAR_SEPARATOR, SIDEBAR_HEADING, NAV_ITEMS, SidebarNavItem
 
 ROOT=Path(__file__).resolve().parent
+PAGE_BG = '#152753'
+PANEL_BG = '#243969'
 
 def asset(name):
     if getattr(sys,'_MEIPASS',None):return Path(sys._MEIPASS)/'assets'/name
@@ -78,9 +80,10 @@ class BackupGUI(tk.Tk):
         self.update_channel=tk.StringVar(value=self.cfg['update_channel'])
         self.autocheck=tk.BooleanVar(value=self.cfg['auto_update_check'])
         self.update_status=tk.StringVar(value='Not checked yet')
-        self._make_styles();self._make_shell()
+        self._make_styles();self._make_shell();self._install_app_menu()
         self.protocol('WM_DELETE_WINDOW',self._quit_securely)
         self.bind('<Control-b>',lambda _event:self._toggle_sidebar())
+        self.bind('<F1>',lambda _event:self._show_about())
         for index,(name,_) in enumerate(NAV_ITEMS,1):
             self.bind('<Control-Key-'+str(index)+'>',
                       lambda _event,n=name:self._show(n))
@@ -91,20 +94,81 @@ class BackupGUI(tk.Tk):
         # No network requests, page actions or background jobs before key unlock.
         self.after(35,self._startup_security)
 
+    def _install_app_menu(self):
+        """Expose the native Help/About command without touching the vault."""
+        bar = tk.Menu(self)
+        help_menu = tk.Menu(bar, tearoff=False)
+        help_menu.add_command(label='About Multi Backup…',
+                              command=self._show_about, accelerator='F1')
+        bar.add_cascade(label='Help', menu=help_menu)
+        self.configure(menu=bar)
+        self._app_menu = bar
+        if sys.platform == 'darwin':
+            # Finder's application menu routes About to the same single popup.
+            try:
+                self.tk.createcommand('tk::mac::ShowAbout', self._show_about)
+            except tk.TclError:
+                pass
+
+    def _show_about(self):
+        current = getattr(self, '_about_dialog', None)
+        if current is not None:
+            try:
+                if current.winfo_exists():
+                    current.lift()
+                    current.focus_set()
+                    return
+            except tk.TclError:
+                pass
+        from about_dialog import AboutDialog
+        self._about_dialog = AboutDialog(self, asset)
+
     def _make_styles(self):
-        style=ttk.Style(self)
-        try:style.theme_use('clam')
-        except tk.TclError:pass
-        style.configure('TFrame',background='#f5f8fc');style.configure('TLabel',background='#f5f8fc',foreground='#24334a',font=('Helvetica',11))
-        style.configure('TButton',padding=(12,9),font=('Helvetica',10,'bold'))
-        style.configure('Accent.TButton',background='#1267c9',foreground='white',borderwidth=0)
-        style.map('Accent.TButton',background=[('active','#0d54a9'),('disabled','#aebdcc')])
-        style.configure('TEntry',padding=7);style.configure('TCombobox',padding=6)
-        style.configure('Title.TLabel',font=('Helvetica',18,'bold'),foreground='#13223e')
-        style.configure('Sub.TLabel',font=('Helvetica',10),foreground='#52647c')
-        style.configure('TLabelframe',background='#f5f8fc',borderwidth=1)
-        style.configure('TLabelframe.Label',font=('Helvetica',11,'bold'),foreground='#19345a')
-        style.configure('Horizontal.TProgressbar',troughcolor='#dbe6f3',background='#1267c9',thickness=16)
+        # The entire native shell uses the approved navy/violet glass palette,
+        # including secondary pages rather than reverting to stark white forms.
+        style = ttk.Style(self)
+        try:
+            style.theme_use('clam')
+        except tk.TclError:
+            pass
+        style.configure('TFrame', background=PAGE_BG)
+        style.configure('TLabel', background=PAGE_BG, foreground='#F2F6FF',
+                        font=('Helvetica Neue', 11))
+        style.configure('Title.TLabel', background=PAGE_BG,
+                        font=('Helvetica Neue', 19, 'bold'),
+                        foreground='#F6F8FF')
+        style.configure('Sub.TLabel', background=PAGE_BG,
+                        font=('Helvetica Neue', 10),
+                        foreground='#C3D2F2')
+        style.configure('TButton', padding=(12, 9),
+                        font=('Helvetica Neue', 10, 'bold'))
+        style.configure('Accent.TButton', background='#625DD8',
+                        foreground='white', borderwidth=0)
+        style.map('Accent.TButton',
+                  background=[('active', '#8676EA'),
+                              ('disabled', '#52628B')])
+        style.configure('TEntry', padding=8, fieldbackground='#EAF1FF',
+                        foreground='#182C50', insertcolor='#182C50')
+        style.configure('TCombobox', padding=7, fieldbackground='#EAF1FF',
+                        background='#5068A9', foreground='#182C50',
+                        arrowcolor='#E6F2FF')
+        style.map('TCombobox',
+                  fieldbackground=[('readonly', '#EAF1FF')],
+                  foreground=[('readonly', '#182C50')])
+        style.configure('TCheckbutton', background=PAGE_BG,
+                        foreground='#EAF2FF', font=('Helvetica Neue', 10),
+                        padding=3)
+        style.map('TCheckbutton', background=[('active', PAGE_BG)],
+                  foreground=[('active', '#FFFFFF')])
+        style.configure('TLabelframe', background=PAGE_BG,
+                        borderwidth=1)
+        style.configure('TLabelframe.Label', background=PAGE_BG,
+                        font=('Helvetica Neue', 11, 'bold'),
+                        foreground='#DFE8FF')
+        style.configure('Horizontal.TProgressbar', troughcolor='#182B57',
+                        background='#7062E1', thickness=16)
+        style.configure('Vertical.TScrollbar', background='#4B5D9E',
+                        troughcolor=PAGE_BG, arrowcolor='#ECF2FF')
 
     def _make_shell(self):
         # Canvas navigation ensures explicitly readable text on macOS Aqua:
@@ -145,13 +209,16 @@ class BackupGUI(tk.Tk):
             self.nav[name]=btn
         foot=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
         foot.pack(side='bottom',fill='x',padx=18,pady=(6,17))
-        tk.Frame(foot,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',pady=(0,13))
+        tk.Frame(foot,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',pady=(0,9))
         for value in ('Licenza: EUPL-1.2',
                       'Autore: '+AUTHOR,
                       'Versione: '+VERSION,
                       'Build: '+BUILD):
             tk.Label(foot,text=value,font=('Helvetica Neue',9),
                      fg='#B4CAE4',bg=SIDEBAR_BG).pack(anchor='center',pady=0)
+        PremiumButton(foot,text='ⓘ  About Multi Backup',style='Dark.TButton',
+                      command=self._show_about,width=210,height=34).pack(
+                      anchor='center',pady=(9,0))
         try:
             from PIL import Image,ImageTk,ImageOps,ImageEnhance,ImageDraw
             with Image.open(asset('backup-sidebar.jpg') if asset('backup-sidebar.jpg').is_file() else asset('hero.jpg')) as photo:
@@ -177,6 +244,9 @@ class BackupGUI(tk.Tk):
         self.menu_button=PremiumButton(toolbar,text='Hide navigation',style='Dark.TButton',
                                        command=self._toggle_sidebar)
         self.menu_button.pack(side='left')
+        PremiumButton(toolbar,text='ⓘ  About',style='Dark.TButton',
+                      command=self._show_about,width=115,height=36).pack(
+                      side='right',padx=(12,0))
         tk.Label(toolbar,text='SPAZIO BACKUP PROTETTO',bg='#0D1A3D',
                  fg='#BDCDF1',font=('Helvetica Neue',10,'bold')).pack(side='right')
         self.hero=tk.Canvas(self.content,height=185,bg='#183855',highlightthickness=0)
@@ -550,8 +620,8 @@ class BackupGUI(tk.Tk):
             self.dashboard.refresh()
         else:
             self.hero.pack(fill='x',before=self.body)
-            self.page_canvas.configure(bg='#f5f8fc')
-            self.pages[name].pack(fill='both',expand=True,padx=24,pady=18)
+            self.page_canvas.configure(bg=PAGE_BG)
+            self.pages[name].pack(fill='both',expand=True,padx=28,pady=22)
         self.page_canvas.yview_moveto(0)
         self._sync_page_scroll()
         if name=='Archives':self._refresh()
@@ -670,10 +740,16 @@ class BackupGUI(tk.Tk):
                         ('Restore…',lambda:self._show('Restore')),
                         ('Elimina archivio…',self._delete_selected_archive)]:
             PremiumButton(row,text=name,command=fn).pack(side='left',padx=(0,7))
-        self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
+        self.archives=tk.Listbox(page,height=9,background='#0D214C',
+                                 foreground='#EDF3FF',border=0,
+                                 selectforeground='#FFFFFF',selectbackground='#6056C9',
+                                 font=('Courier',10))
         self.archives.pack(fill='both',expand=True,pady=(12,5))
         ttk.Label(page,text='Encrypted archive members').pack(anchor='w')
-        self.members=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
+        self.members=tk.Listbox(page,height=9,background='#0D214C',
+                                foreground='#EDF3FF',border=0,
+                                selectforeground='#FFFFFF',selectbackground='#6056C9',
+                                font=('Courier',10))
         self.members.pack(fill='both',expand=True,pady=7)
 
     def _build_restore(self,page):
@@ -688,8 +764,9 @@ class BackupGUI(tk.Tk):
                       command=self._refresh_restore).pack(side='left',padx=(0,10))
         PremiumButton(row,text='Browse archives',
                       command=lambda:self._show('Archives')).pack(side='left')
-        self.restore_list=tk.Listbox(page,height=9,background='white',border=0,
-                                     selectbackground='#1864A8',font=('Courier',10),
+        self.restore_list=tk.Listbox(page,height=9,background='#0D214C',border=0,
+                                     foreground='#EDF3FF',selectforeground='#FFFFFF',
+                                     selectbackground='#6056C9',font=('Courier',10),
                                      exportselection=False)
         self.restore_list.pack(fill='x',pady=(8,7))
         self.restore_list.bind('<<ListboxSelect>>',self._restore_picked)
@@ -829,10 +906,12 @@ class BackupGUI(tk.Tk):
         self.plugin_vars={}
         for backend,detail in [('github','Git repositories, releases, CI metadata and artifacts; optional cleanup'),
                                 ('dropbox','Incremental file revisions; read-only remote operations; no purge')]:
-            frame=tk.Frame(page,bg='white',highlightbackground='#dae4f1',highlightthickness=1)
+            frame=tk.Frame(page,bg=PANEL_BG,highlightbackground='#586FA8',highlightthickness=1)
             frame.pack(fill='x',pady=10,ipady=18)
-            tk.Label(frame,text=backend.upper(),font=('Helvetica',14,'bold'),fg='#123459',bg='white').pack(anchor='w',padx=16)
-            tk.Label(frame,text=detail,font=('Helvetica',10),fg='#4d6986',bg='white').pack(anchor='w',padx=16)
+            tk.Label(frame,text=backend.upper(),font=('Helvetica Neue',14,'bold'),
+                     fg='#F5F8FF',bg=PANEL_BG).pack(anchor='w',padx=16)
+            tk.Label(frame,text=detail,font=('Helvetica Neue',10),
+                     fg='#C8D8F8',bg=PANEL_BG).pack(anchor='w',padx=16)
             var=tk.BooleanVar(value=backend in self.cfg['enabled_backends']);self.plugin_vars[backend]=var
             check=ttk.Checkbutton(frame,text='Enabled',variable=var,
                                   command=lambda b=backend,v=var:self._set_backend(b,v.get()))
@@ -882,7 +961,8 @@ class BackupGUI(tk.Tk):
                       command=self._enable_biometrics).pack(side='left',padx=(0,10))
         PremiumButton(row4,text='Disable Touch ID',
                       command=self._disable_biometrics).pack(side='left')
-        self.key_info=tk.Text(page,height=5,wrap='word',background='#FFFFFF',
+        self.key_info=tk.Text(page,height=5,wrap='word',background='#0D214C',
+                              foreground='#EDF3FF',insertbackground='#FFFFFF',
                               relief='flat',font=('Courier',10))
         self.key_info.pack(fill='x',pady=14)
         ttk.Label(page,text='Save the recovery copy to another location, protected by '
