@@ -25,6 +25,8 @@ def validate():
     flow=load('.github/workflows/ci.yml')
     native=load('.github/workflows/build-native.yml')
     jobs=flow['jobs']; assert 'production-gate' in jobs
+    assert (ROOT/'scripts/check-confidential-artifacts.py').is_file()
+    assert (ROOT/'docs/PRIVATE_ARCHITECTURE_WORKFLOW.md').is_file()
     assert 'native-release' in jobs
     assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
     assert jobs['publications-smoke']['needs']==['production-gate'], 'GUI capture must follow the security gate'
@@ -90,7 +92,7 @@ def validate():
     assert 'if' in release['rpm-repositories'] and 'early-release' in release['rpm-repositories']['if']
     gate_steps='\n'.join(str(x.get('run','')) for x in jobs['production-gate']['steps'])
     for token in ('ruff check','bandit','pip_audit -r requirements.txt','pip_audit -r requirements-docs.txt',
-                  'python -m unittest discover','check-production-gate.py'):
+                  'python -m unittest discover','check-production-gate.py','check-confidential-artifacts.py'):
         assert token in gate_steps,f'Production Gate missing {token}'
     build_macos=(ROOT/'scripts/build-macos-app.sh').read_text('utf-8')
     notarize=(ROOT/'scripts/notarize-macos.sh').read_text('utf-8')

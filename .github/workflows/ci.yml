@@ -52,7 +52,7 @@ jobs:
         uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - name: Install static-analysis and dependency-audit tools
-        run: python -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3' 'PyYAML>=6,<7'
+        run: python -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3' 'PyYAML>=6,<7' 'pypdf>=5,<7'
       - name: Static correctness gate
         run: |
           # Compact legacy lines (E701/E702) are a documented formatting backlog.
@@ -75,6 +75,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y age
           python scripts/test-rust-archive-compat.py rust/target/release/multi-backup-native
+      - name: Reject plaintext confidential artifacts
+        run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
 

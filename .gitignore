@@ -20,3 +20,8 @@ identity.txt
 *.zip
 
 docs/.publication-cache/
+
+# Never commit plaintext private architecture sources.
+/docs/private/*
+!/docs/private/architecture-encrypted.pdf
+/private-architecture-source/
