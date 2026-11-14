@@ -1,0 +1,255 @@
+//! PostgreSQL-backed multi-replica control plane. Every server replica uses
+//! the same authoritative registry. Local volume access is *node-affine*;
+//! "shared" must be explicitly registered as verified shared storage.
+//! Atomic claims use PostgreSQL SKIP LOCKED and leased fencing tokens.
+use multi_backup_core::{
+    cluster_placement::{StorageLocation,StorageVisibility,SourceTransport},
+    execution_policy::ExecutionLimits
+};
+use postgres::{Client,types::ToSql};
+use serde::{Deserialize,Serialize};
+use serde_json::{json,Value};
+use std::{env,fmt::Display};
+use uuid::Uuid;
+
+type BoxError=Box<dyn std::error::Error+Send+Sync>;
+const SCHEMA:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_cluster_storage (
+  storage_id TEXT PRIMARY KEY,
+  backend TEXT NOT NULL,
+  visibility TEXT NOT NULL CHECK (visibility IN ('shared','node_local')),
+  owner_replica TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((visibility='shared' AND owner_replica IS NULL)
+      OR (visibility='node_local' AND owner_replica IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS mb_cluster_replicas (
+  replica_id TEXT PRIMARY KEY,
+  max_jobs INTEGER NOT NULL CHECK (max_jobs BETWEEN 1 AND 256),
+  storage_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS mb_cluster_jobs (
+  job_id TEXT PRIMARY KEY,
+  plugin_id TEXT NOT NULL,
+  storage_id TEXT NOT NULL REFERENCES mb_cluster_storage(storage_id),
+  source_transport TEXT NOT NULL,
+  job_spec JSONB NOT NULL,
+  execution_limits JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued','running','success','failed','cancelled')),
+  priority INTEGER NOT NULL DEFAULT 0,
+  replica_id TEXT,
+  lease_token TEXT,
+  lease_until TIMESTAMPTZ,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  result JSONB,
+  CHECK (priority BETWEEN -100 AND 100)
+);
+CREATE INDEX IF NOT EXISTS mb_cluster_jobs_pending
+ ON mb_cluster_jobs(status,priority DESC,created_at);
+CREATE INDEX IF NOT EXISTS mb_cluster_jobs_lease
+ ON mb_cluster_jobs(replica_id,lease_until) WHERE status='running';
+"#;
+fn error(message:impl Display)->BoxError{message.to_string().into()}
+fn ident(value:&str)->bool{
+    !value.is_empty()&&value.len()<=128&&
+    value.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-".contains(&b))
+}
+pub struct Database {dsn:String}
+impl Database {
+    pub fn configured()->Result<Option<Self>,BoxError>{
+        let Some(dsn)=env::var("MULTI_BACKUP_CLUSTER_DATABASE_URL").ok() else {
+            return Ok(None)
+        };
+        // Certificate and hostname verification MUST NOT be optional in the
+        // multi-node database: no NoTls and no sslmode=prefer fallback.
+        if !(dsn.contains("sslmode=verify-full") ||
+             dsn.contains("sslmode%3Dverify-full")){
+            return Err(error("Cluster PostgreSQL requires sslmode=verify-full"));
+        }
+        let db=Self{dsn};
+        let mut client=db.connect()?;
+        client.batch_execute(SCHEMA)?;
+        Ok(Some(db))
+    }
+    fn connect(&self)->Result<Client,BoxError>{
+        let tls=native_tls::TlsConnector::builder().build()?;
+        let connector=postgres_native_tls::MakeTlsConnector::new(tls);
+        Ok(Client::connect(&self.dsn,connector)?)
+    }
+    pub fn register_storage(&self,location:&StorageLocation)->Result<(),BoxError>{
+        location.validate().map_err(error)?;
+        let mut db=self.connect()?;
+        let visibility=match location.visibility{
+            StorageVisibility::Shared=>"shared",StorageVisibility::NodeLocal=>"node_local"
+        };
+        db.execute("INSERT INTO mb_cluster_storage
+            (storage_id,backend,visibility,owner_replica) VALUES ($1,$2,$3,$4)
+            ON CONFLICT (storage_id) DO UPDATE SET
+              backend=EXCLUDED.backend,visibility=EXCLUDED.visibility,
+              owner_replica=EXCLUDED.owner_replica",
+            &[&location.storage_id,&location.backend,&visibility,&location.owner_replica])?;
+        Ok(())
+    }
+    pub fn heartbeat_replica(&self,id:&str,capacity:u16,
+                             accessible_storage:&[String])->Result<(),BoxError>{
+        if !ident(id)||capacity==0||capacity>256||
+           accessible_storage.iter().any(|s|!ident(s)){
+            return Err(error("Invalid cluster replica identity/capacity/storage"));
+        }
+        let mut db=self.connect()?;
+        let capabilities=json!(accessible_storage);
+        db.execute("INSERT INTO mb_cluster_replicas
+            (replica_id,max_jobs,storage_ids,last_seen)
+            VALUES ($1,$2,$3,now())
+            ON CONFLICT(replica_id) DO UPDATE SET max_jobs=EXCLUDED.max_jobs,
+                storage_ids=EXCLUDED.storage_ids,last_seen=now()",
+            &[&id,&(capacity as i32),&capabilities])?;
+        Ok(())
+    }
+    pub fn enqueue(&self,id:&str,plugin:&str,storage:&str,
+                   transport:SourceTransport,limits:&ExecutionLimits,
+                   spec:&Value,priority:i32)->Result<(),BoxError>{
+        if !ident(id)||!ident(plugin)||!ident(storage)||!(-100..=100).contains(&priority){
+            return Err(error("Invalid cluster job fields"));
+        }
+        limits.validate().map_err(error)?;
+        let transport=match transport{
+            SourceTransport::ServerLocal=>"server_local",
+            SourceTransport::SshAgentless=>"ssh_agentless",
+            SourceTransport::ManagedAgentPull=>"managed_agent_pull",
+            SourceTransport::ManagedAgentPush=>"managed_agent_push",
+        };
+        let limit_json=serde_json::to_value(limits)?;
+        let mut db=self.connect()?;
+        let result=db.execute("INSERT INTO mb_cluster_jobs
+            (job_id,plugin_id,storage_id,source_transport,job_spec,execution_limits,priority)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            ON CONFLICT(job_id) DO NOTHING",
+            &[&id,&plugin,&storage,&transport,spec,&limit_json,&priority])?;
+        if result!=1{return Err(error("Duplicate or previously used job ID"));}
+        Ok(())
+    }
+    pub fn claim(&self,replica_id:&str,lease_secs:i32)
+        ->Result<Option<Lease>,BoxError>{
+        if !ident(replica_id)||!(30..=3600).contains(&lease_secs){
+            return Err(error("Invalid replica or lease duration"));
+        }
+        let mut db=self.connect()?;
+        let token=Uuid::new_v4().to_string();
+        // Native UPDATE + locking CTE makes each claim atomic across replicas.
+        // A shared store is eligible only when explicitly registered as shared
+        // AND this live replica advertises the storage ID as accessible.
+        // Locals may ONLY run on their exact owner replica.
+        // Idle capacity is accounted for in the same DB transaction.
+        let row=db.query_opt(r#"
+            WITH candidate AS (
+              SELECT j.job_id FROM mb_cluster_jobs j
+              JOIN mb_cluster_storage s ON s.storage_id=j.storage_id
+              JOIN mb_cluster_replicas n ON n.replica_id=$1
+              WHERE n.last_seen>now()-interval '90 seconds'
+                AND n.storage_ids ? j.storage_id
+                AND (s.visibility='shared' OR s.owner_replica=$1)
+                AND (j.status='queued'
+                     OR (j.status='running' AND j.lease_until<now()))
+                AND (
+                  SELECT count(*) FROM mb_cluster_jobs running
+                  WHERE running.replica_id=$1 AND running.status='running'
+                        AND running.lease_until>now()
+                ) < n.max_jobs
+              ORDER BY j.priority DESC,j.created_at,j.job_id
+              FOR UPDATE OF j SKIP LOCKED LIMIT 1
+            )
+            UPDATE mb_cluster_jobs j SET
+                status='running',replica_id=$1,lease_token=$2,
+                lease_until=now()+($3::int * interval '1 second'),
+                attempts=j.attempts+1
+            FROM candidate WHERE candidate.job_id=j.job_id
+            RETURNING j.job_id,j.plugin_id,j.storage_id,
+                j.source_transport,j.job_spec,j.execution_limits,
+                j.lease_token,j.attempts
+        "#,&[&replica_id,&token,&lease_secs])?;
+        row.map(|r|{
+            Ok(Lease{job_id:r.get(0),plugin_id:r.get(1),
+                storage_id:r.get(2),source_transport:r.get(3),
+                spec:r.get(4),limits:r.get(5),token:r.get(6),
+                attempts:r.get(7)})
+        }).transpose()
+    }
+    pub fn renew(&self,replica:&str,job:&str,token:&str,seconds:i32)
+        ->Result<bool,BoxError>{
+        if !ident(replica)||!ident(job)||!(30..=3600).contains(&seconds){
+            return Err(error("Invalid lease renewal"));
+        }
+        let mut db=self.connect()?;
+        let n=db.execute("UPDATE mb_cluster_jobs
+            SET lease_until=now()+($4::int*interval '1 second')
+            WHERE job_id=$1 AND replica_id=$2 AND lease_token=$3
+              AND status='running' AND lease_until>now()",
+            &[&job,&replica,&token,&seconds])?;
+        Ok(n==1)
+    }
+    pub fn finish(&self,replica:&str,job:&str,token:&str,
+                  success:bool,result:&Value)->Result<bool,BoxError>{
+        if !ident(replica)||!ident(job){return Err(error("Invalid job completion ID"));}
+        let mut db=self.connect()?;
+        let status=if success{"success"}else{"failed"};
+        let n=db.execute("UPDATE mb_cluster_jobs SET
+            status=$4, result=$5, finished_at=now(), lease_until=NULL
+            WHERE job_id=$1 AND replica_id=$2 AND lease_token=$3
+              AND status='running' AND lease_until>now()",
+            &[&job,&replica,&token,&status,result])?;
+        Ok(n==1)
+    }
+    pub fn status(&self)->Result<Value,BoxError>{
+        let mut db=self.connect()?;
+        let nodes=db.query("SELECT replica_id,max_jobs,storage_ids,
+            last_seen>now()-interval '90 seconds'
+            FROM mb_cluster_replicas ORDER BY replica_id", &[])?;
+        let storages=db.query("SELECT storage_id,backend,visibility,owner_replica
+            FROM mb_cluster_storage ORDER BY storage_id",&[])?;
+        let jobs=db.query("SELECT job_id,plugin_id,storage_id,status,
+            replica_id,attempts,source_transport FROM mb_cluster_jobs
+            ORDER BY created_at DESC LIMIT 500",&[])?;
+        Ok(json!({
+            "replicas":nodes.iter().map(|r|json!({
+                "id":r.get::<_,String>(0),"max_jobs":r.get::<_,i32>(1),
+                "storage_ids":r.get::<_,Value>(2),"healthy":r.get::<_,bool>(3)
+            })).collect::<Vec<_>>(),
+            "storage":storages.iter().map(|r|json!({
+                "id":r.get::<_,String>(0),"backend":r.get::<_,String>(1),
+                "visibility":r.get::<_,String>(2),"owner_replica":r.get::<_,Option<String>>(3)
+            })).collect::<Vec<_>>(),
+            "jobs":jobs.iter().map(|r|json!({
+                "id":r.get::<_,String>(0),"plugin":r.get::<_,String>(1),
+                "storage":r.get::<_,String>(2),"status":r.get::<_,String>(3),
+                "replica":r.get::<_,Option<String>>(4),"attempts":r.get::<_,i32>(5),
+                "transport":r.get::<_,String>(6)
+            })).collect::<Vec<_>>(),
+        }))
+    }
+}
+#[derive(Debug,Serialize,Deserialize)]
+pub struct Lease {
+    pub job_id:String,pub plugin_id:String,pub storage_id:String,
+    pub source_transport:String,pub spec:Value,pub limits:Value,
+    pub token:String,pub attempts:i32
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]fn cluster_schema_has_fencing_and_storage_affinity(){
+        assert!(SCHEMA.contains("lease_token"));
+        assert!(SCHEMA.contains("owner_replica"));
+        assert!(SCHEMA.contains("node_local"));
+        assert!(SCHEMA.contains("storage_ids"));
+    }
+    #[test]fn rejects_invalid_registry_without_database(){
+        let bad=StorageLocation{storage_id:"local".into(),backend:"posix".into(),
+            visibility:StorageVisibility::NodeLocal,owner_replica:None};
+        assert!(bad.validate().is_err());
+    }
+}
