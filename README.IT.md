@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r003-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
+**Multi Backup `0.1.0-r017-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
 
 ![Dashboard Multi Backup](docs/screenshots/dashboard.png)
 
@@ -8,8 +8,8 @@
 
 - **GitHub** (attivo per default): mirror dei repository Git e Git LFS, configurazioni, release, issue/PR, workflow, log e artifact CI; pulizia degli artifact **facoltativa**, con simulazione e protezione conservativa degli artifact usati per la distribuzione.
 - **Dropbox** (disattivato per default): esportazione incrementale e cifrata delle versioni dei file tramite API di sola lettura, deduplicazione delle versioni già archiviate e manifest cifrati. **Non cancella e non modifica i file Dropbox, e non effettua purge dei backup locali.**
-- **Ripresa** dopo interruzione tramite checkpoint e verifiche SHA-256; `--restart` crea un nuovo ciclo senza sovrascrivere i backup validi.
-- **Interfaccia grafica** con Dashboard, Backup, Archivi, Plugin, Cifratura, Aggiornamenti e Impostazioni; supporto CLI anche per consultare, estrarre e montare gli archivi.
+- **Ripresa** dopo interruzione tramite checkpoint e verifiche SHA-256; `--restart` avvia un ciclo nuovo, mentre `--resume` riprende quello incompleto mantenendone il nome e i checkpoint.
+- **Interfaccia grafica** fotografica in stile glass blu/viola con Dashboard, Backup, Archivi, Ripristino, Plugin, Cifratura, Aggiornamenti e Impostazioni; finestra nativa About accessibile da menu Help, barra superiore e sidebar. Tasti Start/Resume separati e cancellazione locale protetta da conferma; CLI per consultare, estrarre e montare gli archivi.
 - **Early release:** commit su `main` contenente `[full-ci]`; **stable release:** push di un tag stabile come `v0.1.0`.
 - Aggiornamenti: controllo all'avvio e ogni sei ore (predefinito), scelta del canale `stable` o `early-release`; download verificato con SHA-256. La RC non installa automaticamente eseguibili privi di firma e approvazione.
 
