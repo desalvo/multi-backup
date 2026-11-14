@@ -6,6 +6,9 @@ mod ldap;
 mod oidc;
 mod dav;
 mod security;
+mod cluster;
+mod agent_registry;
+mod agent_api;
 use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
@@ -22,7 +25,7 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, fs, fs::OpenOptions, io::Write,
     net::SocketAddr, path::PathBuf, sync::{Arc, Mutex},
     time::{Duration, Instant}};
-use zeroize::Zeroize;
+use zeroize::{Zeroize,Zeroizing};
 
 #[derive(Clone)]
 struct AppState(Arc<AppConfig>);
@@ -43,6 +46,8 @@ struct AppConfig {
     sessions: Mutex<HashMap<String, Session>>,
     failed_logins: Mutex<HashMap<String, (Instant,u32)>>,
     last_smtp_test: Mutex<Option<Instant>>,
+    cluster: Option<cluster::Database>,
+    agent_proxy_key: Option<Zeroizing<String>>,
 }
 #[derive(Clone)]
 struct Session { csrf: String, until: Instant, user: String }
@@ -471,6 +476,56 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
+    let cluster=cluster::Database::configured()?;
+    let agent_proxy_key=std::env::var_os("MULTI_BACKUP_AGENT_PROXY_SECRET_FILE")
+        .map(|location|->Result<Zeroizing<String>,Box<dyn std::error::Error+Send+Sync>>{
+            let path=PathBuf::from(location);
+            let meta=fs::symlink_metadata(&path)?;
+            if !meta.file_type().is_file() || meta.len()>256 {
+                return Err("Unsafe trusted HTTPS proxy key file".into());
+            }
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                if meta.permissions().mode()&0o077!=0{
+                    return Err("Agent proxy key must be owner-read only".into());
+                }
+            }
+            let secret=fs::read_to_string(&path)?.trim().to_owned();
+            if secret.len()<64||secret.len()>256 {
+                return Err("Trusted HTTPS proxy secret must be 64+ chars".into());
+            }
+            Ok(Zeroizing::new(secret))
+        }).transpose()?;
+    // An agent endpoint is never enabled without an explicitly verified
+    // public HTTPS origin AND an independent secret injected by trusted proxy.
+    if agent_proxy_key.is_some() && (!origin.starts_with("https://")||cluster.is_none()){
+        return Err("Agent API requires HTTPS origin and shared DB".into());
+    }
+    if let Some(db)=&cluster {
+        let replica=std::env::var("MULTI_BACKUP_REPLICA_ID")
+            .map_err(|_|"Cluster requires a stable, unique replica ID")?;
+        let budget=std::env::var("MULTI_BACKUP_REPLICA_MAX_JOBS")
+            .unwrap_or_else(|_|"4".into()).parse::<u16>()?;
+        let accessible=std::env::var("MULTI_BACKUP_CLUSTER_STORAGE_IDS")
+            .unwrap_or_default().split(',').filter(|s|!s.is_empty())
+            .map(str::to_owned).collect::<Vec<_>>();
+        db.heartbeat_replica(&replica,budget,&accessible)?;
+        let db=db.clone();
+        tokio::spawn(async move {
+            let mut beat=tokio::time::interval(std::time::Duration::from_secs(20));
+            loop {
+                beat.tick().await;
+                let local=db.clone();
+                let id=replica.clone();
+                let stores=accessible.clone();
+                let result=tokio::task::spawn_blocking(move||
+                    local.heartbeat_replica(&id,budget,&stores)).await;
+                if !matches!(result,Ok(Ok(()))){
+                    eprintln!("Cluster heartbeat failed; node will expire from dispatch");
+                }
+            }
+        });
+    }
     let security=SecurityPolicy::from_env(&origin)?;
     let smtp=SmtpConfig::from_env()?;
     let dav=DavConfig::from_env(&origin)?;
@@ -482,6 +537,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
         last_smtp_test:Mutex::new(None),
+        cluster,agent_proxy_key,
     }));
     let app=Router::new().route("/healthz",get(health))
         .route("/login",get(login_page).post(do_login))
@@ -495,6 +551,17 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/dav/:id/*path",axum::routing::any(dav::file))
         .route("/api/export",post(export))
         .route("/api/audit",get(audit_list))
+        .route("/api/cluster/status",get(agent_api::cluster_status))
+        .route("/api/cluster/storage",post(agent_api::register_storage))
+        .route("/api/cluster/jobs",post(agent_api::enqueue_cluster))
+        .route("/api/agents/admin/list",get(agent_api::list_agents))
+        .route("/api/agents/admin/enroll",post(agent_api::enroll))
+        .route("/api/agents/admin/approve",post(agent_api::approve))
+        .route("/api/agents/admin/revoke",post(agent_api::revoke))
+        .route("/api/agents/admin/enqueue",post(agent_api::enqueue_pull))
+        .route("/api/agents/poll",get(agent_api::poll))
+        .route("/api/agents/upload",
+            post(agent_api::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/api/security/status",get(security_status))
         .route("/api/smtp/status",get(smtp_status))
         .route("/api/smtp/test",post(smtp_test))
