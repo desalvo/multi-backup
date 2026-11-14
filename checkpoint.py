@@ -23,6 +23,8 @@ def atomic_json(path: Path, data):
     tmp = path.with_name(path.name + "." + secrets.token_hex(6) + ".partial")
     try:
         with tmp.open('x', encoding='utf-8') as fp:
+            if os.name != 'nt':
+                os.chmod(tmp, 0o600)
             json.dump(data, fp, indent=2, ensure_ascii=False)
             fp.write('\n')
             fp.flush()
@@ -33,13 +35,30 @@ def atomic_json(path: Path, data):
 
 
 class Journal:
-    def __init__(self, directory: Path, configuration: dict, *, restart=False):
+    def __init__(self, directory: Path, configuration: dict, *, restart=False, require_active=False):
         self.directory = directory
         self.path = directory / 'active.json'
         self.lock = threading.RLock()
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         digest = hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest()
+        if restart and require_active:
+            raise ValueError('Cannot select both Start and Resume')
+        if require_active and not self.path.is_file():
+            raise RuntimeError('No incomplete backup to resume; use Start to create a new one.')
+        if self.path.exists() and self.path.is_symlink():
+            raise RuntimeError('Refusing symlink backup checkpoint')
         self.resumed = self.path.exists() and not restart
+        if restart and self.path.is_file():
+            # An explicit Start must never reuse the previous backup name or
+            # discard a recoverable incomplete backup checkpoint.
+            old = json.loads(self.path.read_text('utf-8'))
+            previous = old.get('cycle')
+            if not isinstance(previous, str) or not re.fullmatch(r'[A-Za-z0-9-]{8,80}', previous):
+                raise RuntimeError('Invalid previous backup cycle; refusing to overwrite its checkpoint')
+            abandoned = directory / ('abandoned-' + previous + '.json')
+            if abandoned.exists():
+                raise RuntimeError('Previous incomplete checkpoint already archived; manual review required')
+            atomic_json(abandoned, old)
         if self.resumed:
             state = json.loads(self.path.read_text('utf-8'))
             if state.get('schema') != 1:

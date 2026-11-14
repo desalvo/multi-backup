@@ -21,7 +21,8 @@ def bundle_self_test():
     assert Path(certifi.where()).is_file(), 'Missing frozen CA certificate bundle'
     tls=_verified_https_context()
     assert tls.check_hostname, 'TLS verification must be enabled'
-    for filename in ('hero.jpg', 'multi-backup.png', 'icon-64.png'):
+    for filename in ('backup-hero.jpg', 'backup-sidebar.jpg', 'hero.jpg',
+                     'multi-backup.png', 'icon-64.png'):
         path=Path(asset(filename))
         if not path.is_file():
             raise RuntimeError('Missing bundled image: '+filename)
@@ -37,7 +38,10 @@ def gui_smoke():
     application=BackupGUI()
     try:
         application.update_idletasks()
-        assert application.start_button.caption == 'Start / resume backup'
+        assert application.start_button.caption == 'Start · Nuovo backup'
+        assert application.resume_button.caption == 'Resume · Riprendi backup'
+        assert callable(application.start_button.command)
+        assert callable(application.resume_button.command)
         assert application.menu_button.caption == 'Hide navigation'
         assert not application.ignore_ci_artifact_errors.get()
         application._startup_security()

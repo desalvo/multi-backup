@@ -52,6 +52,7 @@ def summarize_catalog(items, output_directory, now=None):
             provider = 'Dropbox' if str(item.get('kind', '')).startswith('dropbox') else 'GitHub'
             row = {
                 'name': str(item.get('relative') or path.name),
+                'path': str(path),
                 'provider': provider,
                 'size': max(0, int(stat.st_size)),
                 'timestamp': stamp,
@@ -222,12 +223,18 @@ class DashboardView(tk.Canvas):
             d.line((0, y, width, y), fill=(*rgb, 255))
         try:
             if self._hero is None:
-                with Image.open(self.assets('hero.jpg')) as source:
+                asset=(self.assets('backup-hero.jpg') if
+                       self.assets('backup-hero.jpg').is_file() else
+                       self.assets('hero.jpg'))
+                with Image.open(asset) as source:
                     self._hero = source.convert('RGB').copy()
-            photo = ImageOps.fit(self._hero, (width, 255), method=Image.Resampling.LANCZOS,
-                                 centering=(.5, .38))
-            photo = ImageEnhance.Color(photo).enhance(1.13)
-            image.alpha_composite(photo.convert('RGBA'), (0, 0))
+            # Preserve the photographic aspect ratio and subject in full:
+            # contain never crops or stretches, independent of the window size.
+            photo = ImageOps.contain(self._hero,(width,255),
+                                     method=Image.Resampling.LANCZOS)
+            photo = ImageEnhance.Color(photo).enhance(1.10)
+            image.alpha_composite(photo.convert('RGBA'),
+                                  (width-photo.width,(255-photo.height)//2))
         except (OSError, ValueError):
             pass
         layer = Image.new('RGBA', (width, 257), (0, 0, 0, 0))
@@ -257,10 +264,12 @@ class DashboardView(tk.Canvas):
         return image
 
     def _run_backup(self):
-        # _start performs provider, destination, credential, encryption and
-        # destructive-operation confirmations before launching an actual job.
         self.owner._show('Backup')
-        self.owner._start()
+        self.owner._start(mode='new')
+
+    def _run_resume(self):
+        self.owner._show('Backup')
+        self.owner._start(mode='resume')
 
     def _row(self, image, x, y, width, data, index):
         row = (x + 12, y, x + width - 12, y + 62)
@@ -277,6 +286,13 @@ class DashboardView(tk.Canvas):
         stamp = dt.datetime.fromtimestamp(data['timestamp']).strftime('%d/%m/%Y %H:%M')
         self._text(x + 76, y + 36, f'{provider}  ·  {stamp}', 10, colour=MUTED,
                    width=max(145, width - 258))
+        # Accessible deletion hotspot is registered before the entire row,
+        # so the smaller hit target wins without interfering with inspection.
+        delete_box=(x+width-100,y+14,x+width-63,y+48)
+        self._hotspots.append(
+            (delete_box,lambda p=data['path']:self.owner._delete_archive_path(p)))
+        self._text(x + width - 82, y + 22, '✕', 17, weight='bold',
+                   anchor='center', colour='#FFC0C9')
         self._text(x + width - 35, y + 22, '›', 22, weight='bold',
                    anchor='center', colour=LAVENDER)
         self._hotspots.append((row, lambda: self.owner._show('Archives')))
@@ -461,10 +477,12 @@ class DashboardView(tk.Canvas):
             self._text(31, 117,
                        'Backup multipli, cifratura avanzata,\nplugin e ripristino semplificato.',
                        12, colour='#DCE8FF')
-            self._button(image, 25, 163, 236, 51,
-                         '▶   Esegui backup ora', self._run_backup, primary=True)
-            self._button(image, 275, 163, 168, 51,
-                         '◷   Configura…', lambda: self.owner._show('Backup'))
+            self._button(image, 25, 163, 192, 51,
+                         '▶   Start backup', self._run_backup, primary=True)
+            self._button(image, 228, 163, 192, 51,
+                         '↻   Resume backup', self._run_resume, primary=True)
+            self._button(image, 431, 163, 153, 51,
+                         '⚙   Configura…', lambda: self.owner._show('Backup'))
             if wide:
                 x, left_width = 20, width - 376
                 right_x, right_width = x + left_width + 15, 321

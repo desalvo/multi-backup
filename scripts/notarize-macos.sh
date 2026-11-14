@@ -40,8 +40,23 @@ ln -s /Applications "$TMP/dmg-root/Applications"
   echo 'DMG staging must contain only the notarized app and Applications symlink' >&2
   exit 1
 }
-hdiutil create -volname 'Multi Backup' -srcfolder "$TMP/dmg-root" \
-  -ov -format UDZO "$DMG"
+# Retry transient Apple diskimages-helper "Resource busy" collisions.
+created=0
+for attempt in 1 2 3 4; do
+  if hdiutil create -volname 'Multi Backup' -srcfolder "$TMP/dmg-root" \
+      -ov -format UDZO "$DMG" >"$TMP/hdiutil-create.log" 2>&1; then
+    created=1
+    break
+  fi
+  cat "$TMP/hdiutil-create.log" >&2
+  if ! grep -qi 'Resource busy' "$TMP/hdiutil-create.log" || [[ "$attempt" == 4 ]]; then
+    echo 'Notarized DMG creation failed (nontransient or retries exhausted)' >&2
+    exit 1
+  fi
+  rm -f "$DMG"
+  sleep "$((attempt * 3))"
+done
+[[ "$created" == 1 ]] || exit 1
 codesign --force --timestamp --sign "$MAC_SIGNING_ID" "$DMG"
 xcrun notarytool submit "$DMG" \
   --key "$MULTI_BACKUP_NOTARY_KEY" --key-id "$APPLE_NOTARY_KEY_ID" \

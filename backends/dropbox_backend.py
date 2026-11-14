@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 from checkpoint import atomic_json, sha256
+from backup_sessions import start_dropbox_session, finalize_dropbox_session
 from github_engine import StreamingArchive
 
 API = 'https://api.dropboxapi.com/2/files/'
@@ -155,6 +156,22 @@ def run(args, progress=None, api=None):
     manifests=root/'manifests'
     objects.mkdir(parents=True,exist_ok=True,mode=0o700)
     manifests.mkdir(parents=True,exist_ok=True,mode=0o700)
+    manifest_name,resumed=start_dropbox_session(
+        output,args.recipient,getattr(args,'dropbox_path','') or '',
+        resume=getattr(args,'resume',False),restart=getattr(args,'restart',False))
+    name=manifests/manifest_name
+    if resumed:
+        message=(f'RIPRESA backup Dropbox: archivio {manifest_name} invariato; '
+                 'oggetti già cifrati e verificati verranno riutilizzati.')
+        if progress:progress.emit('resume-start',message)
+        else:print(message,flush=True)
+        if name.is_file():
+            # Interrupted after the final durable manifest was published.
+            finalize_dropbox_session(output,name)
+            if progress:progress.emit('complete','Dropbox backup già completato: '+manifest_name)
+            return 0
+    elif progress:
+        progress.emit('cycle-start','Nuovo backup Dropbox: '+manifest_name)
     counts={'files_seen':0,'saved':0,'reused':0,'folders':0,'errors':0}
     entries=[]
     for item in api.list_entries(getattr(args,'dropbox_path','') or ''):
@@ -199,10 +216,9 @@ def run(args, progress=None, api=None):
         if progress:
             progress.emit('dropbox',f"{item.get('name','item')}: {'reused' if reused else 'encrypted'}",
                           completed=counts['files_seen'],total=max(counts['files_seen']+1,1))
-    now=dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+    now=manifest_name.removesuffix('.tar.gz.age')
     manifest={'schema':1,'backend':'dropbox','created_utc':now,'counts':counts,'entries':entries,
               'retention':'append-only; no remote delete/purge APIs'}
-    name=manifests/(now+'.tar.gz.age')
     temp=name.with_name(name.name+'.partial')
     try:
         with StreamingArchive(temp,args.recipient) as archive:
@@ -211,6 +227,8 @@ def run(args, progress=None, api=None):
         name.with_suffix(name.suffix+'.sha256').write_text(f'{sha256(name)}  {name.name}\n',encoding='utf-8')
     finally:
         temp.unlink(missing_ok=True)
-    if progress:progress.emit('complete','Dropbox incremental backup completed',summary=counts)
+    finalize_dropbox_session(output,name)
+    if progress:progress.emit('complete','Dropbox incremental backup completed: '+manifest_name,
+                              summary=counts)
     print(json.dumps({'backend':'dropbox','manifest':str(name),'counts':counts},indent=2))
     return 0

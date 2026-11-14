@@ -103,7 +103,9 @@ class Book(BaseDocTemplate):
     def cover(self,c:canvas.Canvas,doc):
         c.saveState()
         # elegant full-bleed photographic hero, tightly cropped from original artistic asset
-        c.drawImage(str(MEDIA/'hero.jpg'),0,H*.27,width=W,height=H*.73,mask='auto')
+        photo = MEDIA / 'backup-hero.jpg'
+        if not photo.is_file():photo = MEDIA / 'hero.jpg'
+        c.drawImage(str(photo),0,H*.27,width=W,height=H*.73,mask='auto',preserveAspectRatio=True,anchor='c')
         c.setFillColor(NAVY);c.rect(0,0,W,H*.33,fill=1,stroke=0)
         c.drawImage(str(MEDIA/'icon-256.png'),W-56*mm,16*mm,width=37*mm,height=37*mm,mask='auto')
         c.setFillColor(colors.white)
@@ -374,6 +376,45 @@ def refresh_chapters_for_current_interface():
 
 
 refresh_chapters_for_current_interface()
+
+def refresh_r016_instructions():
+    notes={
+        'EN':{
+            'Backup workflow and progress': [
+                'Start and Resume are distinct controls. Start always creates a new backup cycle and preserves a previous incomplete checkpoint. Resume requires an existing checkpoint and continues under the original backup name; it never silently initiates a fresh backup.',
+                'Dropbox Resume preserves the same original dated manifest filename and reuses SHA-256 verified encrypted objects.'
+            ],
+            'Browsing and previewing content': [
+                'Archives has Delete archive: after an explicit yes/no confirmation, type the exact filename to remove one selected local encrypted .tar.gz.age archive and same-name sidecars. An audit is written locally. Nothing is deleted from GitHub or Dropbox; deleting a referenced Dropbox object may invalidate a restore.'
+            ],
+            'Dashboard tour': [
+                'The upper photographic illustration and small sidebar photo depict encrypted backup/server storage and retain the complete intended subjects, never stretching their aspect ratio.',
+                'The sidebar bottom displays EUPL-1.2, author Alessandro De Salvo, application version and build number.'
+            ]
+        },
+        'IT':{
+            'Esecuzione e avanzamento': [
+                'Start e Resume sono pulsanti distinti. Start avvia sempre un nuovo ciclo con nome nuovo e conserva il precedente checkpoint incompleto. Resume richiede un checkpoint valido e riprende con lo stesso nome del backup originale senza crearne uno nuovo.',
+                'Il Resume Dropbox mantiene esattamente il nome del manifest datato originale e riutilizza gli oggetti cifrati già verificati con SHA-256.'
+            ],
+            'Esplorazione e anteprima': [
+                'Nella schermata Archivi, Elimina archivio cancella un singolo file cifrato locale e i metadati associati dopo doppia conferma e digitazione del nome esatto. Registra sempre la cancellazione. Non cancella nulla su GitHub o Dropbox; cancellare un oggetto ancora necessario a un ripristino può rendere impossibile quel ripristino.'
+            ],
+            'Dashboard': [
+                'Le fotografie dedicate a storage e protezione dei dati nella fascia superiore e in fondo alla sidebar conservano le proporzioni e tutti i soggetti fotografati, senza tagli o stiramenti.',
+                'In fondo alla sidebar sono mostrati Licenza EUPL-1.2, Autore Alessandro De Salvo, versione e numero build.'
+            ]
+        }
+    }
+    for lang,chapters in (('EN',EN),('IT',IT)):
+        for index,entry in enumerate(chapters):
+            extra=notes[lang].get(entry[0])
+            if extra:
+                chapters[index]=(entry[0],entry[1]+extra,*entry[2:])
+
+
+refresh_r016_instructions()
+
 
 
 def manual(lang):

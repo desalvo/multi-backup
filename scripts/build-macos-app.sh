@@ -25,6 +25,7 @@ if [[ "$MAC_ARCH" == x86_64 ]]; then
   export PIP_NO_BINARY=cryptography
 fi
 python -m pip install -r requirements.txt 'pyinstaller>=6.11,<7'
+python scripts/create-photo-assets.py
 if [[ "$MAC_ARCH" == x86_64 ]]; then
   RUST_BINDING="$(python - <<'PY'
 import cryptography.hazmat.bindings._rust as binding
@@ -66,7 +67,7 @@ python -m PyInstaller --windowed --onedir --clean --noconfirm \
 plutil -replace LSMinimumSystemVersion -string '13.0' "$APP/Contents/Info.plist"
 plutil -replace LSApplicationCategoryType -string 'public.app-category.productivity' "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string '0.1.0' "$APP/Contents/Info.plist"
-plutil -replace CFBundleVersion -string '15' "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string '16' "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/bin"
 # Keychain-protected Touch ID adapter, device-only; never stores keys in app bundle.
 swiftc -O -framework Security -framework LocalAuthentication \

@@ -1,5 +1,8 @@
 """Build identifiers kept separate from Git tags and release channels."""
-VERSION = '0.1.0-r015-rc1'
+VERSION = '0.1.0-r016-rc1'
 SCHEMA_VERSION = 2
 DEFAULT_UPDATE_CHANNEL = 'stable'
 REPOSITORY = 'desalvo/multi-backup'
+
+BUILD = '16'
+AUTHOR = 'Alessandro De Salvo'

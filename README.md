@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r013-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r016-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -151,3 +151,21 @@ The interface uses scrollable content on all pages, preserves the collapsible si
 ## R013 — macOS early-release SSL validation
 
 Update checks and downloads use a trusted `certifi` CA trust bundle packaged inside the actual app, with TLS certificate and host-name validation intact. The previous frozen-Python `CERTIFICATE_VERIFY_FAILED` issue must be resolved without disabling certificate verification. Release asset downloads also require SHA-256 digest verification.
+
+
+## Explicit Start, Resume, and local archive deletion (r016)
+
+The Backup screen offers **Start - New backup** and **Resume - Continue backup** as independent operations. Start passes --restart and always creates a new cycle ID/name; the previous incomplete checkpoint is safely archived for manual recovery. Resume passes --resume and requires a matching incomplete checkpoint. It never silently starts a new cycle or changes the original cycle ID. Dropbox also preserves its original timestamped manifest name and reuses already verified immutable encrypted objects.
+
+From Archives, choose **Elimina archivio** to remove one explicitly selected local encrypted archive and same-name integrity/metadata companions. Deletion requires an unlocked vault, two-step confirmation including typing the filename, and is blocked while a backup is running or if the archive is referenced by the active GitHub checkpoint. An audit is stored in .state/archive-deletions.jsonl. The command never deletes remote objects or complete backup cycles. Deleting a Dropbox object required by an older manifest can make restoration from that manifest impossible.
+
+The approved dashboard provides separate Start/Resume controls. The sidebar footer lists EUPL-1.2, author Alessandro De Salvo, version and build. Photographic backup storage/server compositions maintain natural aspect ratio with letterboxing as required; they are never stretched to fit.
+
+
+### Photographic artwork generation
+
+The native installers bundle two **local** server-storage photographic composites made specifically for the hero and bottom sidebar. The approved design preserves the source photo's aspect ratio in both the build and the runtime; no cropped or stretched subjects. For an unpackaged source checkout, with network access run:
+
+    python scripts/create-photo-assets.py
+
+This fetches the free-license photo from a pinned Unsplash URL **at build time**. It is not a runtime dependency, and the installed app never contacts Unsplash. For credited artwork details see docs/PHOTO_CREDITS.md. If building without network access, pre-generate the two local JPG assets before invoking the native packaging script.

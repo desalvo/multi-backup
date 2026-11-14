@@ -21,9 +21,11 @@ from pathlib import Path
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
-from version import VERSION
+from version import VERSION, BUILD, AUTHOR
 from ui_widgets import PremiumButton, GradientProgress
 from premium_dashboard import DashboardView
+from archive_management import deletion_plan,delete_local_archive,ArchiveDeletionError
+from backup_sessions import dropbox_active_manifest
 from key_management import private_key_path
 from secure_vault import (vault_path,load_vault,unlock,create_identity,migrate_legacy,
                           export_recovery_copy,change_password,import_recovery_copy,recover_existing_vault,
@@ -45,7 +47,7 @@ def asset(name):
 class BackupGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('Multi Backup  ·  '+VERSION)
+        self.title('Multi Backup  ·  '+VERSION+'  (build '+BUILD+')')
         self.geometry('1480x960');self.minsize(1070,760)
         self.configure(background='#0D1A3D')
         try:self.iconphoto(True,tk.PhotoImage(file=str(asset('icon-64.png'))))
@@ -144,14 +146,21 @@ class BackupGUI(tk.Tk):
         foot=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
         foot.pack(side='bottom',fill='x',padx=18,pady=(6,17))
         tk.Frame(foot,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',pady=(0,13))
-        tk.Label(foot,text='EUPL-1.2  ·  Backup privati',
-                 font=('Helvetica Neue',9),fg='#B4CAE4',
-                 bg=SIDEBAR_BG).pack(anchor='center')
+        for value in ('Licenza: EUPL-1.2',
+                      'Autore: '+AUTHOR,
+                      'Versione: '+VERSION,
+                      'Build: '+BUILD):
+            tk.Label(foot,text=value,font=('Helvetica Neue',9),
+                     fg='#B4CAE4',bg=SIDEBAR_BG).pack(anchor='center',pady=0)
         try:
             from PIL import Image,ImageTk,ImageOps,ImageEnhance,ImageDraw
-            with Image.open(asset('hero.jpg')) as photo:
-                preview=ImageOps.fit(photo.convert('RGB'),(218,130),
-                                     Image.Resampling.LANCZOS,centering=(.6,.5))
+            with Image.open(asset('backup-sidebar.jpg') if asset('backup-sidebar.jpg').is_file() else asset('hero.jpg')) as photo:
+                preview=ImageOps.contain(photo.convert('RGB'),(218,130),
+                                         Image.Resampling.LANCZOS)
+                # Preserve all original content, without any crop/stretch.
+                letterbox=Image.new('RGB',(218,130),SIDEBAR_BG)
+                letterbox.paste(preview,((218-preview.width)//2,(130-preview.height)//2))
+                preview=letterbox
             preview=ImageEnhance.Color(preview).enhance(1.2)
             mask=Image.new('L',preview.size,0)
             ImageDraw.Draw(mask).rounded_rectangle((0,0,217,129),radius=16,fill=255)
@@ -506,15 +515,26 @@ class BackupGUI(tk.Tk):
     def _draw_hero(self,event):
         canvas=self.hero;canvas.delete('all');w=max(1,event.width);h=185
         try:
-            from PIL import Image,ImageTk,ImageEnhance
-            img=Image.open(asset('hero.jpg')).convert('RGB').resize((w,h),Image.Resampling.LANCZOS)
-            img=ImageEnhance.Brightness(img).enhance(.69)
-            self.hero_image=ImageTk.PhotoImage(img)
+            from PIL import Image,ImageTk,ImageEnhance,ImageDraw,ImageOps
+            source=asset('backup-hero.jpg') if asset('backup-hero.jpg').is_file() else asset('hero.jpg')
+            with Image.open(source) as original:
+                photo=ImageOps.contain(original.convert('RGB'),(w,h),
+                                       Image.Resampling.LANCZOS)
+            background=Image.new('RGB',(w,h),'#101F46')
+            # Align to the right, keeping the COMPLETE photographic composition.
+            background.paste(photo,(max(0,w-photo.width),(h-photo.height)//2))
+            overlay=Image.new('RGBA',(w,h),(0,0,0,0))
+            pen=ImageDraw.Draw(overlay)
+            for x in range(w):
+                a=int(235*(1-x/max(w,1))**1.7)
+                pen.line((x,0,x,h),fill=(6,17,49,a))
+            background=Image.alpha_composite(background.convert('RGBA'),overlay)
+            self.hero_image=ImageTk.PhotoImage(background.convert('RGB'))
             canvas.create_image(0,0,anchor='nw',image=self.hero_image)
-        except Exception: pass
+        except (OSError,ValueError):pass
         canvas.create_text(35,57,text='Multi Backup',font=('Helvetica',28,'bold'),fill='white',anchor='w')
-        canvas.create_text(35,92,text='Your data, protected across platforms',font=('Helvetica',13),fill='#eaf5ff',anchor='w')
-        canvas.create_text(35,133,text='Encrypted backups   /   GitHub + Dropbox plugins   /   Resumable snapshots',
+        canvas.create_text(35,92,text='I tuoi dati, sempre al sicuro.',font=('Helvetica',13),fill='#eaf5ff',anchor='w')
+        canvas.create_text(35,133,text='Backup cifrati  /  GitHub + Dropbox  /  Ripresa affidabile',
                            font=('Helvetica',10),fill='#dbeeff',anchor='w')
 
     def _show(self,name):
@@ -588,7 +608,6 @@ class BackupGUI(tk.Tk):
         for label,var in [
             ('Cleanup CI artifacts only after verified backup',self.cleanup),
             ('Simulate cleanup only',self.dryrun),
-            ('Start a fresh cycle',self.restart),
             ('Skip CI logs',self.skiplogs),
             ('Ignora errori di download degli artifact CI (salva il report delle omissioni)',self.ignore_ci_artifact_errors),
         ]:
@@ -596,12 +615,17 @@ class BackupGUI(tk.Tk):
 
         self.commands_frame=ttk.Frame(page)
         self.commands_frame.pack(fill='x',pady=(8,6))
-        self.start_button=PremiumButton(self.commands_frame,text='Start / resume backup',
-                                        style='Accent.TButton',command=self._start)
+        self.start_button=PremiumButton(self.commands_frame,text='Start · Nuovo backup',
+                                        style='Accent.TButton',
+                                        command=lambda:self._start(mode='new'))
         self.start_button.pack(side='left')
-        self.stop_button=PremiumButton(self.commands_frame,text='Interrupt safely',
+        self.resume_button=PremiumButton(self.commands_frame,text='Resume · Riprendi backup',
+                                         style='Dark.TButton',
+                                         command=lambda:self._start(mode='resume'))
+        self.resume_button.pack(side='left',padx=(9,0))
+        self.stop_button=PremiumButton(self.commands_frame,text='Interrompi in sicurezza',
                                        command=self._stop,state='disabled')
-        self.stop_button.pack(side='left',padx=12)
+        self.stop_button.pack(side='left',padx=(9,0))
         self.status=tk.StringVar(value='Ready to protect your account')
         ttk.Label(page,textvariable=self.status,wraplength=710).pack(anchor='w',pady=5)
         self.progress=GradientProgress(page)
@@ -643,7 +667,8 @@ class BackupGUI(tk.Tk):
         row=ttk.Frame(page);row.pack(fill='x')
         for name,fn in [('Refresh',self._refresh),('List contents',self._view),('Show file',self._show_member),
                         ('Extract',self._extract),('Checkout Git',self._checkout),('Mount read-only',self._mount),
-                        ('Restore…',lambda:self._show('Restore'))]:
+                        ('Restore…',lambda:self._show('Restore')),
+                        ('Elimina archivio…',self._delete_selected_archive)]:
             PremiumButton(row,text=name,command=fn).pack(side='left',padx=(0,7))
         self.archives=tk.Listbox(page,height=9,background='white',border=0,selectbackground='#1267c9',font=('Courier',10))
         self.archives.pack(fill='both',expand=True,pady=(12,5))
@@ -1007,7 +1032,9 @@ class BackupGUI(tk.Tk):
             return [str(path)]
         return [sys.executable,str(ROOT/'multi_backup.py')]
 
-    def _start(self):
+    def _start(self,mode='new'):
+        if mode not in ('new','resume'):
+            raise ValueError('Unknown backup action')
         if self.proc is not None and self.proc.poll() is None:return
         backend=self.backend.get()
         if backend not in self.cfg['enabled_backends']:
@@ -1028,6 +1055,26 @@ class BackupGUI(tk.Tk):
         except (OSError,ValueError,RuntimeError) as exc:
             messagebox.showerror('Destination unavailable',str(exc))
             return
+        # Start and Resume are intentionally different operations. Resume
+        # refuses a missing/incompatible checkpoint rather than creating a new
+        # cycle under a different name.
+        if backend=='github':
+            checkpoint=Path(self.root_dir.get())/'.state'/'active.json'
+        else:
+            checkpoint=Path(self.root_dir.get())/'.state'/'dropbox-active.json'
+        if mode=='resume' and not checkpoint.is_file():
+            messagebox.showinfo('Nessun backup da riprendere',
+                                'Non esiste un checkpoint incompleto in questa destinazione. '
+                                'Usa Start per un nuovo backup.')
+            return
+        if mode=='new' and checkpoint.is_file():
+            if not messagebox.askyesno(
+                    'Avviare un nuovo backup?',
+                    'Esiste un backup non terminato. Start creerà un NUOVO '
+                    'nome/ciclo conservando il precedente checkpoint per '
+                    'ispezione. Per continuarlo senza cambiare nome usa Resume. '
+                    'Procedere con un backup nuovo?'):
+                return
         if not self._save_preferences():return
         try:
             created=self._prepare_identity()
@@ -1047,7 +1094,8 @@ class BackupGUI(tk.Tk):
                           '--keep-ci-runs',self.keep.get(),
                           '--metadata-workers',self.workers.get(),
                           '--recipient',self.recipient.get(),
-                          '--json-progress']
+                          '--json-progress',
+                          '--resume' if mode=='resume' else '--restart']
         # The public recipient is enough to encrypt new backups. Never give
         # the CLI a persistent plaintext private identity path.
         if backend=='github':
@@ -1067,13 +1115,17 @@ class BackupGUI(tk.Tk):
                     args+=['--cleanup-ci-artifacts']
                     if self.dryrun.get():args+=['--cleanup-ci-dry-run']
             if self.skiplogs.get():args+=['--skip-ci-logs']
-            if self.restart.get():args+=['--restart']
         elif self.dropbox_path.get():
             args+=['--dropbox-path',self.dropbox_path.get()]
         self.progress.set_percent(0)
         self._backup_had_omissions=False
-        self._log('Avvio del backup: verifica checkpoint e ricerca CI complete fino al limite configurato.')
+        self._log(
+            ('RESUME: riprendo il backup precedente, senza modificarne il nome. '
+             if mode=='resume' else
+             'START: creo un nuovo backup con un nuovo nome/ciclo. ')
+            +'Controllo checkpoint e integrità.')
         self.start_button['state']='disabled'
+        self.resume_button['state']='disabled'
         self.stop_button['state']='normal'
         self.status.set('Starting encrypted backup…')
         try:
@@ -1082,6 +1134,7 @@ class BackupGUI(tk.Tk):
                                        text=True,bufsize=1,**kw)
         except (OSError,RuntimeError) as exc:
             self.start_button['state']='normal'
+            self.resume_button['state']='normal'
             self.stop_button['state']='disabled'
             messagebox.showerror('Start failed',str(exc))
             return
@@ -1114,7 +1167,9 @@ class BackupGUI(tk.Tk):
             for _ in range(100):
                 kind,payload=self.events.get_nowait()
                 if kind=='finished':
-                    self.start_button['state']='normal';self.stop_button['state']='disabled'
+                    self.start_button['state']='normal'
+                    self.resume_button['state']='normal'
+                    self.stop_button['state']='disabled'
                     if payload==0 and self._backup_had_omissions:
                         result='Backup concluso CON OMISSIONI: consultare il report delle CI non recuperate.'
                     elif payload==0:
@@ -1170,6 +1225,57 @@ class BackupGUI(tk.Tk):
         self.archive_index=catalog(Path(self.root_dir.get()))
         self.archives.delete(0,'end');self.members.delete(0,'end')
         for item in self.archive_index:self.archives.insert('end',f'[{item["kind"]}] {item["relative"]}')
+
+    def _delete_selected_archive(self):
+        selection=self.archives.curselection()
+        if not selection:
+            messagebox.showinfo('Seleziona archivio','Seleziona prima un archivio locale.')
+            return
+        self._delete_archive_path(self.archive_index[selection[0]]['path'])
+
+    def _delete_archive_path(self,path):
+        if self._locked or self._session_secret is None:
+            messagebox.showwarning('Vault bloccato','Sblocca il vault prima di eliminare gli archivi.')
+            return
+        if self.proc is not None and self.proc.poll() is None:
+            messagebox.showwarning('Backup in corso','Non è possibile cancellare archivi durante un backup.')
+            return
+        try:
+            root=Path(self.root_dir.get())
+            selected=Path(path)
+            files=deletion_plan(root,selected)
+        except (OSError,ValueError,ArchiveDeletionError) as exc:
+            messagebox.showerror('Impossibile eliminare',str(exc))
+            return
+        warning=(
+            'Eliminazione DEFINITIVA LOCALE dell’archivio selezionato:\n\n'
+            +str(selected)+'\n\n'
+            +f'File interessati: {len(files)} (archivio e metadati associati).\n'
+            +'Se è un oggetto Dropbox, eventuali ripristini che lo '
+             'richiedono non saranno più possibili.\n'
+            +'Nessun file su GitHub o Dropbox sarà cancellato.\n\n'
+            +'Continuare?'
+        )
+        if not messagebox.askyesno('Conferma eliminazione definitiva',warning):
+            return
+        response=simpledialog.askstring(
+            'Conferma nome esatto',
+            'Per eliminare definitivamente questo archivio, scrivi il '
+            'suo nome ESATTO (inclusa .tar.gz.age):\n'+selected.name,
+            parent=self)
+        if response is None:
+            return
+        try:
+            removed=delete_local_archive(root,selected,confirmation=response,
+                                         in_use=bool(self.proc and self.proc.poll() is None))
+            self._log('ARCHIVIO ELIMINATO LOCAMENTE: '+str(selected)
+                      +f' ({len(removed)} file).')
+            self._refresh()
+            self._refresh_restore()
+            self.dashboard.refresh(force=True)
+        except (OSError,ValueError,ArchiveDeletionError) as exc:
+            messagebox.showerror('Eliminazione non completata',str(exc))
+            self._log('ERRORE eliminazione archivio: '+str(exc))
 
     def _selected(self):
         sel=self.archives.curselection()
