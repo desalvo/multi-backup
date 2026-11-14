@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS mb_agent_registry (
   approved BOOLEAN NOT NULL DEFAULT FALSE,
   revoked BOOLEAN NOT NULL DEFAULT FALSE,
   last_sequence BIGINT NOT NULL DEFAULT 0,
+  execution_limits JSONB NOT NULL DEFAULT '{}'::jsonb,
   last_seen TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
