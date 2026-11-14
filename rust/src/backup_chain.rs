@@ -117,13 +117,16 @@ fn metric(store:&Store,key:&Path,backup:&LogicalBackup,parent:Option<&LogicalBac
         .map(|e|(e.path.as_str(),e)).collect();
     let old:HashMap<&str,&Entry>=parent.into_iter().flat_map(|b|b.entries.iter())
         .map(|e|(e.path.as_str(),e)).collect();
-    let modified=current.iter().filter(|(path,entry)| {
-        old.get(path).is_none_or(|old_entry|
-            old_entry.bytes!=entry.bytes ||
-            old_entry.chunks.len()!=entry.chunks.len() ||
-            old_entry.chunks.iter().zip(&entry.chunks).any(|(a,b)|a.id!=b.id))
+    // Work on concrete file entries to avoid nested Borrow<&&str> inference
+    // from HashMap iterators; compare the full chunk-ID sequences.
+    let modified=backup.entries.iter().filter(|entry| {
+        old.get(entry.path.as_str()).is_none_or(|previous|
+            previous.bytes!=entry.bytes ||
+            previous.chunks.len()!=entry.chunks.len() ||
+            previous.chunks.iter().zip(&entry.chunks).any(|(a,b)|a.id!=b.id))
     }).count();
-    let deleted=old.keys().filter(|path|!current.contains_key(*path)).count();
+    let deleted=parent.map_or(0,|previous|previous.entries.iter()
+        .filter(|entry|!current.contains_key(entry.path.as_str())).count());
     Ok(SnapshotMetrics {
         backup_id:backup.id.clone(),kind:backup.kind,
         file_count:backup.entries.len(),uncompressed_bytes,
