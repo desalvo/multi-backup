@@ -94,7 +94,7 @@ impl ExecutionLimits {
             if sys.cpus().is_empty(){
                 return Err("CPU telemetry unavailable; threshold cannot be checked".into());
             }
-            if sys.global_cpu_usage()>limit {
+            if sys.global_cpu_info().cpu_usage()>limit {
                 return Err("Host CPU usage above backup admission threshold".into());
             }
         }
