@@ -103,3 +103,7 @@ Branch: `feature/r017-about-mock-publications`; intended version: `0.1.0-r017-rc
 ## r018 handoff — Rust core progress and precise live-status animation
 
 Requested gradient is monotonic hue red (0)→yellow (50)→green (100), anti-aliased 4x via Pillow; animated small glow bead is independent of true % and stops after 8s without events, immediately upon stop/finish. Replaces Hide navigation with an antialiased hamburger button and keeps native accessibility/keyboard navigation. Rust native progress-colour / bounded-completion ABI builds in Production Gate and is embedded in Mac and Windows GUI packages with Python parity fallback; Rust **whole-application migration is not complete** and must not be claimed. Remaining major areas: GitHub/Dropbox network clients, age encrypted streaming, checkpoint compatibility, vault, restore, Rust UI, Linux native packaging and true cross-version E2E.
+
+### r018 native scheduler milestone
+
+CI backfill target and admission checks now have a real Rust C ABI used by the bundled Mac/Windows CLI (and GUI), with safe Python fallback for other platforms. All provider communication, crypto, state journals, vault and GUI remain Python. Qualify full PR and release build before any stable claim.

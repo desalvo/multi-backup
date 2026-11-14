@@ -157,7 +157,7 @@ jobs:
       - name: Windows binary and executable dependencies
         shell: pwsh
         run: |
-          python -m PyInstaller --onefile --clean --noconfirm --name multi-backup --icon assets/multi-backup.ico --add-data "assets;assets" multi_backup.py
+          python -m PyInstaller --onefile --clean --noconfirm --name multi-backup --icon assets/multi-backup.ico --add-data "assets;assets" --add-binary "rust/target/release/multi_backup_core.dll;rust-native" multi_backup.py
           python -m PyInstaller --onefile --windowed --clean --noconfirm --name MultiBackupGUI --icon assets/multi-backup.ico --add-data "assets;assets" --add-binary "rust/target/release/multi_backup_core.dll;rust-native" gui_launcher.py
           New-Item -ItemType Directory -Force -Path dist/bin
           choco install age.portable -y --no-progress

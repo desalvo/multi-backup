@@ -146,8 +146,8 @@ class AboutDialog(tk.Toplevel):
         if self._icon is not None:
             canvas.create_image(47, 49, image=self._icon, anchor='nw')
 
-        canvas.create_text(144, 55, text='MULTI BACKUP', anchor='nw',
-                           font=('Helvetica Neue', 24, 'bold'), fill=TEXT)
+        canvas.create_text(144, 55, text='Multi Backup', anchor='nw',
+                           font=('Helvetica Neue', 25, 'bold'), fill=TEXT)
         canvas.create_text(145, 98, text='Encrypted recovery',
                            anchor='nw', font=('Helvetica Neue', 12),
                            fill='#D1E5FF')

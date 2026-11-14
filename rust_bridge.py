@@ -39,6 +39,12 @@ def _native_core():
             lib.multi_backup_completion_percent.argtypes = [
                 ctypes.c_uint64, ctypes.c_uint64]
             lib.multi_backup_completion_percent.restype = ctypes.c_uint32
+            lib.multi_backup_ci_target.argtypes = [
+                ctypes.c_uint64, ctypes.c_uint64]
+            lib.multi_backup_ci_target.restype = ctypes.c_uint64
+            lib.multi_backup_ci_should_schedule.argtypes = [
+                ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64]
+            lib.multi_backup_ci_should_schedule.restype = ctypes.c_uint32
             return lib
         except (OSError, AttributeError):
             continue
@@ -63,5 +69,33 @@ def native_completion_percent(completed, total):
     try:
         return int(lib.multi_backup_completion_percent(
             max(0, int(completed)), max(0, int(total))))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def native_ci_target_count(available, requested):
+    """Use native Rust target policy where bundled; otherwise return None."""
+    lib = _native_core()
+    if lib is None:
+        return None
+    try:
+        available, requested = int(available), int(requested)
+        if min(available, requested) < 0:
+            raise ValueError('Run counts cannot be negative')
+        return int(lib.multi_backup_ci_target(available, requested))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def native_ci_should_schedule(completed, pending, target, workers):
+    """Native conservative CI backfill capacity decision, or None."""
+    lib = _native_core()
+    if lib is None:
+        return None
+    try:
+        values = [int(x) for x in (completed, pending, target, workers)]
+        if any(x < 0 for x in values):
+            return None
+        return bool(lib.multi_backup_ci_should_schedule(*values))
     except (ValueError, TypeError, OverflowError):
         return None

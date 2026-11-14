@@ -198,3 +198,8 @@ The r016 PR initial complete-visual run #43534898468 passed Production Gate and 
 - Begin **operational Rust integration**: rust/src/lib.rs now exports a stable C ABI for bounded progress and the red→yellow→green colour kernel; rust_bridge.py loads only a packaged, trusted native library when available, with mathematically equivalent Python fallback. The native kernel is built and checked by Production Gate and packaged in macOS/Windows GUI applications. Linux GUI, remote backends, vault, encrypted streaming, restore, and the full graphical shell remain Python.
 - End-to-end Rust migration remains UNFINISHED: this is a scoped, verified transition, not permission to discard Python or to modify existing encrypted files. Native recovery interoperability and full graphical parity remain mandatory release blockers.
 - Update version/build to 0.1.0-r018-rc1 / 18. Re-run PR Production Gate, UI screenshots and native Mac/Windows build, then main full distribution CI before claiming release.
+
+### r018 native CI scheduling compatibility addendum
+
+- Rust C ABI now also provides conservative CI target count and backfill schedule eligibility using saturating arithmetic. The actual GitHub backup process calls this library when bundled in Mac/Windows CLI; no change to downloads, encrypted archives, checkpoint state or cleanup permissions. Python fallback keeps Linux/source builds working with equivalent semantics. Production Gate parity tests test all small valid scheduler combinations and native DLL linkage.
+- README EN/IT updated to r018. About title polished to avoid colliding with photographic header. Full Rust GUI/provider/vault/restore migration remains an open, separately testable macroarea.

@@ -58,7 +58,8 @@ iconutil -c icns assets/MultiBackup.iconset -o assets/multi-backup.icns
 # The GUI uses an onedir .app: it is an actual macOS application bundle, not
 # a Python file or a self-extracting executable that can break after relocation.
 python -m PyInstaller --onefile --clean --noconfirm --name multi-backup \
-  "${SIGN_ARGS[@]}" --add-data assets:assets multi_backup.py
+  "${SIGN_ARGS[@]}" --add-data assets:assets \
+  --add-binary rust/target/release/libmulti_backup_core.dylib:rust-native multi_backup.py
 python -m PyInstaller --windowed --onedir --clean --noconfirm \
   --name 'Multi Backup' --osx-bundle-identifier 'io.github.desalvo.multi-backup' \
   "${SIGN_ARGS[@]}" --icon assets/multi-backup.icns --add-data assets:assets \

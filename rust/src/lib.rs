@@ -121,10 +121,27 @@ pub extern "C" fn multi_backup_completion_percent(completed: u64, total: u64) ->
     (fraction * 100.0).clamp(0.0, 100.0).round() as u32
 }
 
+/// Preserve the exact deployed GitHub Actions candidate/backfill limits.
+#[no_mangle]
+pub extern "C" fn multi_backup_ci_target(available: u64, requested: u64) -> u64 {
+    if requested == 0 { available } else { available.min(requested) }
+}
+
+/// No unexpected extra CI downloads: schedule only when both capacity and
+/// target slots remain; saturating arithmetic avoids user-controlled overflow.
+#[no_mangle]
+pub extern "C" fn multi_backup_ci_should_schedule(
+    completed: u64, pending: u64, target: u64, worker_capacity: u64
+) -> u32 {
+    if worker_capacity > 0 && pending < worker_capacity &&
+       completed.saturating_add(pending) < target { 1 } else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BackfillPlanner, RunOutcome, progress_rgb,
-                multi_backup_progress_rgb, multi_backup_completion_percent};
+                multi_backup_progress_rgb, multi_backup_completion_percent,
+                multi_backup_ci_target, multi_backup_ci_should_schedule};
 
     #[test]
     fn progress_kernel_endpoints_are_red_yellow_green() {
@@ -144,6 +161,18 @@ mod tests {
         assert_eq!(multi_backup_completion_percent(50, 100), 50);
         assert_eq!(multi_backup_completion_percent(100, 100), 100);
         assert_eq!(multi_backup_completion_percent(110, 100), 100);
+    }
+
+    #[test]
+    fn ci_scheduler_mirrors_conservative_python_backfill() {
+        assert_eq!(multi_backup_ci_target(7, 0), 7);
+        assert_eq!(multi_backup_ci_target(7, 5), 5);
+        assert_eq!(multi_backup_ci_target(2, 5), 2);
+        assert_eq!(multi_backup_ci_should_schedule(1, 2, 5, 4), 1);
+        assert_eq!(multi_backup_ci_should_schedule(3, 2, 5, 4), 0);
+        assert_eq!(multi_backup_ci_should_schedule(0, 4, 5, 4), 0);
+        assert_eq!(multi_backup_ci_should_schedule(u64::MAX, 1, 4, 4), 0);
+        assert_eq!(multi_backup_ci_should_schedule(0, 0, 5, 0), 0);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r017-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
+**Multi Backup `0.1.0-r018-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
 
 ![Dashboard Multi Backup](docs/screenshots/dashboard.png)
 
@@ -10,6 +10,7 @@
 - **Dropbox** (disattivato per default): esportazione incrementale e cifrata delle versioni dei file tramite API di sola lettura, deduplicazione delle versioni già archiviate e manifest cifrati. **Non cancella e non modifica i file Dropbox, e non effettua purge dei backup locali.**
 - **Ripresa** dopo interruzione tramite checkpoint e verifiche SHA-256; `--restart` avvia un ciclo nuovo, mentre `--resume` riprende quello incompleto mantenendone il nome e i checkpoint.
 - **Interfaccia grafica** fotografica in stile glass blu/viola con Dashboard, Backup, Archivi, Ripristino, Plugin, Cifratura, Aggiornamenti e Impostazioni; finestra nativa About accessibile da menu Help, barra superiore e sidebar. Tasti Start/Resume separati e cancellazione locale protetta da conferma; CLI per consultare, estrarre e montare gli archivi.
+- **Avanzamento:** gradiente antialiasing 4x rosso→giallo→verde e indicatore di attività animato solo durante un backup con eventi recenti; tasto hamburger per la sidebar. La libreria Rust è utilizzata nei pacchetti nativi macOS/Windows per il progresso e la politica di recupero CI; backup, ripristino, vault e GUI Rust completa richiedono ancora la migrazione con test E2E.
 - **Early release:** commit su `main` contenente `[full-ci]`; **stable release:** push di un tag stabile come `v0.1.0`.
 - Aggiornamenti: controllo all'avvio e ogni sei ore (predefinito), scelta del canale `stable` o `early-release`; download verificato con SHA-256. La RC non installa automaticamente eseguibili privi di firma e approvazione.
 
