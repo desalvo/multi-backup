@@ -375,6 +375,13 @@ jobs:
             test -s "$item"
             pdftotext "$item" - | grep -qi 'Multi Backup'
           done
+          # The two source manuals must actually be rebuilt and carry the
+          # clearly labelled Rust r038 development-preview supplement.
+          for manual in docs/manuals/*.pdf; do
+            pdftotext "$manual" - | grep -Fqi 'Rust r038:'
+            pdftotext "$manual" - | grep -Fq 'gc-collect'
+            pdftotext "$manual" - | grep -Fq 'verify-chain'
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: native-gui-and-about-preview
