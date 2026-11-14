@@ -9,3 +9,12 @@ publish = false
 name = "multi_backup_core"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+flate2 = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tar = "0.4"
+tempfile = "3.10"
+walkdir = "2.5"
