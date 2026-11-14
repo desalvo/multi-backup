@@ -147,7 +147,7 @@ impl Session {
         Ok(Self { active, name, _lock: lock })
     }
     fn finish(&self, manifest: &Path) -> DropboxResult<()> {
-        if manifest.file_name().and_then(|x| x.to_str()) != Some(&self.name) ||
+        if manifest.file_name().and_then(|x| x.to_str()) != Some(self.name.as_str()) ||
            !verified_archive(manifest)? {
             return Err(err("Cannot finalize an unverified or mismatched manifest"));
         }

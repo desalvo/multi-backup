@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, checkpoint_audit, dropbox_hash, journal, vault};
+use multi_backup_core::{archive, checkpoint_audit, dropbox_client, dropbox_hash, journal, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -20,6 +20,8 @@ fn usage() -> &'static str {
        multi-backup-native journal record --directory STATE_DIR --config CONFIG.json --step STEP --file ARCHIVE\n\
        multi-backup-native journal finish --directory STATE_DIR --config CONFIG.json\n\
        multi-backup-native dropbox hash --file LOCAL_FILE\n\
+       multi-backup-native dropbox backup --output-dir PRIVATE_DIR --recipient age1KEY [--remote-path /folder]\n\
+       multi-backup-native dropbox resume --output-dir PRIVATE_DIR --recipient age1KEY [--remote-path /folder]\n\
        multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native vault create --file NEW.agevault [--password-stdin]\n\
        multi-backup-native vault export --file SOURCE.agevault --destination RECOVERY.agevault [--password-stdin]\n\
@@ -175,6 +177,15 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !audit.invalid.is_empty() {
             return Err("Checkpoint contains missing or modified archives".into());
         }
+        return Ok(());
+    }
+    if family == "dropbox" && (command == "backup" || command == "resume") {
+        accepted(&flags, &["--output-dir", "--recipient", "--remote-path"])?;
+        let out = Path::new(required(&flags, "--output-dir")?);
+        let recipient = required(&flags, "--recipient")?;
+        let remote = flags.get("--remote-path").copied().unwrap_or("");
+        let result = dropbox_client::backup(out, remote, recipient, command == "resume")?;
+        println!("{}", serde_json::to_string_pretty(&result)?);
         return Ok(());
     }
     if family == "dropbox" && command == "hash" {
