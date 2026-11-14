@@ -29,8 +29,17 @@ fn safe_hash(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|v| v.is_ascii_hexdigit() && !v.is_ascii_uppercase())
 }
 fn safe_path(s: &str) -> bool {
-    s.len() <= 4096 && !s.is_empty() && !s.contains('\\') &&
-    s.split('/').all(|v| !v.is_empty() && v != "." && v != ".." && !v.contains('\0'))
+    if s.len()>4096 || s.is_empty() || s.chars().any(|c|
+        c.is_control() || r#"\:*?"<>|"#.contains(c)) { return false; }
+    s.split('/').all(|v| {
+        if v.is_empty() || v=="." || v==".." || v.ends_with(' ') || v.ends_with('.') {
+            return false;
+        }
+        let part=v.split('.').next().unwrap_or("").to_ascii_uppercase();
+        !matches!(part.as_str(),"CON"|"PRN"|"AUX"|"NUL"|"COM1"|"COM2"|"COM3"|
+            "COM4"|"COM5"|"COM6"|"COM7"|"COM8"|"COM9"|"LPT1"|"LPT2"|
+            "LPT3"|"LPT4"|"LPT5"|"LPT6"|"LPT7"|"LPT8"|"LPT9")
+    })
 }
 fn dir(path: &Path) -> Res<()> {
     if path.exists() {

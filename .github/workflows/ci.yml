@@ -67,6 +67,8 @@ jobs:
       - name: Rust core migration compatibility tests
         run: |
           cargo --version
+          sudo apt-get update -qq
+          sudo apt-get install -y age
           cargo test --manifest-path rust/Cargo.toml
           cargo build --manifest-path rust/Cargo.toml --release
           python -m unittest discover -s tests -p test_rust_bridge.py -v
