@@ -87,3 +87,15 @@ UI currently uses Tk/Pillow, r015 4x antialias stays unchanged. Build numbers an
 ### Photo integration for r016
 
 The user wanted bespoke photographic backup-related banners replacing the hiking illustration. Use scripts/create-photo-assets.py to generate assets/backup-hero.jpg and assets/backup-sidebar.jpg at native packaging time from a freely licensed server-rack photo, with independent navy-toned compositions and image contain to avoid distortion or unwanted crop. The pipeline generates them before native app freezing and before the PDF screenshot job; both are local assets at runtime. docs/PHOTO_CREDITS.md records the source/license. Tests: tests/test_photo_assets.py. Source checkout without network may temporarily show prior hero if generator not run; do not claim the native packages are updated until qualified CI uploads those images.
+
+
+## r017 handoff — native About, supplied photographic mock and documentation repair
+
+User supplied the final desired Multi Backup premium navy/violet photographic UI mock and requests faithful adoption across all pages, not just the dashboard. They also requested a native About popup comparable to MTA, with accurate app metadata. Keep the user-approved navy/violet/cyan palette, high-DPI 4x anti-aliasing, no distorted/cropped photos, operational local stats only, and explicit Start vs Resume and guarded archive deletion from r016.
+
+New `about_dialog.py` presents `VERSION`, `BUILD`, `AUTHOR`, EUPL-1.2 and the GitHub project URL without reading/unlocking the vault. Available in Help, macOS `tk::mac::ShowAbout`, toolbar, sidebar and F1. It can copy build provenance and open project website only on explicit click. GUI secondary pages now use a dark-glass palette instead of bright white forms.
+
+Main build `43537250887` was NOT fully successful: the publication job failed with `ModuleNotFoundError: No module named 'gui'` from direct execution of `scripts/capture-ui.py`. `scripts/capture-ui.py` now inserts the project root into `sys.path`; PR CI has a post-gate `publications-smoke` job for real screenshots, About and bilingual PDFs, and `native-release` depends on this. Verify PR and new main builds (Windows/6 RPMs/both Mac platforms, artifact publication) before claiming r017 released.
+
+Branch: `feature/r017-about-mock-publications`; intended version: `0.1.0-r017-rc1` build 17. Do not publish stable until external production signing/notarization, full E2E restore and user visual acceptance. Rust migration remains a separately gated, incomplete macro-area; Python/Tk runtime stays active until proven equivalent.
+
