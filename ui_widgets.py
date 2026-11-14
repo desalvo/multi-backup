@@ -7,11 +7,29 @@ from __future__ import annotations
 
 import colorsys
 import tkinter as tk
-from tkinter import font as tkfont
+from tkinter import font as tkfont, ttk
 
 SURFACE = '#F5F8FC'
 NAVY = '#163451'
 PALE = '#EDF5FF'
+
+
+def _parent_background(parent):
+    """Match rounded-button corner pixels to the real enclosing native surface."""
+    try:
+        color = parent.cget('background')
+        if isinstance(color, str) and color.startswith('#'):
+            return color
+    except (tk.TclError, KeyError):
+        pass
+    try:
+        style = parent.cget('style') or parent.winfo_class()
+        value = ttk.Style(parent).lookup(style, 'background')
+        if value and value.startswith('#'):
+            return value
+    except (tk.TclError, KeyError, AttributeError):
+        pass
+    return SURFACE
 
 
 def _rgb(value: str) -> tuple[int, int, int]:
@@ -47,9 +65,10 @@ class PremiumButton(tk.Canvas):
         self.focused = False
         self._font = tkfont.Font(root=parent, family='Helvetica Neue', size=11, weight='bold')
         self._height = int(height)
+        self._surface = _parent_background(parent)
         self._width = max(96, int(width) if width else self._font.measure(self.caption) + 38)
         super().__init__(parent, width=self._width, height=self._height,
-                         bg='#0D1A3D' if self.dark else SURFACE,
+                         bg=self._surface,
                          borderwidth=0, highlightthickness=0,
                          takefocus=1, cursor='hand2')
         self._photo = None
@@ -130,15 +149,15 @@ class PremiumButton(tk.Canvas):
 
         width = max(5, self.winfo_width() if self.winfo_width() > 1 else self._width)
         height = max(5, self.winfo_height() if self.winfo_height() > 1 else self._height)
-        bg = '#0D1A3D' if self.dark else SURFACE
+        bg = self._surface
         if self.state == 'disabled':
             top, bottom, border, foreground = (
                 '#E1E8F0', '#CED7E3', '#C6D2DE', '#8292A6')
         elif self.accent:
             top, bottom, border, foreground = (
-                '#3D96E8' if self.hover else '#2786D8',
-                '#1162A6' if self.hover else '#134F91',
-                '#1F5F9D', '#FFFFFF')
+                '#B18BFF' if self.hover else '#A579F6',
+                '#5568E8' if self.hover else '#4658D1',
+                '#C8BBFF', '#FFFFFF')
         elif self.dark:
             top, bottom, border, foreground = (
                 '#6471C9' if self.hover else '#4559A5',
