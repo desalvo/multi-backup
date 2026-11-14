@@ -38,6 +38,6 @@ spec:
           persistentVolumeClaim:
             claimName: {{ default (printf "%s-data" .Release.Name) .Values.storage.existingClaim }}
         - name: credentials
-          secret: {secretName: {{ .Values.existingSecret | quote }}, defaultMode: 0400}
+          secret: {secretName: {{ .Values.existingSecret | quote }}, defaultMode: 0440}
         - name: temp
           emptyDir: {sizeLimit: 64Mi}

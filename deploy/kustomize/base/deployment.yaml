@@ -34,6 +34,6 @@ spec:
         - name: data
           persistentVolumeClaim: {claimName: multi-backup-data}
         - name: secrets
-          secret: {secretName: multi-backup-auth, defaultMode: 0400}
+          secret: {secretName: multi-backup-auth, defaultMode: 0440}
         - name: temp
           emptyDir: {sizeLimit: 64Mi}
