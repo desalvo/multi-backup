@@ -3,8 +3,10 @@
 //! advertised or enabled until implemented and externally verified.
 mod smtp;
 mod ldap;
+mod oidc;
 use smtp::SmtpConfig;
 use ldap::LdapConfig;
+use oidc::{OidcConfig,Pending};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
     password_hash::SaltString};
 use axum::{extract::{Form, Json, State}, http::{header, HeaderMap, StatusCode},
@@ -30,6 +32,8 @@ struct AppConfig {
     audit: PathBuf,
     smtp: Option<SmtpConfig>,
     ldap: Option<LdapConfig>,
+    oidc: Option<OidcConfig>,
+    pending_oidc: Mutex<HashMap<String,Pending>>,
     sessions: Mutex<HashMap<String, Session>>,
 }
 #[derive(Clone)]
@@ -84,8 +88,12 @@ async fn js()->Response {
     ([(header::CONTENT_TYPE,"application/javascript; charset=utf-8")],
         include_str!("../public/app.js")).into_response()
 }
-async fn login_page()->Response {
-    secure_headers(Html(include_str!("../public/login.html")))
+async fn login_page(State(state):State<AppState>)->Response {
+    let link=if state.0.oidc.is_some(){
+        r#"<p><a href="/oidc/start">Accedi con OpenID Connect / SSO</a></p>"#
+    }else{""};
+    secure_headers(Html(include_str!("../public/login.html")
+        .replace("<!--MULTI_BACKUP_SSO-->",link)))
 }
 async fn do_login(State(state):State<AppState>,headers:HeaderMap,
                   Form(login):Form<Login>)->Response{
@@ -125,6 +133,74 @@ async fn do_login(State(state):State<AppState>,headers:HeaderMap,
     if let Ok(value)=cookie.parse(){response.headers_mut().insert(header::SET_COOKIE,value);}
     secure_headers(response)
 }
+#[derive(Deserialize)]
+struct OidcReturn {code:Option<String>,state:Option<String>,error:Option<String>}
+async fn oidc_start(State(state):State<AppState>)->Response{
+    let Some(config)=state.0.oidc.clone() else {
+        return secure_headers(StatusCode::NOT_FOUND);
+    };
+    let Ok((url,csrf,pending))=config.start().await else {
+        audit(&state.0,"oidc_start_failed");
+        return secure_headers(StatusCode::BAD_GATEWAY);
+    };
+    {
+        let Ok(mut entries)=state.0.pending_oidc.lock() else {
+            return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
+        };
+        entries.retain(|_,p|p.created.elapsed()<Duration::from_secs(600));
+        if entries.len()>=100{return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
+        entries.insert(csrf,pending);
+    }
+    secure_headers(Redirect::temporary(&url))
+}
+async fn oidc_callback(State(state):State<AppState>,
+    axum::extract::Query(params):axum::extract::Query<OidcReturn>)->Response{
+    let Some(config)=state.0.oidc.clone() else {
+        return secure_headers(StatusCode::NOT_FOUND);
+    };
+    if params.error.is_some(){return secure_headers(StatusCode::UNAUTHORIZED);}
+    let Some(state_param)=params.state.filter(|s|s.len()>=16&&s.len()<=512) else {
+        return secure_headers(StatusCode::UNAUTHORIZED);
+    };
+    let Some(code)=params.code.filter(|s|!s.is_empty()&&s.len()<=8192) else {
+        return secure_headers(StatusCode::UNAUTHORIZED);
+    };
+    let pending={
+        let Ok(mut entries)=state.0.pending_oidc.lock() else {
+            return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
+        };
+        entries.remove(&state_param)
+    };
+    let Some(pending)=pending else {
+        audit(&state.0,"oidc_state_replay_rejected");
+        return secure_headers(StatusCode::UNAUTHORIZED);
+    };
+    let subject=match config.complete(pending,code).await {
+        Ok(subject)=>subject,
+        Err(_)=>{
+            audit(&state.0,"oidc_token_validation_failed");
+            return secure_headers(StatusCode::UNAUTHORIZED);
+        }
+    };
+    let cookie_id=random_token();
+    let csrf=random_token();
+    {
+        let Ok(mut sessions)=state.0.sessions.lock() else {
+            return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
+        };
+        if sessions.len()>=100{return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
+        sessions.insert(cookie_id.clone(),Session{
+            csrf,until:Instant::now()+Duration::from_secs(8*3600),
+            user:format!("oidc:{subject}")
+        });
+    }
+    audit(&state.0,"login_oidc_success");
+    let cookie=format!("mb_session={cookie_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800; Secure");
+    let mut response=Redirect::to("/").into_response();
+    if let Ok(value)=cookie.parse(){response.headers_mut().insert(header::SET_COOKIE,value);}
+    secure_headers(response)
+}
+
 async fn dashboard(State(state):State<AppState>,headers:HeaderMap)->Response {
     if let Some((_,auth))=session(&headers,&state.0) {
         let page=include_str!("../public/index.html").replace("CSRF_TOKEN", &auth.csrf);
@@ -249,12 +325,16 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
     let smtp=SmtpConfig::from_env()?;
     let ldap=LdapConfig::from_env()?;
+    let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,root,exports,identity,audit,smtp,ldap,
+        name,password_hash:hash,origin,root,exports,identity,audit,smtp,ldap,oidc,
+        pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
     }));
     let app=Router::new().route("/healthz",get(health))
         .route("/login",get(login_page).post(do_login))
+        .route("/oidc/start",get(oidc_start))
+        .route("/oidc/callback",get(oidc_callback))
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
