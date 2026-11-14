@@ -18,6 +18,7 @@ test -x "$CLI" && test -x "$GUI"
 cargo test --manifest-path rust/Cargo.toml --test native_cli_restore_matrix
 cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
 cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
+cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
 APP="dist-rust/Multi Backup Rust Preview.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "dist-rust"
