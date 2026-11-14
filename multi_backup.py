@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from checkpoint import Journal, atomic_json, sha256
 from ci_download import retrieve_artifact, ArtifactDownloadError
 from progress import Progress
+from rust_bridge import native_ci_target_count, native_ci_should_schedule
 from archive_ops import (ArchiveError, catalog, checkout_git, extract_archive, list_members,
                          mount_archive, read_member, unmount_archive)
 from migration import migrate_legacy, legacy_archives
@@ -371,7 +372,11 @@ class ResumableBackup:
             self.progress.emit('ci','No workflow runs for '+slug,repository=slug)
             return
         limit=self.args.max_runs_per_repo
-        target=min(limit,len(runs)) if limit else len(runs)
+        # The release-bundled Rust core owns this conservative scheduling
+        # policy when available; source/Linux fallback is exactly equivalent.
+        native_target=native_ci_target_count(len(runs),limit)
+        target=(native_target if native_target is not None else
+                (min(limit,len(runs)) if limit else len(runs)))
         workers=min(self.args.metadata_workers,4)
         if not self.args.recipient:
             workers=1
@@ -384,7 +389,13 @@ class ResumableBackup:
         pending={}
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             def fill():
-                while len(pending)<workers and valid+len(pending)<target:
+                while True:
+                    decision=native_ci_should_schedule(
+                        valid,len(pending),target,workers)
+                    allowed=(decision if decision is not None else
+                             len(pending)<workers and valid+len(pending)<target)
+                    if not allowed:
+                        break
                     item=next(candidates,None)
                     if item is None:
                         break

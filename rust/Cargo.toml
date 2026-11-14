@@ -8,3 +8,4 @@ publish = false
 [lib]
 name = "multi_backup_core"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]

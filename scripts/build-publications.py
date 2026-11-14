@@ -2,8 +2,8 @@
 """Reproducible bilingual Multi Backup RC brochure and detailed user manuals.
 
 The screenshots in this publication come from the actual Tk interface (Xvfb).
-The landscape hero and icon are original graphic assets, not representations
-of executed backup runs or external storage availability.
+The locally bundled photography and real UI screenshots do not represent
+fabricated backup runs. Photographic provenance is in docs/PHOTO_CREDITS.md.
 """
 from __future__ import annotations
 import os
@@ -102,9 +102,10 @@ class Book(BaseDocTemplate):
         c.restoreState()
     def cover(self,c:canvas.Canvas,doc):
         c.saveState()
-        # elegant full-bleed photographic hero, tightly cropped from original artistic asset
+        # Preserve the complete photograph at its natural ratio; no crop/stretch.
         photo = MEDIA / 'backup-hero.jpg'
         if not photo.is_file():photo = MEDIA / 'hero.jpg'
+        c.setFillColor(NAVY);c.rect(0,H*.27,W,H*.73,fill=1,stroke=0)
         c.drawImage(str(photo),0,H*.27,width=W,height=H*.73,mask='auto',preserveAspectRatio=True,anchor='c')
         c.setFillColor(NAVY);c.rect(0,0,W,H*.33,fill=1,stroke=0)
         c.drawImage(str(MEDIA/'icon-256.png'),W-56*mm,16*mm,width=37*mm,height=37*mm,mask='auto')
@@ -140,14 +141,19 @@ def chapter(title,paragraphs,items=None,screen=None,caption='',example=None,extr
 EN=[
 ('The workspace and first launch',[
  'Multi Backup combines independent source plugins under one encrypted backup workspace. The first release candidate preserves the GitHub disaster recovery engine and adds a Dropbox read-only incremental backup plugin.',
- 'The navigation sidebar provides Dashboard, Backup, Archives, Plugins, Encryption, Updates and Settings. Each screen works with the same application configuration and underlying CLI.'],
+ 'The photographic sidebar provides Dashboard, Backup, Archives, Restore, Plugins, Encryption, Updates and Settings. Each screen works with the same application configuration and underlying CLI.'],
  ['Review the enabled plugins before starting a job.','Set a private output directory on an encrypted volume.','Keep your age private key separate from backup media.'],'dashboard.png','Actual running dashboard captured on Linux. Other operating systems may render controls differently.'),
+('About Multi Backup',[
+ 'Choose About from the top toolbar, the sidebar footer, the Help menu or the native macOS application menu. The dedicated photographic popup shows the real product version, build number, author, EUPL-1.2 license and project link.',
+ 'About never unlocks the encryption vault and never contacts GitHub automatically. Copy version copies the precise version/build to the clipboard; Project website opens only if explicitly selected.'],
+ ['The version and build shown in About identify the installed package.','The About window can be dismissed with Escape or the Close button.'],
+ 'about.png','Native About popup captured from the running application.'),
 ('Installation and platform requirements',[
  'Install from the release page matching your platform: DMG on macOS 13+ (Apple Silicon or Intel), EXE/ZIP on Windows 11 x64, or RPM for Rocky/AlmaLinux 8, 9 and 10. Until signatures are configured, these are RC evaluation packages.',
  'For source use, install Python 3.11+, dependencies from requirements.txt and the external age, git, Git LFS and GitHub CLI programs. The Dropbox engine requires age and a token with minimum read permissions.'],
  ['Confirm the installer signature and SHA-256 digest before proceeding.','Allow the OS to install the CLI helper tools if they were not bundled.','Use gh auth login for GitHub; keep Dropbox tokens out of shell history.'],None,''),
 ('Dashboard tour',[
- 'Dashboard is designed for quick orientation. Three cards show the available providers, the encryption model and the update channel. Use Create backup to open the job configuration or Browse archives to inspect finished snapshots.',
+ 'Dashboard is designed for quick orientation. Three cards show the available providers, the encryption model and the update channel. Use the explicit Start and Resume actions for safe cycles or Browse archives to inspect finished snapshots.',
  'The application is deliberately not a cloud synchronization service: source data is never overwritten by restore actions without a user-selected destination.'],None,'dashboard.png','Dashboard landing page with photographic header and shortcuts.'),
 ('Choosing a source plugin',[
  'Open Plugins to enable the backend required for a job. GitHub is enabled by default; Dropbox is disabled until the user explicitly switches it on. The backend selector in Backup determines which source engine runs.',
@@ -162,19 +168,19 @@ EN=[
  'The Dropbox engine reads folder listings and file downloads, calculates a stable key from file ID and revision, and reuses existing encrypted files when their SHA-256 checksum matches. It writes a separate encrypted manifest for each cycle.'],
  ['No remote delete or modify calls are used.','Local old revisions are never purged.','Sharing ACLs and team admin settings are not yet exported in this RC.'],None,''),
 ('Backup workflow and progress',[
- 'In Backup, select the backend, output and staging locations, and an age recipient. The output directory must be private; stage files on an encrypted volume. Press Run or resume to start a child process.',
+ 'In Backup, select the backend, output and staging locations, and an age recipient. The output directory must be private; stage files on an encrypted volume. Press Start for a new named backup cycle, or Resume to continue the matching incomplete cycle without changing its name.',
  'The progress bar reflects the job state emitted by the CLI, while the log lists operations, warnings, and cleanup summaries. Interrupt safely leaves previous atomic archives and checkpoint journals intact.'],
- ['Do not use a shared or unencrypted staging volume.','For GitHub, repeat the exact command to resume from the last verified shard.','Select Force fresh cycle when you intentionally need a completely new run.'],'backup.png','Backup page with source selection, encryption keys, cleanup simulation and progress bar.'),
+ ['Do not use a shared or unencrypted staging volume.','For GitHub, use --resume to keep the interrupted cycle identity and verified shards.','Start explicitly creates an independent cycle; old incomplete state is preserved.'],'backup.png','Backup page with source selection, encryption keys, cleanup simulation and progress bar.'),
 ('CI artifact cleanup and safety',[
- 'The optional GitHub artifact cleanup runs BEFORE the GitHub backup. It keeps the configured number of main-branch CI executions (default five), respects tag-associated runs, and dynamically protects artifacts needed for distribution, or whose dependencies are uncertain.',
+ 'The optional GitHub artifact cleanup runs only AFTER a verified successful GitHub backup. It keeps the configured number of main-branch CI executions (default five), respects tag-associated runs, and dynamically protects artifacts needed for distribution, or whose dependencies are uncertain.',
  'Use Cleanup dry-run first. Real deletion is irreversible. As work proceeds, the CLI shows per-artifact updates, per-repository summaries, and an overall report. Cleanup does not delete workflow histories, releases or Git repository references.'],
  ['Explicitly opt in to cleanup; it is off by default.','Review dynamic protection decisions; unknown dependencies stay preserved.','Do not assume an external software repository is independent from an old artifact without checking.'],None,'',
  'multi-backup backup --backend github --cleanup-ci-artifacts --cleanup-ci-dry-run --keep-ci-runs 5'),
 ('Resuming, restarting and migration',[
- 'The GitHub engine saves an integrity-checked checkpoint for each completed metadata and repository archive. The current cycle is automatically resumed when the same configuration is used after interruption.',
+ 'The GitHub engine saves an integrity-checked checkpoint for each completed metadata and repository archive. Resume requires an existing matching incomplete cycle and retains the same backup name.',
  'The --restart option produces a distinct backup cycle without overwriting the earlier completed archive. Older monolithic encrypted metadata archives are recognized and can be repartitioned with the correct age identity and recipient; originals remain immutable until new shards are verified.'],
  ['Do not remove .state until a full backup and restore validation have completed.','An interrupted download may need to restart its current file; prior completed shards are retained.'],None,'',
- 'multi-backup backup --backend github --recipient age1EXAMPLE --restart --progress'),
+ 'multi-backup backup --backend github --recipient age1EXAMPLE --resume --progress'),
 ('Understanding encrypted archive layout',[
  'The GitHub layout separates account/common metadata, per-repository settings, issues, releases and individual CI run archives; Git mirrors are kept in distinct encrypted archives, so unchanged snapshots may be deduplicated.',
  'The Dropbox layout contains encrypted objects and versioned encrypted manifests. Each file revision can be reused across backup cycles; there is no remote or local purge. Sidecar SHA-256 digests detect accidental corruption.'],None,'archives.png','Archive explorer showing available encrypted metadata and repository archives.'),
@@ -188,7 +194,7 @@ EN=[
  ['Install and configure bindfs where supported.','Use unmount after inspection to remove the private temporary extraction.'],None,''),
 ('Create and protect encryption keys',[
  'Open Encryption and generate a new age X25519 identity. The CLI keys generate subcommand creates an identity in a private application configuration folder with owner-only permissions and prints only the public recipient.',
- 'The recipient string may be stored in application settings. The identity file must not be bundled with your ciphertext backups: keep separate encrypted/offline recovery copies and test the decryption process regularly.'],
+ 'The private identity is stored in a password-protected vault outside the app. Create an independently password-protected recovery copy and test it periodically; Touch ID is optional on eligible Macs after the first password unlock.'],
  ['A lost age private key means the encrypted data is not recoverable.','Never share private key contents in screenshots or support logs.','Some platform key management requires installation of age-keygen.'],'encryption.png','Real key-management screen. Private key values are never displayed.'),
 ('Application settings',[
  'Settings stores non-secret preferences such as backup location, enabled plugins, retention and update channel. On macOS settings are stored under the user Application Support folder; on Windows under APPDATA; on Linux under XDG_CONFIG_HOME or ~/.config.',
@@ -219,14 +225,19 @@ EN=[
 IT=[
 ('Panoramica e primo avvio',[
  'Multi Backup riunisce motori di backup indipendenti in uno spazio di lavoro cifrato. La prima release candidate mantiene il motore GitHub di disaster recovery e aggiunge il plugin Dropbox incrementale e di sola lettura.',
- 'La navigazione comprende Dashboard, Backup, Archivi, Plugin, Cifratura, Aggiornamenti e Impostazioni. Interfaccia grafica e CLI condividono la configurazione dell’applicazione.'],
+ 'La navigazione fotografica comprende Dashboard, Backup, Archivi, Ripristino, Plugin, Cifratura, Aggiornamenti e Impostazioni. Interfaccia grafica e CLI condividono la configurazione dell’applicazione.'],
  ['Prima di avviare un lavoro controllare i plugin attivi.','Impostare un percorso di output riservato su volume cifrato.','Conservare la chiave privata age separata dal backup.'],'dashboard.png','Dashboard reale catturata su Linux; sui diversi sistemi i controlli possono variare.'),
+('Informazioni sull’app (About)',[
+ 'La finestra About si apre dalla barra superiore, dal fondo della sidebar, dal menu Help o dal menu nativo dell’applicazione su macOS. Mostra versione, build, autore, licenza EUPL-1.2 e collegamento al repository.',
+ 'About non sblocca il vault e non contatta automaticamente i server. Copy version copia la versione esatta; Project website apre il browser soltanto su richiesta esplicita.'],
+ ['Versione e build identificano il pacchetto installato.','La finestra si chiude con Escape o Close.'],
+ 'about.png','Finestra nativa About catturata dall’applicazione in esecuzione.'),
 ('Installazione e requisiti',[
  'Scaricare il pacchetto del proprio sistema operativo: DMG per macOS 13+ (Apple Silicon o Intel), EXE/ZIP per Windows 11 x64, RPM per Rocky/AlmaLinux 8, 9 e 10. I pacchetti RC devono essere verificati e non sono ancora certificati come produzione.',
  'Per eseguire il sorgente servono Python 3.11+, i moduli in requirements.txt e i programmi esterni age, git, Git LFS e GitHub CLI. Il plugin Dropbox richiede age e un token con permessi minimi di lettura.'],
  ['Controllare le firme dell’installer e lo SHA-256.','Verificare che le dipendenze native siano state incluse o installate.','Usare gh auth login per GitHub; non mostrare i token nelle schermate.'],None,''),
 ('Dashboard',[
- 'La Dashboard fornisce una vista immediata delle sorgenti, del modello di cifratura e del canale di aggiornamento. I pulsanti permettono di creare un backup, consultare gli archivi o aprire la configurazione dei plugin.',
+ 'La Dashboard fornisce una vista immediata delle sorgenti, del modello di cifratura e del canale di aggiornamento. I tasti Start e Resume distinguono nuovi cicli dalla ripresa sicura; è possibile consultare o cancellare localmente archivi selezionati dopo conferma forte.',
  'Il software non è un servizio di sincronizzazione cloud: il ripristino avviene verso una destinazione selezionata, senza sovrascrivere implicitamente i dati online.'],None,'dashboard.png','Schermata iniziale con immagine fotografica e scorciatoie.'),
 ('Selezione del plugin',[
  'Aprire Plugin per abilitare il motore necessario. GitHub è abilitato per default, mentre Dropbox resta disattivato finché non viene abilitato esplicitamente. Il selettore in Backup determina la sorgente da elaborare.',
@@ -241,19 +252,19 @@ IT=[
  'Il motore legge l’elenco dei file e le revisioni, identifica ogni versione tramite ID e revisione, riutilizza gli archivi già verificati via SHA-256 e produce un manifest cifrato a ogni ciclo.'],
  ['Non modifica e non cancella file su Dropbox.','Non effettua purge dei vecchi backup locali.','Condivisioni, permessi di team e impostazioni amministrative sono fuori scope nella RC.'],None,''),
 ('Esecuzione e avanzamento',[
- 'Nella pagina Backup scegliere backend, cartelle di output/staging e destinatario age. La cartella di staging deve essere privata e su disco cifrato. Il pulsante di avvio lancia un processo separato.',
+ 'Nella pagina Backup scegliere backend, cartelle di output/staging e destinatario age. La cartella di staging deve essere privata e su disco cifrato. Start crea un backup nuovo, Resume riprende un ciclo incompleto con lo stesso nome senza sovrascriverlo.',
  'La barra avanza in base agli eventi forniti dalla CLI e l’area dei log mostra attività, warning e sommari. L’interruzione sicura mantiene gli archivi atomici completati e i checkpoint validi.'],
- ['Non usare uno staging condiviso o non cifrato.','Con GitHub ripetere il comando identico per riprendere.','Usare Force fresh cycle per iniziare un nuovo ciclo indipendente.'],'backup.png','Pannello Backup con motore selezionabile, chiavi, simulazione cleanup e barra.'),
+ ['Non usare uno staging condiviso o non cifrato.','Con GitHub utilizzare --resume per mantenere nome e checkpoint del ciclo incompleto.','Start crea un nuovo ciclo e conserva gli stati incompleti esistenti.'],'backup.png','Pannello Backup con motore selezionabile, chiavi, simulazione cleanup e barra.'),
 ('Pulizia degli artifact CI',[
- 'Il cleanup GitHub è facoltativo e precede il backup. Mantiene le ultime CI del branch principale secondo il numero configurato (default cinque), tutela le CI associate ai tag e preserva dinamicamente gli artifact necessari o potenzialmente necessari per la distribuzione.',
+ 'Il cleanup GitHub è facoltativo e avviene solo dopo un backup completato e verificato. Mantiene le ultime CI del branch principale secondo il numero configurato (default cinque), tutela le CI associate ai tag e preserva dinamicamente gli artifact necessari o potenzialmente necessari per la distribuzione.',
  'Eseguire prima Cleanup dry-run: la cancellazione reale è irreversibile. Durante l’operazione vengono mostrati avanzamento per artifact, sommario per repository e riepilogo complessivo. Non vengono eliminati commit, tag o release.'],
  ['Attivare espressamente il cleanup.','Controllare le decisioni conservative prima di applicare.','Verificare eventuali dipendenze esterne non dichiarate nei workflow.'],None,'',
  'multi-backup backup --backend github --cleanup-ci-artifacts --cleanup-ci-dry-run --keep-ci-runs 5'),
 ('Ripresa, riavvio e migrazione',[
- 'Il motore GitHub salva per ogni archivio completato un checkpoint con verifica SHA-256. Dopo una interruzione, lo stesso comando riprende dall’ultima unità verificata.',
+ 'Il motore GitHub salva per ogni archivio completato un checkpoint con verifica SHA-256. Dopo un’interruzione, --resume riprende il ciclo compatibile con nome invariato.',
  'Con --restart si crea un nuovo ciclo senza sovrascrivere gli archivi precedenti. I vecchi metadata monolitici cifrati possono essere ripartiti usando identità age originale e destinatario per i nuovi archivi; la sorgente originale resta immutata fino alla verifica.'],
  ['Non cancellare .state prima di una verifica di ripristino.','Il file in download al momento dell’interruzione potrebbe essere riscaricato.'],None,'',
- 'multi-backup backup --backend github --recipient age1ESEMPIO --restart --progress'),
+ 'multi-backup backup --backend github --recipient age1ESEMPIO --resume --progress'),
 ('Struttura degli archivi cifrati',[
  'GitHub conserva account e dati comuni, impostazioni per repository, issue, release e singole esecuzioni CI; i mirror Git usano archivi cifrati separati e possono essere deduplicati.',
  'Dropbox memorizza oggetti cifrati e manifest cifrati per ciclo. Le revisioni non cambiate vengono riutilizzate, senza purge remoto o locale. I file sidecar SHA-256 permettono di verificare la corruzione accidentale.'],None,'archives.png','Catalogo dei backup: metadata cifrati e archivi repository.'),
@@ -267,7 +278,7 @@ IT=[
  ['Installare bindfs dove necessario.','Concludere con unmount e controllare la pulizia dello staging.'],None,''),
 ('Gestione delle chiavi age',[
  'Nella pagina Encryption si può generare un’identità X25519. La CLI keys generate crea la chiave nella cartella riservata dell’applicazione, imposta permessi 0600 e rende disponibile la sola chiave pubblica.',
- 'Il destinatario pubblico può comparire nelle impostazioni. La chiave privata deve essere conservata fuori dal deposito cifrato, con copie di recupero offline e prove periodiche di decifratura.'],
+ 'L’identità privata è conservata in un vault cifrato con password fuori dall’app. Creare una copia di recupero cifrata con password distinta; Touch ID è facoltativo sui Mac supportati dopo il primo sblocco.'],
  ['La perdita della chiave privata impedisce di recuperare il backup.','Non mostrare valori privati negli screenshot.','Per generare le chiavi può servire il programma age-keygen.'],'encryption.png','Schermata reale per la gestione delle chiavi.'),
 ('Preferenze dell’applicazione',[
  'La pagina Settings mantiene preferenze non segrete: destinazione dei backup, plugin attivi, limiti di conservazione e canale di aggiornamento. Su macOS usa Application Support, su Windows APPDATA e su Linux XDG_CONFIG_HOME o ~/.config.',

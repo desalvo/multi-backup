@@ -73,7 +73,7 @@ class PluginTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         gui=(root/'gui.py').read_text('utf-8')
         sidebar=(root/'sidebar_nav.py').read_text('utf-8')
-        self.assertIn('SidebarNavItem(self.sidebar,translated[name],icon',gui)
+        self.assertIn('SidebarNavItem(self.nav_content,translated[name],icon',gui)
         self.assertIn("'Encryption':'Vault e chiavi'",gui)
         self.assertIn('self.nav[key].set_active(key==name)',gui)
         self.assertIn("fill=NAV_TEXT",sidebar)
@@ -495,7 +495,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn('  production-gate:',ci)
         self.assertIn('  native-release:',ci)
         self.assertIn('    needs: [production-gate]',ci)
-        self.assertIn('    needs: [production-gate, macos-smoke]',ci)
+        self.assertIn('  publications-smoke:',ci)
+        self.assertIn('    needs: [production-gate, macos-smoke, publications-smoke]',ci)
         self.assertIn('MAC_UNSIGNED_SMOKE',ci)
         self.assertIn('macos-${{ matrix.arch }}-preview',ci)
         self.assertNotIn('TEST-ONLY-macos-',ci)

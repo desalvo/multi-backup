@@ -86,9 +86,94 @@ impl BackfillPlanner {
     }
 }
 
+/// Canonical numeric progress mapping in the native, dependency-free core.
+/// HSV: 0% red, 50% yellow, 100% green. No filesystem or credential access.
+pub fn progress_rgb(percent: f64) -> (u8, u8, u8) {
+    let p = if percent.is_finite() { percent.clamp(0.0, 100.0) }
+            else { 0.0 };
+    let s = 0.86_f64;
+    let v = 0.91_f64;
+    let chroma = v * s;
+    let hue = p / 100.0 * 120.0;
+    let x = chroma * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+    let m = v - chroma;
+    let (r, g, b) = if hue < 60.0 {
+        (chroma, x, 0.0)
+    } else {
+        (x, chroma, 0.0)
+    };
+    (((r + m) * 255.0).round() as u8,
+     ((g + m) * 255.0).round() as u8,
+     ((b + m) * 255.0).round() as u8)
+}
+
+/// A compact stable ABI for the Python/Tk transition.
+#[no_mangle]
+pub extern "C" fn multi_backup_progress_rgb(percent: f64) -> u32 {
+    let (r, g, b) = progress_rgb(percent);
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
+#[no_mangle]
+pub extern "C" fn multi_backup_completion_percent(completed: u64, total: u64) -> u32 {
+    if total == 0 { return 0; }
+    let fraction = (completed as f64) / (total as f64);
+    (fraction * 100.0).clamp(0.0, 100.0).round() as u32
+}
+
+/// Preserve the exact deployed GitHub Actions candidate/backfill limits.
+#[no_mangle]
+pub extern "C" fn multi_backup_ci_target(available: u64, requested: u64) -> u64 {
+    if requested == 0 { available } else { available.min(requested) }
+}
+
+/// No unexpected extra CI downloads: schedule only when both capacity and
+/// target slots remain; saturating arithmetic avoids user-controlled overflow.
+#[no_mangle]
+pub extern "C" fn multi_backup_ci_should_schedule(
+    completed: u64, pending: u64, target: u64, worker_capacity: u64
+) -> u32 {
+    if worker_capacity > 0 && pending < worker_capacity &&
+       completed.saturating_add(pending) < target { 1 } else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BackfillPlanner, RunOutcome};
+    use super::{BackfillPlanner, RunOutcome, progress_rgb,
+                multi_backup_progress_rgb, multi_backup_completion_percent,
+                multi_backup_ci_target, multi_backup_ci_should_schedule};
+
+    #[test]
+    fn progress_kernel_endpoints_are_red_yellow_green() {
+        assert_eq!(progress_rgb(0.0), (232, 32, 32));
+        assert_eq!(progress_rgb(50.0), (232, 232, 32));
+        assert_eq!(progress_rgb(100.0), (32, 232, 32));
+        assert_eq!(progress_rgb(f64::NAN), progress_rgb(0.0));
+        assert_eq!(progress_rgb(-200.0), progress_rgb(0.0));
+        assert_eq!(progress_rgb(200.0), progress_rgb(100.0));
+        assert_eq!(multi_backup_progress_rgb(0.0), 0xE82020);
+    }
+
+    #[test]
+    fn progress_events_do_not_fabricate_completion() {
+        assert_eq!(multi_backup_completion_percent(0, 0), 0);
+        assert_eq!(multi_backup_completion_percent(0, 100), 0);
+        assert_eq!(multi_backup_completion_percent(50, 100), 50);
+        assert_eq!(multi_backup_completion_percent(100, 100), 100);
+        assert_eq!(multi_backup_completion_percent(110, 100), 100);
+    }
+
+    #[test]
+    fn ci_scheduler_mirrors_conservative_python_backfill() {
+        assert_eq!(multi_backup_ci_target(7, 0), 7);
+        assert_eq!(multi_backup_ci_target(7, 5), 5);
+        assert_eq!(multi_backup_ci_target(2, 5), 2);
+        assert_eq!(multi_backup_ci_should_schedule(1, 2, 5, 4), 1);
+        assert_eq!(multi_backup_ci_should_schedule(3, 2, 5, 4), 0);
+        assert_eq!(multi_backup_ci_should_schedule(0, 4, 5, 4), 0);
+        assert_eq!(multi_backup_ci_should_schedule(u64::MAX, 1, 4, 4), 0);
+        assert_eq!(multi_backup_ci_should_schedule(0, 0, 5, 0), 0);
+    }
 
     #[test]
     fn older_ci_replaces_broken_recent_artifact() {

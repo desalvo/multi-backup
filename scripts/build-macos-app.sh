@@ -26,6 +26,8 @@ if [[ "$MAC_ARCH" == x86_64 ]]; then
 fi
 python -m pip install -r requirements.txt 'pyinstaller>=6.11,<7'
 python scripts/create-photo-assets.py
+cargo build --manifest-path rust/Cargo.toml --release
+[[ -s rust/target/release/libmulti_backup_core.dylib ]] || exit 1
 if [[ "$MAC_ARCH" == x86_64 ]]; then
   RUST_BINDING="$(python - <<'PY'
 import cryptography.hazmat.bindings._rust as binding
@@ -56,10 +58,12 @@ iconutil -c icns assets/MultiBackup.iconset -o assets/multi-backup.icns
 # The GUI uses an onedir .app: it is an actual macOS application bundle, not
 # a Python file or a self-extracting executable that can break after relocation.
 python -m PyInstaller --onefile --clean --noconfirm --name multi-backup \
-  "${SIGN_ARGS[@]}" --add-data assets:assets multi_backup.py
+  "${SIGN_ARGS[@]}" --add-data assets:assets \
+  --add-binary rust/target/release/libmulti_backup_core.dylib:rust-native multi_backup.py
 python -m PyInstaller --windowed --onedir --clean --noconfirm \
   --name 'Multi Backup' --osx-bundle-identifier 'io.github.desalvo.multi-backup' \
-  "${SIGN_ARGS[@]}" --icon assets/multi-backup.icns --add-data assets:assets gui_launcher.py
+  "${SIGN_ARGS[@]}" --icon assets/multi-backup.icns --add-data assets:assets \
+  --add-binary rust/target/release/libmulti_backup_core.dylib:rust-native gui_launcher.py
 [[ -d "$APP/Contents/MacOS" && -f "$APP/Contents/Info.plist" ]] || {
   echo 'PyInstaller did not create a valid application bundle' >&2; exit 1;
 }
@@ -67,7 +71,7 @@ python -m PyInstaller --windowed --onedir --clean --noconfirm \
 plutil -replace LSMinimumSystemVersion -string '13.0' "$APP/Contents/Info.plist"
 plutil -replace LSApplicationCategoryType -string 'public.app-category.productivity' "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string '0.1.0' "$APP/Contents/Info.plist"
-plutil -replace CFBundleVersion -string '16' "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string '18' "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/bin"
 # Keychain-protected Touch ID adapter, device-only; never stores keys in app bundle.
 swiftc -O -framework Security -framework LocalAuthentication \

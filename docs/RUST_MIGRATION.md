@@ -33,3 +33,9 @@ Do not migrate user private identities or discard an old working vault until
 round-trip encryption/decryption and restore parity are proven. Never promise
 that a Rust executable exists in a released package until its artifacts
 are actually built and tested.
+
+## r018 executable Rust interoperability milestone
+
+The production Rust crate now builds as `rlib` and `cdylib` and exposes two side-effect-free stable C ABI functions: `multi_backup_progress_rgb(f64)->u32` and `multi_backup_completion_percent(u64,u64)->u32`. The Python GUI's real progress colour mapping attempts the compiled, bundled Rust-native kernel first via the constrained `rust_bridge.py` loader. Production Gate builds/releases a native library and runs parity tests against all 101 integral hues, including red/yellow/green endpoints. The Mac and Windows PyInstaller builds embed this compiled core; Linux RPMs retain the Python fallback. No remote credential, vault, or archive path is passed to the Rust kernel. This is a real, bounded native integration milestone, not a completed application rewrite. Keep all numbered parity gates above open until individually qualified.
+
+The active GitHub CI backup scheduler now calls native Rust `multi_backup_ci_target` and `multi_backup_ci_should_schedule` where present, verified against the Python backfill algorithm over full combinations of candidate counts, limits, pending/complete slots and worker capacities. The native library is bundled in both CLI and GUI on Mac and Windows. No change is made to checkpoint or encrypted archive formats, and Linux remains on the equivalent safe Python policy until native EL8-10 build qualification. The other Rust migration gates remain open.

@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r016-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r018-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -10,9 +10,10 @@
 
 - **GitHub plugin (enabled by default):** mirror repositories with Git LFS, retain distinct snapshots, back up metadata, issues/PRs, workflow runs, logs, release assets, GitHub settings and optional user-supplied credentials. All exported backup archives use `age` encryption. The CI artifact cleanup is **opt-in** and conservatively protects distributable artifacts; it can simulate actions before deletion.
 - **Dropbox plugin (disabled by default):** read-only Dropbox API, list file revisions and back up changed versions as individual encrypted archives, reuse already verified objects, create timestamped encrypted manifests. **Never modifies or deletes files in Dropbox; never purges local backups.** Dropbox integration is an RC feature requiring live-account testing.
-- **Resumable backups:** atomic archives, SHA-256 verification, checkpoint journals, `--restart` to create a fresh independent cycle.
+- **Resumable backups:** atomic archives, SHA-256 verification, checkpoint journals, explicit `--restart` to start an independent cycle and `--resume` to retain the interrupted backup identity.
 - **Archive explorer:** list, display, extract, Git checkout and optional read-only FUSE mounting.
-- **Native GUI:** Dashboard, Backup, Archives, Plugins, Encryption, Updates and Settings with real-time progress.
+- **Native GUI:** photographic navy/violet glass Dashboard, Backup, Archives, Restore, Plugins, Encryption, Updates and Settings, plus a native About popup from Help, the toolbar, the sidebar or the macOS application menu. Explicit Start/Resume, local archive deletion with confirmation and real-time progress.
+- **Progress:** continuous 4x-antialiased red-to-yellow-to-green progress track and an independently animated busy bead driven by recent backup events. A compact hamburger toggles the navigation. macOS/Windows native builds bundle a tested Rust kernel for progress and conservative CI backfill policy; the Python GUI/backup providers and Linux fallback remain operational until full parity is proven.
 - **Two release channels:** `early-release` after a `[full-ci]` commit to `main`, and eventually `stable` after a stable version tag (for example `v0.1.0`). RC1 blocks stable publication until signed native packages and repositories are available. New versions are checked at launch and every six hours by default. Verified installers are staged but never executed without explicit approval.
 
 ## Requirements
