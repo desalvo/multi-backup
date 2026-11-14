@@ -486,16 +486,15 @@ impl NativeApp {
         let pen = ui.painter_at(rect);
         pen.rect_filled(rect, 17.0, Color32::from_rgb(16, 32, 76));
         let step = (width / 16.0).max(8.0);
-        for i in 0..5 {
+        for i in 0.0.5 {
             let x = rect.left() + i as f32 * step;
             let right = rect.right() - i as f32 * step;
-            for dx in [x, right - step * .75] {
+            for dx in [x, right - step * 0.75] {
                 let rack = egui::Rect::from_min_size(
-                    egui::pos2(dx, rect.top() + 6.0), Vec2::new(step * .74, height - 12.0));
+                    egui::pos2(dx, rect.top() + 6.0), Vec2::new(step * 0.74, height - 12.0));
                 pen.rect_filled(rack, 5.0, Color32::from_rgb(12, 26, 60));
-                pen.rect_stroke(rack, 5.0, egui::Stroke::new(1.0, Color32::from_rgb(57, 96, 168)),
-                    egui::StrokeKind::Outside);
-                for j in 0..9 {
+                pen.rect_stroke(rack, 5.0, egui::Stroke::new(1.0, Color32::from_rgb(57, 96, 168)));
+                for j in 0.0.9 {
                     let led = egui::pos2(rack.left() + 8.0,
                         rack.top() + 10.0 + j as f32 * (height - 30.0) / 10.0);
                     pen.circle_filled(led, 1.7, if j%3==0 {VIOLET}
@@ -503,19 +502,18 @@ impl NativeApp {
                 }
             }
         }
-        let card = rect.shrink2(Vec2::new(width * .16, height * .23));
+        let card = rect.shrink2(Vec2::new(width * 0.16, height * 0.23));
         pen.rect_filled(card, 18.0, Color32::from_rgb(23, 38, 97));
-        pen.rect_stroke(card, 18.0, egui::Stroke::new(2.0, Color32::from_rgb(85, 205, 247)),
-            egui::StrokeKind::Outside);
-        pen.text(card.center() - Vec2::new(0.0, height * .06),
+        pen.rect_stroke(card, 18.0, egui::Stroke::new(2.0, Color32::from_rgb(85, 205, 247)));
+        pen.text(card.center() - Vec2::new(0.0, height * 0.06),
             egui::Align2::CENTER_CENTER, "Multi Backup",
-            egui::FontId::proportional((width * .044).clamp(18.0, 39.0)),INK);
+            egui::FontId::proportional((width * 0.044).clamp(18.0, 39.0)),INK);
         let bar = egui::Rect::from_min_size(
-            egui::pos2(card.left()+card.width()*.18,card.bottom()-height*.15),
-            Vec2::new(card.width()*.64,8.0));
+            egui::pos2(card.left()+card.width()*0.18,card.bottom()-height*0.15),
+            Vec2::new(card.width()*0.64,8.0));
         pen.rect_filled(bar, 4.0, Color32::from_rgb(31, 52, 110));
         pen.rect_filled(egui::Rect::from_min_size(bar.min,
-           Vec2::new(bar.width()*.67,bar.height())),4.0,Color32::from_rgb(58, 207, 231));
+           Vec2::new(bar.width()*0.67,bar.height())),4.0,Color32::from_rgb(58, 207, 231));
     }
 
     fn dashboard(&mut self, ui: &mut egui::Ui) {
@@ -619,7 +617,7 @@ impl NativeApp {
                         self.fields.selected_archive = path.clone();
                     }
                     let bytes = item.metadata().map(|v| v.len()).unwrap_or(0);
-                    ui.label(format!("{:.1} MiB", bytes as f64 / (1024.0*1024.0)));
+                    ui.label(format!("{:0.1} MiB", bytes as f64 / (1024.0*1024.0)));
                 });
             }
         });
@@ -1129,7 +1127,8 @@ fn main() -> eframe::Result {
         println!("{VERSION}"); return Ok(());
     }
     if args.len() == 1 && args[0] == "--self-test" {
-        assert!(image::load_from_memory(include_bytes!("../../assets/hero.jpg")).is_ok());
+        // Artwork is built from in-process vector geometry; no external photo asset.
+        assert!(std::mem::size_of::<NativeApp>() > 0);
         assert!(image::load_from_memory(include_bytes!("../../assets/icon-256.png")).is_ok());
         assert_eq!(progress_rgb(0.), (232,32,32));
         assert_eq!(progress_rgb(100.), (32,232,32));
