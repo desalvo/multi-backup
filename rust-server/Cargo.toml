@@ -29,3 +29,8 @@ bytes = "1"
 futures-util = "0.3"
 percent-encoding = "2"
 subtle = "2"
+postgres = "0.19"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
