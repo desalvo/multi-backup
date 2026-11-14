@@ -1,5 +1,10 @@
 # Multi Backup
 
+## Documentazione corrente Rust r038
+
+Leggere il [manuale operativo italiano](docs/OPERATIONS_R038_IT.md), [l'indice documentale](docs/DOCUMENTATION_INDEX_R038.md) e [l'inventario delle funzionalità](docs/FEATURE_INVENTORY_R038.md). I PDF storici r018 con screenshot Python/Tk non attestano la nuova GUI Rust. Le funzionalità della PR #10, incluso il repack automatico delle parità 8+2, non sono ancora una RC certificata.
+
+
 **Multi Backup `0.1.0-r018-rc1`** è l'ultima versione Python/Tk distribuita; **Rust nativo `0.1.0-r038`** è una anteprima di sviluppo nella PR #10, non ancora una RC certificata. Licenza **EUPL-1.2**. Le guide operative r038 descrivono le funzionalità del codice in sviluppo, non quelle già distribuite.
 
 ![Dashboard Multi Backup](docs/screenshots/dashboard.png)
