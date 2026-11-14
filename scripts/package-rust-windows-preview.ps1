@@ -45,6 +45,8 @@ try {
     $env:PATH = "$(Join-Path $bundle 'bin');$previousPath"
     cargo test --manifest-path rust/Cargo.toml --test native_cli_restore_matrix
     if ($LASTEXITCODE -ne 0) { throw 'Native Windows encrypted restore acceptance failed' }
+    cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+    if ($LASTEXITCODE -ne 0) { throw 'Native Windows plugin execution acceptance failed' }
 } finally {
     $env:PATH = $previousPath
 }
