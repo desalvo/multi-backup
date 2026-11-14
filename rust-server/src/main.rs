@@ -4,6 +4,8 @@
 mod smtp;
 mod ldap;
 mod oidc;
+mod dav;
+use dav::DavConfig;
 use smtp::SmtpConfig;
 use ldap::LdapConfig;
 use oidc::{OidcConfig,Pending};
@@ -31,6 +33,7 @@ struct AppConfig {
     exports: PathBuf,
     audit: PathBuf,
     smtp: Option<SmtpConfig>,
+    dav: Option<DavConfig>,
     ldap: Option<LdapConfig>,
     oidc: Option<OidcConfig>,
     pending_oidc: Mutex<HashMap<String,Pending>>,
@@ -381,10 +384,11 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
     let smtp=SmtpConfig::from_env()?;
+    let dav=DavConfig::from_env(&origin)?;
     let ldap=LdapConfig::from_env()?;
     let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,root,exports,identity,audit,smtp,ldap,oidc,
+        name,password_hash:hash,origin,root,exports,identity,audit,smtp,dav,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
@@ -397,6 +401,9 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
+        .route("/dav/:id",axum::routing::any(dav::root))
+        .route("/dav/:id/",axum::routing::any(dav::root))
+        .route("/dav/:id/*path",axum::routing::any(dav::file))
         .route("/api/export",post(export))
         .route("/api/smtp/status",get(smtp_status))
         .route("/api/smtp/test",post(smtp_test))

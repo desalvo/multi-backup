@@ -134,6 +134,10 @@ impl Store {
         let key: [u8;32] = decoded_key.try_into().map_err(|_| "Invalid store key")?;
         Ok(Self {root: private, cfg, key})
     }
+    /// On-demand integrity checked block read for read-only mounts.
+    pub fn read_chunk_ref(&self,identity:&Path,chunk:&ChunkRef)->Res<Vec<u8>>{
+        self.read_chunk(identity,chunk)
+    }
     fn read_chunk(&self, identity: &Path, chunk: &ChunkRef) -> Res<Vec<u8>> {
         if !safe_hash(&chunk.id) || !safe_hash(&chunk.sha256) ||
             chunk.bytes > self.cfg.chunk_bytes { return Err("Invalid chunk reference".into()); }

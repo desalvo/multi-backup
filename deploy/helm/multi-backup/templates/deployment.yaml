@@ -24,6 +24,10 @@ spec:
             - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: /run/secrets/age-identity}
             - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
             - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
+          {{- if .Values.auth.dav.enabled }}
+            - {name: MULTI_BACKUP_DAV_USER, value: {{ .Values.auth.dav.user | quote }}}
+            - {name: MULTI_BACKUP_DAV_PASSWORD_FILE, value: /run/secrets/dav-password}
+          {{- end }}
           {{- if .Values.auth.ldap.enabled }}
             - {name: MULTI_BACKUP_LDAP_URL, value: {{ .Values.auth.ldap.url | quote }}}
             - {name: MULTI_BACKUP_LDAP_USER_DN_TEMPLATE, value: {{ .Values.auth.ldap.userDnTemplate | quote }}}

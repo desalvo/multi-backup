@@ -25,6 +25,9 @@ resources:
 
 # External identity providers and SMTP are disabled until configured.
 auth:
+  dav:
+    enabled: false
+    user: mount
   ldap:
     enabled: false
     url: ""
