@@ -132,7 +132,7 @@ pub fn delete(output: &Path, archive: &Path,
     })();
     let record = json!({
         "utc": Utc::now().to_rfc3339(),
-        "requested": archive.strip_prefix(&root)?.to_string_lossy().replace('\\', "/"),
+        "requested": files[0].strip_prefix(&root)?.to_string_lossy().replace('\\', "/"),
         "removed": removed,
         "complete": outcome.is_ok() && removed.len() == files.len(),
         "operation": "local-delete-only"

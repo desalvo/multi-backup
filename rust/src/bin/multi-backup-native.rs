@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, vault};
+use multi_backup_core::{archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -14,6 +14,7 @@ fn usage() -> &'static str {
        multi-backup-native archive list --archive FILE.tar.gz.age --identity AGE_KEY [--json]\n\
        multi-backup-native archive verify --archive FILE.tar.gz.age --identity AGE_KEY\n\
        multi-backup-native archive extract --archive FILE.tar.gz.age --identity AGE_KEY --destination NEW_DIR\n\
+       multi-backup-native archive delete --root PRIVATE_BACKUP_ROOT --archive FILE.tar.gz.age --confirm EXACT_FILENAME\n\
        multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
        multi-backup-native journal start --directory STATE_DIR --config CONFIG.json\n\
        multi-backup-native journal resume --directory STATE_DIR --config CONFIG.json\n\
@@ -236,6 +237,20 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         accepted(&flags, &["--file"])?;
         let file = Path::new(required(&flags, "--file")?);
         println!("{}", dropbox_hash::hash_file(file)?);
+        return Ok(());
+    }
+    if family == "archive" && command == "delete" {
+        accepted(&flags, &["--root", "--archive", "--confirm"])?;
+        if password_stdin { return Err("Password input not used for local deletion".into()); }
+        let root = Path::new(required(&flags, "--root")?);
+        let file = Path::new(required(&flags, "--archive")?);
+        let confirmation = required(&flags, "--confirm")?;
+        let removed = archive_management::delete(root, file, confirmation, false)?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&removed)?);
+        } else {
+            println!("Deleted {} local files with durable audit log", removed.len());
+        }
         return Ok(());
     }
     if family != "archive" { return Err(usage().into()); }

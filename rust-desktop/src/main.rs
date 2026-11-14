@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{archive, dropbox_client, github_client, progress_rgb, remote_restore, vault};
+use multi_backup_core::{archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, vault};
 use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver},
@@ -59,6 +59,7 @@ struct Fields {
     max_runs: String,
     remote_repo: String,
     remote_file: String,
+    delete_confirm: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -430,6 +431,25 @@ impl NativeApp {
         if ui.button("Verifica / Ripristina archivio selezionato").clicked() {
             self.page = Page::Restore;
         }
+        ui.separator();
+        ui.label("Per cancellare un archivio locale digita il filename esatto:");
+        ui.text_edit_singleline(&mut self.fields.delete_confirm);
+        if ui.add_enabled(!self.active, egui::Button::new("Cancella backup selezionato"))
+            .clicked() {
+            let target = PathBuf::from(&self.fields.selected_archive);
+            match archive_management::delete(
+                Path::new(&self.fields.output), &target,
+                &self.fields.delete_confirm, self.active) {
+                Ok(removed) => {
+                    self.status = format!("Eliminati {} file locali; audit registrato", removed.len());
+                    self.fields.delete_confirm.clear();
+                    self.fields.selected_archive.clear();
+                    self.rescan();
+                }
+                Err(error) => self.status = format!("Cancellazione rifiutata: {error}"),
+            }
+        }
+        ui.label(RichText::new(&self.status).color(INK));
     }
     fn restore(&mut self, ui: &mut egui::Ui) {
         ui.heading("Ripristino cifrato");

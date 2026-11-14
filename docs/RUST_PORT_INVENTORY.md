@@ -5,7 +5,7 @@ Goal: a fully compiled, independently usable Rust app that preserves all 0.1.0 e
 | Functional area | Rust state | Still required for full release |
 |---|---|---|
 | Progress gradient, CI backfill admission | Operational native ABI | Keep parity tests |
-| Streaming age-encrypted tar/gzip archive operations | Native create, list, verify, atomic safe extraction; routed for installed Mac/Windows browse/new extraction | Live large-file and all-platform recovery |
+| Streaming age-encrypted tar/gzip archive operations | Native create/list/verify/atomic extraction plus audited local delete with typed confirmation; Mac/Windows browse/restore routing | Live large-file and all-platform recovery |
 | Protected vault v1 (scrypt/AES-256-GCM) | Native create, authenticate, export/import recovery, password change | Full Keychain/Touch ID/damaged-vault recovery and rollout certification |
 | Dropbox 4-MiB content hash | Native streaming kernel actively used in packaged plugin | Provider transport still Python |
 | Backup cycle checkpoints | Native read-only schema-1 audit | Implement mutation, restart/resume, atomic journal, locking |

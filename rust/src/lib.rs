@@ -5,6 +5,7 @@
 //! This Rust module intentionally does not open or modify existing archives.
 
 pub mod archive;
+pub mod archive_management;
 pub mod checkpoint_audit;
 pub mod journal;
 pub mod remote_restore;
