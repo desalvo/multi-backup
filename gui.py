@@ -250,7 +250,7 @@ class BackupGUI(tk.Tk):
                       'Build: '+BUILD):
             tk.Label(foot,text=value,font=('Helvetica Neue',9),
                      fg='#B4CAE4',bg=SIDEBAR_BG).pack(anchor='center',pady=0)
-        PremiumButton(foot,text='ⓘ  About Multi Backup',style='Dark.TButton',
+        PremiumButton(foot,text='About Multi Backup',style='Dark.TButton',
                       command=self._show_about,width=210,height=34).pack(
                       anchor='center',pady=(9,0))
         try:
@@ -278,7 +278,7 @@ class BackupGUI(tk.Tk):
         self.menu_button=PremiumButton(toolbar,text='Hide navigation',style='Dark.TButton',
                                        command=self._toggle_sidebar)
         self.menu_button.pack(side='left')
-        PremiumButton(toolbar,text='ⓘ  About',style='Dark.TButton',
+        PremiumButton(toolbar,text='About',style='Dark.TButton',
                       command=self._show_about,width=115,height=36).pack(
                       side='right',padx=(12,0))
         tk.Label(toolbar,text='SPAZIO BACKUP PROTETTO',bg='#0D1A3D',
