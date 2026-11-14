@@ -1,6 +1,6 @@
 # Multi Backup development status
 
-**Last existing working release:** 0.1.0-r018-rc1 (Python/Tk); **main development baseline:** Rust-native r037 preview  
+**Last published working release:** 0.1.0-r018-rc1 (Python/Tk); **main baseline:** Rust r037; **active branch:** Rust r038 functional plugin executor  
 **Repository:** https://github.com/desalvo/multi-backup  
 **Baseline:** migrated from desalvo/github-backup 0.1.0-r001; new project namespace and plugin architecture.
 
@@ -562,3 +562,13 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - The merge commit deliberately omits `[full-ci]` and does not request public early release or stable publication. The previous working r018 early-release assets must remain available, and experimental server/plugin/mount features must remain opt-in, not advertised production-ready.
 - The next main-branch CI for this integration/documentation snapshot must be observed independently; the green premerge PR is not proof that follow-up commits passed.
 - **Remaining RC acceptance:** real authenticated GitHub+Dropbox backups/restores (CI/LFS and interruptions), installed native GUI/user visual and access checks, legacy migration recovery, Apple Developer ID/notarization, Windows Authenticode/RPM signatures, update/rollback, mounted WebDAV server hardening, scheduler and protected GC certification, live provider plugin adapters and independent security assessment. No stable tag or promoted Docker image is authorized on these results alone.
+
+
+## r038 — Rust-first development decision and plugin runtime (2026-11-14)
+
+- By explicit user decision, historical Python archive migration/byte parity is **optional** and no longer a blocking RC gate. Existing archives, keys and converters are retained, never silently deleted. Functional backup/restore and user-visible behavior remain mandatory.
+- Versioned native GUI/CLI previews as r038 and replaced Python archive-wire compatibility in Production Gate with real Rust binary plugin restore acceptance; Mac, Windows and Debian package jobs also exercise the test.
+- New `rust/src/plugin_executor.rs` implements executable POSIX→POSIX age-encrypted chunk backup and fresh-directory verified restore, including source/store containment checks, refusal to archive private identity files, integrity verification and no overwrite.
+- Four additional **Linux-only read-only mounted source previews**: NFSv3/v4, SMB/CIFS, SSHFS/FUSE and GPFS CES NFS/SMB. Exact read-only mount evidence and an operator snapshot-attestation flag are required; neither is proof of vendor snapshot/ACL consistency, and no remote target writes are enabled.
+- Rust generic plugin preview backup pairs: **5**; certified generic backup pairs: **0/682**. Static catalog: 32 plugins/53 backup roles unchanged. Dedicated Rust GitHub and Dropbox provider paths still need common-plugin integration and real account E2E.
+- **Still open:** PR #10 full green CI, native GUI settings parity, GitHub/Dropbox live recovery and resume, real mounted filesystem recovery, protected garbage collection/scheduler, full OS installed-app qualification, signing and update/rollback. Do not claim final migration or stable release yet.
