@@ -14,7 +14,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
-       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
+       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--top-namespace PATH]\n\
+       multi-backup-native storage retention-preview --root DIR --identity IDENTITY [--days 30] [--keep-last 1] [--json]\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
        multi-backup-native storage protect-backup --root DIR --identity IDENTITY --id HASH\n\
@@ -194,7 +195,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("Initialized immutable age/Zstandard storage; legacy archives untouched");
             }
             "backup" => {
-                accepted(&flags, &["--root","--identity","--label","--sources-json"])?;
+                accepted(&flags, &["--root","--identity","--label","--sources-json","--top-namespace"])?;
                 let identity = Path::new(required(&flags, "--identity")?);
                 let store = chunk_store::Store::open(root, identity)?;
                 let sources_file = std::fs::File::open(required(&flags, "--sources-json")?)?;
@@ -207,7 +208,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         namespace: namespace.to_owned(), directory: path.into(),
                     })
                 }).collect::<Result<_,_>>()?;
-                let snapshot = store.backup(identity, required(&flags,"--label")?, &sources)?;
+                let snapshot = store.backup_in_namespace(identity, required(&flags,"--label")?,
+                    flags.get("--top-namespace").copied().unwrap_or(""), &sources)?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             }
             "list" => {
@@ -230,6 +232,20 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             backup.id,backup.label,backup.entries.len());
                     }
                 }
+            }
+            "retention-preview" => {
+                accepted(&flags,&["--root","--identity","--days","--keep-last"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let policy=multi_backup_core::backup_policy::Retention {
+                    days:flags.get("--days").copied().unwrap_or("30").parse()?,
+                    keep_last_verified:flags.get("--keep-last").copied().unwrap_or("1").parse()?,
+                    immutable_retention_enforced:true,
+                };
+                let now=std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                let preview=chunk_store::Store::open(root,key)?
+                    .preview_retention(key,&policy,now)?;
+                println!("{}",serde_json::to_string_pretty(&preview)?);
             }
             "protect-backup" => {
                 accepted(&flags,&["--root","--identity","--id"])?;

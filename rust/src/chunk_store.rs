@@ -23,6 +23,12 @@ pub struct LogicalBackup {
     /// trust the stored manifest itself to authorize deletion.
     #[serde(default, skip_serializing)]
     pub protected: bool,
+    /// Missing in pre-r037 manifests; unknown legacy age is never expired.
+    #[serde(default)]
+    pub created_unix: u64,
+    /// Optional nested namespace at the logical backup level.
+    #[serde(default)]
+    pub top_namespace: String,
 }
 #[derive(Serialize, Deserialize)]
 struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: String }
@@ -182,16 +188,22 @@ impl Store {
     }
     /// A single manifest covers ALL GitHub/CI/metadata/Dropbox virtual namespaces.
     pub fn backup(&self, identity: &Path, label: &str, sources: &[Source]) -> Res<LogicalBackup> {
+        self.backup_in_namespace(identity,label,"",sources)
+    }
+    pub fn backup_in_namespace(&self,identity:&Path,label:&str,
+                               top_namespace:&str,sources:&[Source])
+        ->Res<LogicalBackup> {
+        if !top_namespace.is_empty() && !crate::backup_policy::safe_namespace(top_namespace) {
+            return Err("Unsafe top namespace".into());
+        }
         if label.len() > 256 || sources.is_empty() { return Err("Invalid label/sources".into()); }
         let lock = OpenOptions::new().create(true).write(true).open(self.root.join(".lock"))?;
         fs2::FileExt::lock_exclusive(&lock)?;
         let mut entries = Vec::new();
         let mut visited = HashSet::new();
         for src in sources {
-            if src.namespace.is_empty() || src.namespace.len() > 80 ||
-                !src.namespace.bytes().all(|b|
-                   b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
-                return Err("Unsafe namespace".into());
+            if !crate::backup_policy::safe_namespace(&src.namespace) {
+                return Err("Unsafe source namespace".into());
             }
             if !fs::symlink_metadata(&src.directory)?.file_type().is_dir() {
                 return Err("Source must be a directory, not symlink".into());
@@ -207,7 +219,9 @@ impl Store {
                         components.push(name.to_str().ok_or("Non UTF-8 path")?.to_string());
                     } else { return Err("Unsafe relative component".into()); }
                 }
-                let vpath = format!("{}/{}", src.namespace, components.join("/"));
+                let relative_path=format!("{}/{}",src.namespace,components.join("/"));
+                let vpath=if top_namespace.is_empty(){relative_path}
+                    else{format!("{top_namespace}/{relative_path}")};
                 if !safe_path(&vpath) || !visited.insert(vpath.clone()) {
                     return Err("Unsafe/duplicate logical file".into());
                 }
@@ -228,7 +242,10 @@ impl Store {
         let mut random = [0u8;32];
         rand::rngs::OsRng.fill_bytes(&mut random);
         let snapshot = LogicalBackup {version: 1, id: hex::encode(random),
-            label: label.to_owned(), entries, protected:false};
+            label: label.to_owned(), entries, protected:false,
+            created_unix:std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).map_or(0,|v|v.as_secs()),
+            top_namespace:top_namespace.to_owned()};
         let encrypted = age(&serde_json::to_vec(&snapshot)?, Some(&self.cfg.recipient), None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
@@ -245,6 +262,10 @@ impl Store {
         let data = age(&fs::read(path)?, None, Some(identity))?;
         let mut value: LogicalBackup = serde_json::from_slice(&data)?;
         if value.version != 1 || value.id != id { return Err("Manifest identity mismatch".into()); }
+        if !value.top_namespace.is_empty() &&
+           !crate::backup_policy::safe_namespace(&value.top_namespace) {
+            return Err("Invalid manifest top namespace".into());
+        }
         value.protected = self.is_backup_protected(identity,id)?;
         let mut names = HashSet::new();
         for item in &value.entries {
@@ -632,7 +653,8 @@ impl Store {
         entries.sort_by(|a,b|a.path.cmp(&b.path));
         let mut nonce=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut nonce);
         let snapshot=LogicalBackup{version:1,id:hex::encode(nonce),
-            label:label.to_string(),entries,protected:false};
+            label:label.to_string(),entries,protected:false,
+            created_unix:0,top_namespace:String::new()};
         let encrypted=age(&serde_json::to_vec(&snapshot)?,
             Some(&self.cfg.recipient),None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)? {
@@ -883,5 +905,30 @@ impl Store {
         fs::remove_file(manifest)?;
         fs2::FileExt::unlock(&lock)?;
         Ok(())
+    }
+}
+
+
+/// Read-only, conservative retention preview: decrypt and verify *every*
+/// logical snapshot. Old snapshots lack timestamps and remain preserved.
+/// Explicit user protection is always taken from the encrypted live marker,
+/// not from a caller-provided JSON flag. No deletion or GC occurs here.
+impl Store {
+    pub fn preview_retention(&self,identity:&Path,
+                             policy:&crate::backup_policy::Retention,now:u64)
+        ->Res<crate::backup_policy::ExpiryPreview>{
+        let backups=self.list(identity)?;
+        let mut records=Vec::with_capacity(backups.len());
+        for b in backups {
+            let namespace=if b.top_namespace.is_empty(){"default".to_string()}
+                          else{b.top_namespace};
+            let verified=self.verify(identity,&b.id)?.healthy;
+            records.push(crate::backup_policy::BackupStamp{
+                id:b.id,namespace,created_unix:b.created_unix,
+                verified,protected:b.protected,pinned:false,
+                legal_hold:false,immutable_until:None,
+            });
+        }
+        Ok(crate::backup_policy::expiry_preview(&records,policy,now)?)
     }
 }

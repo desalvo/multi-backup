@@ -280,3 +280,34 @@ fn protected_marker_corruption_or_missing_confirmation_fails_closed(){
     assert!(store.delete_backup(&key,&backup.id,&backup.id).is_err());
     assert!(store.load(&key,&backup.id).is_err());
 }
+
+
+#[test]
+fn nested_top_namespace_and_authenticated_expiration_respect_backup_hold(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(tmp.path()) else{return};
+    let root=tmp.path().join("nested-store");
+    let dir=tmp.path().join("inputs");
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("config.txt"),b"config snapshot").unwrap();
+    Store::init(&root,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&root,&key).unwrap();
+    let sources=[Source{namespace:"kubernetes/config".into(),directory:dir}];
+    assert!(store.backup_in_namespace(&key,"bad","../secret",&sources).is_err());
+    let held=store.backup_in_namespace(&key,"live","Roma1/Cluster/A",
+                                        &sources).unwrap();
+    assert_eq!(held.top_namespace,"Roma1/Cluster/A");
+    assert!(held.created_unix>0);
+    assert_eq!(held.entries[0].path,
+        "Roma1/Cluster/A/kubernetes/config/config.txt");
+    store.protect_backup(&key,&held.id).unwrap();
+    let default=multi_backup_core::backup_policy::Retention::default();
+    let future=held.created_unix+31*86400;
+    let check=store.preview_retention(&key,&default,future).unwrap();
+    assert!(check.expire.is_empty());
+    assert_eq!(check.preserve[&held.id],"explicit_backup_protection");
+    let recovered=tmp.path().join("recovered");
+    store.restore(&key,&held.id,None,&recovered).unwrap();
+    assert_eq!(fs::read(recovered.join(&held.entries[0].path)).unwrap(),
+               b"config snapshot");
+}

@@ -72,6 +72,7 @@ struct Fields {
     chunk_metadata: String,
     chunk_dropbox: String,
     chunk_label: String,
+    chunk_top_namespace: String,
     chunk_selection: String,
     chunk_legacy_json: String,
     chunk_volume_mib: String,
@@ -942,6 +943,7 @@ impl NativeApp {
         let recipient=self.fields.recipient.trim().to_string();
         let destination=self.fields.chunk_destination.trim().to_string();
         let label=self.fields.chunk_label.trim().to_string();
+        let top_namespace=self.fields.chunk_top_namespace.trim().to_string();
         let selection=self.fields.chunk_selection.clone();
         let legacy=self.fields.chunk_legacy_json.clone();
         let volume=self.fields.chunk_volume_mib.clone();
@@ -990,7 +992,8 @@ impl NativeApp {
                                 directory:PathBuf::from(path.trim())
                             }).collect();
                         if input.is_empty(){return Err("Nessuna directory fonte selezionata".into());}
-                        let b=store.backup(key,&label,&input).map_err(|e|e.to_string())?;
+                        let b=store.backup_in_namespace(key,&label,&top_namespace,&input)
+                            .map_err(|e|e.to_string())?;
                         format!("Creato un solo backup logico {} con {} file",
                             b.id,b.entries.len())
                     },
@@ -1098,6 +1101,8 @@ impl NativeApp {
         ui.separator();
         ui.label("Etichetta del backup logico completo");
         ui.text_edit_singleline(&mut self.fields.chunk_label);
+        ui.label("Namespace superiore (opzionale; può contenere cartelle annidate: Roma1/Cluster/VM)");
+        ui.text_edit_singleline(&mut self.fields.chunk_top_namespace);
         ui.label("Directory Git (opzionale; preparata dal motore/provider)");
         ui.text_edit_singleline(&mut self.fields.chunk_git);
         ui.label("Directory CI / Actions (opzionale)");
@@ -1114,9 +1119,11 @@ impl NativeApp {
         egui::ScrollArea::vertical().max_height(300.0).show(ui,|ui|{
             for backup in backup_list {
                 let selected=self.chunk_selected==backup.id;
-                let name=format!("{} {} ({} file) · {}",
+                let name=format!("{} {} [{}] ({} file) · {}",
                     if backup.protected {"🔒 PROTETTO"} else {"◯"},
-                    backup.label,backup.entries.len(),&backup.id[..12]);
+                    backup.label,
+                    if backup.top_namespace.is_empty() {"/"}else{&backup.top_namespace},
+                    backup.entries.len(),&backup.id[..12]);
                 if ui.selectable_label(selected,name).clicked() {
                     self.chunk_selected=backup.id.clone();
                 }
