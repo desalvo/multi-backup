@@ -181,16 +181,24 @@ pub fn stage(info: &ReleaseInfo, folder: &Path) -> UpdateResult<PathBuf> {
     }
     let agent=agent();
     let mut url=checked_url(&asset.download_url)?;
+    let mut redirects=0u8;
     let response=loop {
         let result=agent.get(url.as_str()).set("User-Agent","MultiBackupRust/0.1.0").call();
         match result {
+            Ok(reply) if (300..400).contains(&reply.status()) => {
+                if redirects >= 5 { return Err(err("Update redirect limit exceeded")); }
+                redirects += 1;
+                let next=reply.header("Location")
+                    .ok_or_else(||err("Update redirect location missing"))?;
+                url=checked_url(next)?;
+            },
             Ok(reply) => break reply,
             Err(ureq::Error::Status(status,reply)) if (300..400).contains(&status) => {
-                let redirect=reply.header("Location").ok_or_else(||err("Unsigned redirect lacks location"))?;
-                let next=checked_url(redirect)?;
-                url=next;
-                // No more than 5 redirects, avoiding public CDN loops.
-                // Counted by the dedicated vector of seen locations below.
+                if redirects >= 5 { return Err(err("Update redirect limit exceeded")); }
+                redirects += 1;
+                let next=reply.header("Location")
+                    .ok_or_else(||err("Update redirect location missing"))?;
+                url=checked_url(next)?;
             },
             Err(error) => return Err(Box::new(error)),
         }
