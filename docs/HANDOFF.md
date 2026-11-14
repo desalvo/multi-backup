@@ -521,3 +521,9 @@ authorize destination access. Signed stable release remains blocked.
 - Documentation in older milestones and PDF screenshots reflects r018 Python/Tk; `scripts/build-publications.py` now produces four r038-specific *development-preview* chapters in each bilingual manual. After CI, verify PDFs really contain new text and re-render correctly. Brochures describe earlier delivery and must not claim r038 certification.
 - Current branch PR #10, not merged. Published r018 preserved. Old Python format migration optional. New Rust end-to-end recovery and safe storage lifecycle are mandatory.
 - Do not confuse metadata-only purge with later physical GC. Mixed live/dead 8+2 parity stripe repack and actual authenticated cross-user multi-object restore remain unimplemented. Check latest PR CI, fix regressions, certify independent real data restores and operating-system signatures before merge/release.
+
+## r038 — Handoff aggiornato dopo audit documentale
+
+PR #10 branch feature/r038-rust-primary-plugin-executor. Documenti autorevoli: docs/DOCUMENTATION_INDEX_R038.md, docs/FEATURE_INVENTORY_R038.md, docs/OPERATIONS_R038_IT.md, docs/OPERATIONS_R038_EN.md; sempre aggiornare anche DEVELOPMENT_STATUS.md, RC_CERTIFICATION_MATRIX.md e documenti tecnici. scripts/check-documentation-consistency.py è il gate automatico. Il generatore PDF include appendice Rust e avvisa che screenshot Tk r018 sono storici.
+
+Repack automatico 8+2 nella GC: parità nuova creata e verificata, indice autenticato supersedes pubblicato ultimo, vecchia stripe conservata durante grace del successore. I frammenti preparati senza commit vengono considerati orfani dopo grace. GC preview non modifica. Il purge conserva chunk e parità; protezioni sui discendenti bloccano riscritture implicite. Non dichiarare certificato senza CI dell'ultimo SHA, power-loss fault injection, restore su dati reali, installer firmati e rollback. Compatibilità degli archivi Python facoltativa, non bloccante.
