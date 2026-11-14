@@ -9,7 +9,7 @@ be editable in the desktop/server settings with durable saved state.
 | Backup schedule | Disabled until explicitly enabled; configurable per-job interval | Native `schedule run` (manual/cron/launchd/Task Scheduler) and Rust `schedule daemon` added in r038; live provider/service qualification pending |
 | Backup retention | 30 days; keep at least one verified backup per namespace | `expiry_preview` and authenticated `storage retention-preview`; deletion job not wired |
 | Explicit protection | Off until user protects a backup | Protected logical chunk-store and local legacy archives, UI/CLI and confirmation, E2E unit tests |
-| Garbage collection | Execution manual with explicit confirmation; 48-hour orphan grace | Native local POSIX mark-and-sweep preview/run implemented in r038, preserving live parity and protection; mixed-stripe repack and remote GC not yet qualified |
+| Garbage collection | Execution manual with explicit confirmation; 48-hour orphan grace | Native local POSIX mark-and-sweep preview/run implemented in r038, preserving live parity and protection; automatic repack in Rust preview; remote GC and power-loss verification unqualified |
 | Namespace | Optional nested path, e.g. `Projects/Lab/Cluster` | Manifest field + CLI/GUI for new native chunk-store backups; filesystem index in-memory prototype |
 | Destination capacity | Used/available/total for a specific destination | `mounted_capacity` for POSIX/mounted NFS/CIFS/GPFS/SSHFS/etc.; cloud-specific provider APIs not wired |
 | Consistency | DB live; VM live with quiesce/snapshot; CT live where supported | Read-only `plan_consistency` only; hypervisor/database workflows not yet run |
@@ -103,3 +103,8 @@ unattended production retention/GC service. Acceptance tests include chain
 promotion, protected-dependency refusal, no physical deletion at purge,
 grace-period gating, orphan parity deletion, and preservation of mixed
 live/dead parity protection.
+## r038 — Repack automatico durante GC
+
+Lo stato storico in tabella è aggiornato: il repack automatico delle stripe miste 8+2 è implementato in Rust preview durante gc-collect confermato. L'azione crea e verifica nuova parità age cifrata, pubblica l'indice sostitutivo come ultimo commit e conserva la vecchia stripe finché il sostituto non ha raggiunto il grace period (48 ore per default, minimo 24). Una passata successiva della GC può rimuovere la vecchia stripe, i chunk orfani e le preparazioni di parità rimaste prive di indice. gc-preview è di sola lettura.
+
+Il report espone mixed_stripes_to_repack, repacked_stripes, orphan_parity_directories, deleted_orphan_parity_directories, blocked_chunks_by_shared_parity e reclaimed_bytes. La GC resta una operazione manuale con conferma ERASE-ORPHANS: lo scheduler Rust gestisce backup e verify, NON ancora GC automatica a intervalli. Restano da qualificare power-loss, multiwriter e GC remota. Procedure bilingue: [IT](OPERATIONS_R038_IT.md) / [EN](OPERATIONS_R038_EN.md).
