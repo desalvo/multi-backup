@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r018-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+**Multi Backup `0.1.0-r018-rc1`** is the last published Python/Tk compatibility build. **Rust-native `0.1.0-r038`** is the active development preview, not yet a certified public RC. License: **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -280,3 +280,21 @@ GitHub CI rejects plaintext/private artifacts under docs/private. The
 operator chooses the PDF password locally; no password is sent to CI or
 ChatGPT. No encrypted final PDF can be committed until the operator has
 created and validated it with their chosen password.
+
+
+## Rust native r038 — real plugin execution preview
+
+The release focus is the compiled Rust GUI/CLI and functionally tested **new** backups. Old Python-created archive byte compatibility is optional, not an RC blocker; no old data or keys are automatically deleted.
+
+The common Rust executor implements POSIX → encrypted POSIX chunk storage and verified restore into a **new** directory. On Linux, read-only **NFS, SMB/CIFS, SSHFS and GPFS CES** mounts can be experimental input sources to the POSIX encrypted store. These require the *exact* read-only mount and an explicit snapshot-attestation flag. The operator's attestation cannot prove backend snapshot or metadata consistency; production qualification remains open.
+
+```bash
+age-keygen -o /private/keys/backup-age.txt
+multi-backup-native storage init --root /private/backup-store --recipient age1PUBLIC_KEY
+multi-backup-native plugins backup --input posix --output posix --source /home/user/data --root /private/backup-store --identity /private/keys/backup-age.txt --label "Native backup" --json
+multi-backup-native plugins restore --input posix --output posix --root /private/backup-store --identity /private/keys/backup-age.txt --id BACKUP_ID --destination /home/user/new-restore
+# On Linux, for a separately prepared read-only NFS snapshot source:
+multi-backup-native plugins backup --input nfs --output posix --source /mnt/nfs-snapshot --source-snapshot-attested --root /private/backup-store --identity /private/keys/backup-age.txt --label "NFS snapshot"
+```
+
+For GPFS CES use `--input gpfs --input-gpfs-access ces-nfs|ces-smb`. No remote mounts, proprietary clients, overwrite or automatic remote deletion are performed. See [plugin architecture](docs/PLUGIN_API.md) and [RC gates](docs/RC_CERTIFICATION_MATRIX.md).
