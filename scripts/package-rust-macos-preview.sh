@@ -13,7 +13,7 @@ GUI="rust-desktop/target/release/multi-backup-desktop"
 test -x "$CLI" && test -x "$GUI"
 "$CLI" --version
 "$GUI" --self-test
-APP="dist-rust/Multi Backup.app"
+APP="dist-rust/Multi Backup Rust Preview.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "dist-rust"
 install -m 755 "$GUI" "$APP/Contents/MacOS/Multi Backup"
@@ -46,7 +46,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Multi Backup</string>
+  <key>CFBundleName</key><string>Multi Backup Rust Preview</string>
   <key>CFBundleDisplayName</key><string>Multi Backup Rust Preview</string>
   <key>CFBundleIdentifier</key><string>net.adsnet.multibackup.rust-preview</string>
   <key>CFBundleExecutable</key><string>Multi Backup</string>
@@ -71,9 +71,9 @@ MOUNT="$(mktemp -d -t multi-backup-rust-mount.XXXXXXXX)"
 hdiutil attach -quiet -nobrowse -mountpoint "$MOUNT" "$DMG"
 cleanup() { hdiutil detach -quiet "$MOUNT" || true; rmdir "$MOUNT" || true; }
 trap cleanup EXIT
-test -d "$MOUNT/Multi Backup.app"
+test -d "$MOUNT/Multi Backup Rust Preview.app"
 test "$(find "$MOUNT" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1
-"$MOUNT/Multi Backup.app/Contents/MacOS/Multi Backup" --self-test
-codesign --verify --deep --strict "$MOUNT/Multi Backup.app"
+"$MOUNT/Multi Backup Rust Preview.app/Contents/MacOS/Multi Backup" --self-test
+codesign --verify --deep --strict "$MOUNT/Multi Backup Rust Preview.app"
 shasum -a 256 "$DMG" > "$DMG.sha256"
 echo "Rust-only native $ARCH DMG preview verified."
