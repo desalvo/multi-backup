@@ -298,3 +298,9 @@ is explicitly optional and no longer a promotion gate.
 Per ogni plugin autenticato l'identità dell'account sorgente è sola provenienza: il restore verso altro utente richiede autorizzazione indipendente dell'account di destinazione. GitHub crea un nuovo repository su un proprietario target autorizzato; Dropbox verifica l'account del token WRITE per il nuovo file. I restore remoti parziali generici e le combinazioni cloud-to-cloud NON sono certificati.
 
 La destinazione POSIX Rust supporta FULL/INCREMENTAL, purge con rebase, verifica catena completa e GC separata con repack automatico 8+2. Non implica che gli altri plugin catalogati siano adapter eseguibili. Leggere [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md) e [OPERATIONS_R038_EN.md](OPERATIONS_R038_EN.md).
+
+## r039 — Common source transport & cluster contract
+
+Every plugin input can declare server_local, ssh_agentless, managed_agent_pull or managed_agent_push plus ExecutionLimits. This declares a source preparation/dispatch mode, NOT an executable adapter. For AFS a volume-specific vos dump local or pinned SSH plan and managed-agent preview exist; the generic server replica worker currently executes only server_local POSIX/NFS/SMB/SSHFS/GPFS CES filesystem input.
+
+Budget fields: max_concurrent_jobs, threads_per_job, max_transfer_bytes_per_sec, max_host_cpu_percent, max_host_memory_percent, min_free_memory_bytes. Pull and autonomous push must apply stricter server/agent limits. Single-volume AFS dumps cannot be split into threads; concurrent independent volumes may execute on different eligible nodes. Node_local storage is assigned only to its registered owner replica; truly shared storage may be scheduled across eligible replicas with PG-backed leases. Writes after lost lease are not yet fenced and thus not certified. Procedure in [cluster r039 EN](CLUSTER_ORCHESTRATION_R039_EN.md).

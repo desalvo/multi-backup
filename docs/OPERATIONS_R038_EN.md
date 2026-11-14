@@ -160,3 +160,7 @@ Implemented in Rust preview: compiled CLI/GUI, age+zstd/HMAC chunk store, 8+2 pa
 **Not yet certified:** real-account GitHub/Dropbox full recoveries including LFS/CI metadata, partial cross-account restore, crash/power-failure-safe transaction drills, multigeneration parity repack under fault injection, native GUI scheduling, production GC/WORM, signed/notarized installers, real OS updates/rollback, independent security assessment. The current PR #10 must pass its own CI; the earlier green r037 run does not qualify r038.
 
 See [CHUNK_STORAGE_V1.md](CHUNK_STORAGE_V1.md), [MAINTENANCE_POLICY.md](MAINTENANCE_POLICY.md), [PLUGIN_API.md](PLUGIN_API.md), [RC_CERTIFICATION_MATRIX.md](RC_CERTIFICATION_MATRIX.md), and [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
+
+## Later r039 update — native agents and Kubernetes (15 November 2026)
+
+This document remains the core Rust r038 operations manual. New AFS agents, concurrency/transfer/host resource limits, PostgreSQL multi-replica orchestration and storage-locality rules are documented in [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHESTRATION_R039_EN.md) and [AGENTS_AFS_R039_EN.md](AGENTS_AFS_R039_EN.md). The native r039 agent installers and cluster behavior are still previews subject to independent qualification.

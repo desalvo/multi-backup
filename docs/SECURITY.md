@@ -67,3 +67,9 @@ offline. Never share the PDF password in chat, commits, CLI arguments or CI.
 
 Le credenziali del proprietario originale sono soltanto provenienza, non autorizzazione a scrivere nel nuovo account. Il restore GitHub verifica lo slug del nuovo owner e richiede gh autorizzato; Dropbox può verificare l'account del token WRITE della destinazione. Il purge modifica solo manifest cifrati e blocca successori protetti. La GC esamina tutti i backup sotto lock, esegue automaticamente il repack delle stripe 8+2 miste preparando e verificando nuovi shard prima del commit dell'indice autenticato, conserva la vecchia parità fino al grace del successore e rimuove soltanto ciphertext orfano dopo conferma. Non è WORM indipendente; restano da certificare crash, multiwriter e comportamento remoto.
 
+
+## r039 — Agent/cluster and resource security boundaries
+
+Agent ID, user, server-issued high-entropy token and Ed25519 device key require explicit server administrator approval. Proof includes timestamp, monotonic nonce, method/path, ciphertext digest and metadata digest. PostgreSQL stores approval/revocation, token digest and unique replay nonces, supports concurrent agent requests. Agent API is isolated from browser sessions and requires HTTPS proxy attestation injected by a trusted ingress; direct HTTP Pod access is prohibited. Cluster PG requires sslmode=verify-full, and stores shared login sessions and lease assignments.
+
+CPU/RAM policies are cooperative admission/stream checks and NOT hard cgroup/Windows Job Object limits; SSH target remote host load cannot be proven by a local probe. Queue lease tokens protect assignment/result updates but do not yet fence all encrypted object writes after lease loss. Agent push/pull and cross-pod storage use only true shared storage after explicit registration. These gaps require security and multi-node failure drills before RC. [Agent guide](AGENTS_AFS_R039_EN.md), [cluster guide](CLUSTER_ORCHESTRATION_R039_EN.md).

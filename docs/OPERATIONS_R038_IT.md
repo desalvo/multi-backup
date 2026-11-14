@@ -189,3 +189,7 @@ L'esempio di variabile d'ambiente è illustrativo: evitare di inserire token nel
 - **CI di questa PR:** controllare l'ultimo SHA della PR #10 e le prove di ripristino prima di un merge. Non usare il verde della vecchia PR #9 come prova delle modifiche r038.
 
 Per i dettagli ingegneristici e i gate: [CHUNK_STORAGE_V1.md](CHUNK_STORAGE_V1.md), [MAINTENANCE_POLICY.md](MAINTENANCE_POLICY.md), [PLUGIN_MATRIX.md](PLUGIN_MATRIX.md), [RC_CERTIFICATION_MATRIX.md](RC_CERTIFICATION_MATRIX.md) e [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
+
+## Nota successiva — r039 agenti e Kubernetes (15 novembre 2026)
+
+Questa guida conserva il manuale operativo del core Rust r038. Le nuove funzioni agenti AFS, parallelizzazione su volumi, banda, policy host, server Kubernetes e storage locale/condiviso sono descritte in [CLUSTER_ORCHESTRATION_R039_IT.md](CLUSTER_ORCHESTRATION_R039_IT.md) e [AGENTS_AFS_R039_IT.md](AGENTS_AFS_R039_IT.md). Le API, il cluster e gli installer r039 sono ancora anteprime da certificare; vecchi screenshot Python/Tk non attestano il comportamento Rust.

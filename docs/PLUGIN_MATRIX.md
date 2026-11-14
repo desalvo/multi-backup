@@ -183,3 +183,7 @@ Five executable **development-preview backup pairs** now have a Rust code path: 
 
 Per ogni plugin che usa login, il restore deve poter indicare un utente di destinazione distinto da quello originale, autorizzato con credenziali proprie. Le implementazioni Rust dedicate attuali permettono un nuovo repository GitHub o un file Dropbox su un altro account, senza certificare ancora il restore parziale universale. Lo storage POSIX impiega FULL/INCREMENTAL, purge con rebase e GC con repack automatico delle parità 8+2. Questo non aumenta il numero dei plugin genericamente certificati: 0/682. Fonte [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md).
 
+
+## r039 — Cross-plugin source execution (not provider certification)
+
+Source execution options are server_local / ssh_agentless / managed_agent_pull / managed_agent_push for *all future* input plugins. The AFS plugin has typed local/pinned SSH dump plans and a bounded parallel-volume agent preview; this does not enable arbitrary plugins over SSH or scripts without explicit adapters. Generic replica execution remains limited to already implemented filesystem inputs in server_local mode. PostgreSQL storage visibility shared/node_local controls replica placement; no cloud destination writer becomes certified merely through registration. [Orchestration IT](CLUSTER_ORCHESTRATION_R039_IT.md).
