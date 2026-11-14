@@ -215,7 +215,7 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
     }
     let limits=verified.limits.clone();
     if tokio::task::spawn_blocking(move||limits.check_host()).await
-        .is_err_or(|result|result.is_err()){
+        .map_or(true,|result|result.is_err()){
         return error(StatusCode::SERVICE_UNAVAILABLE,"server_resource_threshold_reached");
     }
     let folder=match spool_directory(){
