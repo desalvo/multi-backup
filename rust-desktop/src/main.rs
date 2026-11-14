@@ -486,7 +486,7 @@ impl NativeApp {
         let pen = ui.painter_at(rect);
         pen.rect_filled(rect, 17.0, Color32::from_rgb(16, 32, 76));
         let step = (width / 16.0).max(8.0);
-        for i in 0.0.5 {
+        for i in 0..5 {
             let x = rect.left() + i as f32 * step;
             let right = rect.right() - i as f32 * step;
             for dx in [x, right - step * 0.75] {
