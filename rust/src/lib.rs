@@ -17,6 +17,7 @@ pub mod dropbox_hash;
 pub mod dropbox_client;
 pub mod github_client;
 pub mod vault;
+pub mod plugins;
 
 use std::collections::HashSet;
 

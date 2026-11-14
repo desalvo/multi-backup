@@ -297,3 +297,12 @@ is incomplete.
 - Server hardened-mode policy now rejects public origins without explicit hardened mode, and rejects identical private gateway and recovery secrets. Local development remains allowed only at `http://127.0.0.1:8080` without hardened mode.
 - Added black-box running Docker image gateway checks after image build: health probe, missing/wrong/correct gateway token, authentication requirement, and denial of recovery without a user session. No deployment passwords are used.
 - CI result for this **new** commit must be checked; a green older SHA does not certify the patch. Stable promotion, independent WORM retention, mTLS ingress, real provider restores, physical signing and live adversarial tests remain blocked.
+
+
+## r029 — universal bidirectional plugin matrix
+
+The user requires **all** inputs and outputs to be plugins, with source/destination roles swapped for restores. A static Rust registry `rust/src/plugins.rs` now declares **18 backup input providers**, **7 backup output providers**, **7 restore input providers**, and **18 restore output providers**. Full list, stable IDs, consistency models and readiness in `docs/PLUGIN_MATRIX.md` and `docs/PLUGIN_API.md`.
+
+`multi-backup-native plugins list --json` and `plugins plan --input github --output posix --mode backup --json` are **read-only metadata operations**. No generic pair is currently executable; standalone existing GitHub/Dropbox/POSIX commands are preserved. No arbitrary source loading or unverified plugin runtime. Unsupported directions deny by default. Test in `cargo test --manifest-path rust/Cargo.toml --all-targets` and newest CI before claiming green.
+
+Expanded scope makes the previous 57.5% product-wide readiness estimate outdated: **25/25 role contracts inventoried**, **0/25 generalized backup-role integrations certified**, and no new overall percentage until scope rebaseline. Never conflate documentation/catalog registration with an operational plugin. Public code/docs/manuals/releases remain in GitHub; private handoff and encrypted architecture PDF remain solely in the approved Dropbox `/ADSNET/Projects/Multi Backup/Private`.

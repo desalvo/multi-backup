@@ -110,3 +110,8 @@ an international security certification or resistance guarantee.
 - CI run 43625695818 at a10a40e8: Production Gate, OCI compilation, Mac ARM64/Intel DMGs, Windows x64 installer, Ubuntu GUI, Debian 12/13 x AMD64/ARM64 and six Rocky/Alma RPM previews all passed. No official release publishing took place from the draft PR.
 - New security delta: refuse public-origin insecure startup, reject copied gate/recovery keys, verify authentication boundary in a **running** OCI container and require this check in release policy. New CI is required before marking runtime gate verified.
 - Remaining for production: reverse-proxy removal of untrusted gateway headers, enforced private mTLS/CNI network policy, WORM Object Lock, 2-of-3 independent recovery approvals, signed audit, external provider restores and independent penetration test. Unit and container acceptance do not substitute these.
+
+
+## r029 — universal plugin acceptance extension
+
+New scope adds 18 backup input roles and 7 output roles, reversed for restore; see `docs/PLUGIN_MATRIX.md`. **None** is yet certified as a unified bidirectional generic plugin pair. Existing GitHub/Dropbox/POSIX direct Rust preview operations remain outside the generic dispatch. Every plugin must prove source consistency, inventory and metadata fidelity, verified encrypted transport, retry/resume, manifest-last atomicity, create-new restore with explicit conflict handling, least-privilege tokens and real test-service recovery. VM/CT, RBD, database/PITR and Kubernetes/CSI drivers require application-aware snapshot consistency and restore acceptance; not interchangeable with POSIX copy. Static catalog is a contract, not authorization to operate remote services or release a stable build.

@@ -387,3 +387,13 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - Server startup now fails closed on public HTTPS origins unless hardened mode is explicitly enabled; its two 256-bit gateway/recovery credentials must be present and **different**, preventing accidental privilege collapse through copied secrets.
 - Added unit regressions for remote-origin downgrade, absent credentials and reused secrets. The OCI validation job additionally starts the actual Rust server and verifies the private-gateway/login/export HTTP boundary.
 - Does not implement immutable WORM, independent key authority, mTLS, multi-person recovery approvals or real-account disaster recovery; no stable certification claim. CI on this new HEAD still requires review.
+
+
+## r029 — bidirectional input/output plugin catalogue (2026-11-14)
+
+- Added a **static Rust role/capability registry** for 18 input providers and 7 output providers, with exact inverse restore roles (7 restore input, 18 restore output). Roles cover GitHub, Dropbox, Google Drive, OneDrive, POSIX, S3 AWS/Ceph, WebDAV, NFSv3+, CIFS/Samba, CephFS, Ceph RADOS Block Device (RBD), Proxmox VE/PBS/VM/CT, Kubernetes/OpenShift/OKD, VMware, oVirt, MySQL/MariaDB, PostgreSQL, SSH/SCP/SFTP.
+- Added read-only `multi-backup-native plugins list/plan` with JSON output and strict role validation; absent/unwired adapters cannot execute or overwrite data.
+- Preserved existing direct Rust GitHub/Dropbox/FS commands and the legacy Python plugin registry. A catalog entry is not an adapter implementation.
+- Added tests for the full 18+7 matrix, inverse role mapping, unknown or unsupported roles, and fail-closed non-executable plans.
+- New public docs `docs/PLUGIN_API.md` and `docs/PLUGIN_MATRIX.md` define consistency contracts, encrypted transfer, restore confirmation, and acceptance gates. No provider credentials or private infrastructure details are committed.
+- **Progress rebaseline:** 25/25 requested plugin role definitions represented; operational generalized provider-pair certification 0/25. The old 57.5% whole-product maturity indicator is not comparable after this scope expansion; recalculate only after an audited expanded inventory, never label this scope as delivered.

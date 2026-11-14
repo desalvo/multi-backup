@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -10,6 +10,8 @@ fn usage() -> &'static str {
     "Multi Backup Rust archive CLI (EUPL-1.2)\n\
      Usage:\n\
        multi-backup-native --version\n\
+       multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
@@ -108,6 +110,47 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "plugins" {
+        if password_stdin { return Err("Plugin catalog does not accept passwords".into()); }
+        match command {
+            "list" => {
+                accepted(&flags, &["--role", "--mode"])?;
+                let mode = plugins::Mode::parse(flags.get("--mode").copied().unwrap_or("backup"))?;
+                let list = match flags.get("--role").copied() {
+                    None => plugins::CATALOG.iter().collect::<Vec<_>>(),
+                    Some("input") => plugins::catalog_for(mode, true),
+                    Some("output") => plugins::catalog_for(mode, false),
+                    _ => return Err("Role must be input or output".into()),
+                };
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                } else {
+                    for p in list {
+                        let input = p.input_stage(mode);
+                        let output = p.output_stage(mode);
+                        println!("{}\t{}\t{:?}\tinput={:?}\toutput={:?}",
+                                 p.id, p.title, p.kind, input, output);
+                    }
+                }
+            },
+            "plan" => {
+                accepted(&flags, &["--input", "--output", "--mode"])?;
+                let mode = plugins::Mode::parse(required(&flags, "--mode")?)?;
+                let item = plugins::plan(mode, required(&flags, "--input")?,
+                                         required(&flags, "--output")?)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&item)?);
+                } else {
+                    println!("{:?}: {} -> {} (input={:?}, output={:?}); executable={}",
+                             item.mode, item.source_plugin, item.destination_plugin,
+                             item.source_stage, item.destination_stage, item.executable);
+                    println!("{}", item.reason);
+                }
+            },
+            _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
     if family == "storage" {
         if password_stdin { return Err("Storage uses a separately supplied age identity".into()); }
         let root = Path::new(required(&flags, "--root")?);
