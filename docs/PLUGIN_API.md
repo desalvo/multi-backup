@@ -179,3 +179,27 @@ Licensing compatibility for *redistributed binaries* needs an independent
 review before packaging any vendor code. Multi Backup itself remains
 EUPL-1.2 and is deliberately not shipping vendor runtimes in this commit.
 All providers are `planned`, not implemented or approved for production.
+
+## r034 — GPFS via CES (NFS/SMB), SSHFS as an independent plugin
+
+GPFS uses operator-mounted open-protocol exports, not IBM native GPFS
+client code. `GpfsAccess` supports `ces-nfs` or `ces-smb`; CLI
+`plugins plan` accepts independent optional `--input-gpfs-access` and
+`--output-gpfs-access`. The licensed server exposes the share, while the
+client may use OS-maintained NFS/CIFS components without GPFS Client licensing.
+Check the actual IBM licensing agreement and CES server entitlement.
+
+SSHFS is **distinct from SSH/SFTP/SCP**. This plugin declares input/output
+via an already mounted, updated SSHFS/FUSE client supplied separately by
+the operating system. SSHFS is GPL-2.0; Multi Backup does not distribute or
+statically link this package. Enforce SSH host key pinning and do not accept
+insecure directport options or symlink traversal; remote snapshot consistency
+requires server-side support.
+
+`plugins probe --plugin gpfs|sshfs --mount DIR [--access ces-nfs|ces-smb]`
+is a new Linux read-only mount evidence endpoint; it checks
+`/proc/self/mountinfo` and exact filesystem type, redacting remote source
+details. The returned `rw_mount_option` is only a kernel flag, never proof
+of actual remote write permissions, verified identity or successful backup.
+It launches no client or mount command, accesses no user data or remote
+credentials, and does not certify a generic adapter.

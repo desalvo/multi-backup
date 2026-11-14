@@ -177,3 +177,26 @@ deletion/truncation/shortened retention despite stolen ingestion credentials.
   completion. Existing older overall RC percentage must be rebaselined.
 - No unqualified vendor adapter is enabled; latest CI must verify this
   commit before declaring the new code/test matrix green.
+
+## r034 — SSHFS and open CES GPFS client support (2026-11-14)
+
+- Added bidirectional `sshfs` provider, distinct from `ssh` (SCP/SFTP
+  transfer). Client is an independently installed, patched GNU GPL-2.0
+  SSHFS/FUSE package, not bundled into Multi Backup.
+- Switched GPFS plugin to **CES NFS/SMB profiles** `ces-nfs` and
+  `ces-smb`, using open-source distribution client tools; IBM Storage
+  Scale server/CES nodes retain their own license requirements.
+  Direct native GPFS mount via a free client is not assumed available.
+- Added Rust `mount_probe` module and read-only CLI `plugins probe`,
+  checking Linux exact pre-mounted NFS/CIFS/FUSE.SSHFS mountpoint and
+  filesystem type without mounting, file reads, authentication or writes.
+  Kernel rw flag does not prove access privileges/GPFS provenance.
+- CLI `plugins plan` now supports input/output GPFS CES protocol profiles
+  separately, with preflight for consistent snapshots, ACLs, patched SSHFS,
+  host-key pinning, symlink containment, isolated encrypted-only output.
+  All newly cataloged adapters remain `planned`.
+- Inventory **31 plugin IDs, 30 backup inputs, 22 backup outputs**, reverse
+  restore roles 22/30. Declarative contracts 52/52, certified generic
+  adapter roles 0/52, qualified provider pairs 0/660; rebaseline overall
+  completion before reporting a new product-wide percentage.
+- No change to main/stable. Production CI for this commit must complete.

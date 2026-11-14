@@ -19,7 +19,7 @@ implemented and tested before the reverse operation is enabled.
 | cephfs | Planned | Planned | CephFS snapshot, file metadata and safe writer |
 | glusterfs | Planned | Planned | Gluster distributed volume, consistency barrier/snapshot, GFID, ACL/xattr; restore via mounted volume only |
 | lustre | Planned | Planned | Lustre MDT/OST, stripe metadata and coordinated snapshot; external client |
-| gpfs | Planned | Planned | IBM Storage Scale fileset/snapshot, operator-provided license and client |
+| gpfs | Planned | Planned | IBM Storage Scale CES NFSv3/v4 or SMB3 using open-source OS clients; consistent fileset required |
 | hdfs | Planned | Planned | SWebHDFS/WebHDFS, snapshots, ACL/xattr and Kerberos |
 | afs | Planned | Planned | OpenAFS cells and VLDB volume IDs, full/incremental vos dumps, ACL and new-volume restore |
 | alfresco | Planned | Planned | Alfresco REST/CMIS document versions, types/aspects, ACL, repository metadata |
@@ -36,21 +36,19 @@ implemented and tested before the reverse operation is enabled.
 | mysql | Planned | — | MySQL/MariaDB consistency + binlog/PITR |
 | postgresql | Planned | — | pg_basebackup/WAL or logical export and PITR |
 | ssh | Planned | Planned | SSH/SCP/SFTP host verification, remote metadata |
+| sshfs | Planned | Planned | Pre-mounted SSHFS/FUSE SFTP filesystem, pinned host key, encrypted-only output |
 | anti-ransomware-vault | — | Planned | WORM/Object Lock, independent append-only ingest and recovery plane, offline credentials |
 
-**Counts (expanded scope r032):** 30 distinct plugin IDs.
-**29 backup input** and **21 backup output** roles; the reverse direction has
-21 restore input and 29 restore output roles. **50 declared backup roles**
-plus 50 mirrored restore roles = 100 directional capability declarations.
-The theoretical pairing space is 29 × 21 = **609** backup combinations and
-609 reverse restore combinations. **Zero generic pairs are certified for
-execution**; catalog registration alone does not implement remote APIs.
+**Counts (expanded scope r034):** 31 plugin IDs. **30 backup input** and
+**22 backup output** roles, mirrored by 22 restore inputs/30 restore outputs.
+There are **52 declared backup roles** and 52 reverse restore roles (104
+directional declarations). Possible pairings: 30 × 22 = **660** backup pairs,
+660 inverse restore pairs. None certified for generic execution.
 
-**Progress:** 50/50 requested backup role definitions inventoried (100% of
-catalog requirements); 0/50 generic adapters certified (0%);
-0/609 generic backup pairs certified (0%). Neither number represents the
-overall RC completion after expanding the scope. Dedicated Rust GitHub/
-Dropbox/POSIX paths remain available as separate preview commands.
+**Progress:** 52/52 declared role definitions; 0/52 generic adapters
+certified; 0/660 generic backup combinations certified. These measures
+are not comparable to the earlier overall-RC 57.5% estimate. Dedicated
+GitHub/Dropbox/POSIX native preview commands remain separate.
 
 ### LVM over iSCSI and Fibre Channel
 
@@ -144,3 +142,31 @@ All new capabilities are **Planned**, never implicitly executable. Backups
 send authenticated encrypted content to output adapters; restores require
 the inverse role and a new isolated destination. Missing privileges,
 snapshot consistency or vendor/API entitlements must stop execution.
+
+### r034 — open-source GPFS CES and SSHFS/FUSE
+
+The `gpfs` plugin's **ces-nfs** and **ces-smb** profiles require an existing
+NFSv3/v4 or SMB3 export from an IBM Storage Scale CES server. The Linux
+client can be open-source (`nfs-utils`, `cifs-utils`) with no GPFS Client
+license; the server still requires IBM's applicable Server entitlement.
+No open-source native GPFS mount client is asserted or bundled. Native
+GPFS fileset/snapshot/ILM metadata requires separate authorized capture.
+No actual GPFS source/target plugin is yet certified for backup/restore.
+
+The new independent `sshfs` plugin permits input and output roles, using
+a pre-mounted distro-provided **SSHFS (GPL-2.0) and FUSE3** client. It differs
+from streaming SSH/SFTP/SCP: file operations happen through a mounted
+filesystem, so mount liveness, strong host-key verification, containment of
+symlinks, stable file metadata and encrypted-only storage are required.
+Avoid unencrypted directport bypass. Do not bundle the GPL client inside
+the EUPL application before compatibility review.
+
+Linux read-only discovery:
+```sh
+multi-backup-native plugins probe --plugin gpfs --mount /mnt/gpfs --access ces-nfs --json
+multi-backup-native plugins probe --plugin sshfs --mount /mnt/sshfs --json
+multi-backup-native plugins plan --mode backup --input gpfs --input-gpfs-access ces-nfs --output sshfs --json
+```
+The probe verifies the exact kernel mount type, not storage ownership,
+server software, key pinning, write permissions or snapshot consistency.
+It never mounts, reads customer files or writes any data.

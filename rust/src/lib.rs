@@ -18,6 +18,7 @@ pub mod dropbox_client;
 pub mod github_client;
 pub mod vault;
 pub mod plugins;
+pub mod mount_probe;
 
 use std::collections::HashSet;
 

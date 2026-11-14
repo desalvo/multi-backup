@@ -11,7 +11,8 @@ fn usage() -> &'static str {
      Usage:\n\
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
-       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--json]\n\
+       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\\n\\
+       multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
@@ -135,15 +136,19 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             },
             "plan" => {
                 accepted(&flags, &["--input", "--output", "--mode",
-                                    "--input-lvm", "--output-lvm"])?;
+                                    "--input-lvm", "--output-lvm",
+                                    "--input-gpfs-access","--output-gpfs-access"])?;
                 let mode = plugins::Mode::parse(required(&flags, "--mode")?)?;
                 let input_lvm = flags.get("--input-lvm").map(|v|plugins::LvmMode::parse(v))
                     .transpose()?;
                 let output_lvm = flags.get("--output-lvm").map(|v|plugins::LvmMode::parse(v))
                     .transpose()?;
-                let item = plugins::plan_lvm(mode, required(&flags, "--input")?,
-                                              required(&flags, "--output")?,
-                                              input_lvm, output_lvm)?;
+                let gpfs_in=flags.get("--input-gpfs-access")
+                    .map(|v|plugins::GpfsAccess::parse(v)).transpose()?;
+                let gpfs_out=flags.get("--output-gpfs-access")
+                    .map(|v|plugins::GpfsAccess::parse(v)).transpose()?;
+                let item = plugins::plan_profiles(mode, required(&flags,"--input")?,
+                    required(&flags,"--output")?,input_lvm,output_lvm,gpfs_in,gpfs_out)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&item)?);
                 } else {
@@ -155,6 +160,18 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         println!("preflight: {check}");
                     }
                 }
+            },
+            "probe" => {
+                accepted(&flags, &["--plugin","--mount","--access"])?;
+                let plugin=required(&flags,"--plugin")?;
+                let access=flags.get("--access")
+                    .map(|v|plugins::GpfsAccess::parse(v)).transpose()?;
+                let mount=Path::new(required(&flags,"--mount")?);
+                let evidence=multi_backup_core::mount_probe::probe(plugin,mount,access)?;
+                if json {println!("{}",serde_json::to_string_pretty(&evidence)?);}
+                else {println!("{} {} fs={} rw_flag={} (read-only probe)",
+                    evidence.plugin,evidence.mountpoint,evidence.fs_type,
+                    evidence.rw_mount_option);}
             },
             _ => return Err(usage().into()),
         }
