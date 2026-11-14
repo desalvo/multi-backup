@@ -15,6 +15,9 @@ for src in LICENSE packaging/linux/multi-backup-rust.desktop assets/icon-256.png
 done
 command -v cargo >/dev/null
 cargo test --manifest-path rust/Cargo.toml --lib
+# On each Debian 12/13 AMD64/ARM64 runner, prove that the compiled CLI can
+# create an encrypted backup, refuse wrong keys and restore byte-identically.
+cargo test --manifest-path rust/Cargo.toml --test native_cli_restore_matrix
 cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
 cargo build --manifest-path rust-desktop/Cargo.toml --release --bin multi-backup-desktop
 rust-desktop/target/release/multi-backup-desktop --self-test
