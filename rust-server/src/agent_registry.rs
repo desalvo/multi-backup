@@ -138,7 +138,11 @@ pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
     if hashed.as_bytes().ct_eq(token_hash.as_bytes()).unwrap_u8()!=1{
         return Err(fail("Agent credential rejected"));
     }
-    wire::verify(&key,&proof,method,path,&metadata,last as u64,wire::now())
+    // Permit bounded out-of-order completion of independently signed
+    // parallel uploads; nonce uniqueness is enforced in PostgreSQL.
+    // A stale sequence older than the 1024-wide replay window fails closed.
+    wire::verify(&key,&proof,method,path,&metadata,
+        (last as u64).saturating_sub(1024),wire::now())
         .map_err(|_|fail("Device signature or replay check failed"))?;
     Ok(Verified{agent_id:proof.agent_id.clone(),owner_user:owner,proof,metadata})
 }
@@ -146,12 +150,23 @@ pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
 /// Concurrent replays may pass the preflight but at most one can commit.
 pub fn record_sequence(db:&Database,proof:&AgentProof)->Res<bool>{
     let mut conn=db.connect()?;
-    let n=conn.execute("UPDATE mb_agent_registry SET
-        last_sequence=$2,last_seen=now()
-        WHERE agent_id=$1 AND last_sequence<$2
-          AND approved AND NOT revoked",
+    let mut tx=conn.transaction()?;
+    // Token/proof checks have already passed. Prevent any concurrent replay
+    // via the unique(agent_id,sequence) key, regardless of arrival order.
+    let n=tx.execute("INSERT INTO mb_agent_request_nonces (agent_id,sequence)
+         SELECT agent_id,$2 FROM mb_agent_registry
+         WHERE agent_id=$1 AND approved AND NOT revoked
+           AND last_sequence - 1024 < $2
+         ON CONFLICT DO NOTHING",
         &[&proof.agent_id,&(proof.sequence as i64)])?;
-    Ok(n==1)
+    if n!=1 {return Ok(false);}
+    let changed=tx.execute("UPDATE mb_agent_registry
+         SET last_sequence=GREATEST(last_sequence,$2),last_seen=now()
+         WHERE agent_id=$1 AND approved AND NOT revoked",
+        &[&proof.agent_id,&(proof.sequence as i64)])?;
+    if changed!=1{return Ok(false);}
+    tx.commit()?;
+    Ok(true)
 }
 pub fn poll(db:&Database,identity:&Verified)->Res<Value>{
     if !record_sequence(db,&identity.proof)?{return Err(fail("Replayed agent poll"));}
