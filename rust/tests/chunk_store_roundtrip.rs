@@ -72,3 +72,35 @@ fn three_missing_data_shards_are_not_silently_restored() {
     }
     assert!(store.restore(&identity,&backup.id,None,&workspace.path().join("not-restored")).is_err());
 }
+
+#[test]
+fn zip64_portable_roundtrip_and_tamper_detection(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,identity))=credentials(tmp.path()) else {return};
+    let root=tmp.path().join("source-store");
+    let data=tmp.path().join("provider-data");
+    fs::create_dir(&data).unwrap();
+    fs::write(data.join("README.txt"),"Portable verified encrypted logical backup").unwrap();
+    Store::init(&root,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&root,&identity).unwrap();
+    let snapshot=store.backup(&identity,"portable",&[
+        Source{namespace:"github".into(),directory:data}]).unwrap();
+    let bundle=tmp.path().join("portable-package");
+    let parts=multi_backup_core::portable::export(
+        &store,&identity,&snapshot.id,&bundle,1).unwrap();
+    assert_eq!(parts.len(),1);
+    let imported_root=tmp.path().join("imported-store");
+    let imported_id=multi_backup_core::portable::import(&bundle,&identity,&imported_root).unwrap();
+    assert_eq!(imported_id,snapshot.id);
+    let imported=Store::open(&imported_root,&identity).unwrap();
+    assert!(imported.verify(&identity,&imported_id).unwrap().healthy);
+    let restored=tmp.path().join("restored-import");
+    imported.restore(&identity,&imported_id,None,&restored).unwrap();
+    assert_eq!(fs::read(restored.join("github/README.txt")).unwrap(),
+        b"Portable verified encrypted logical backup");
+    let mut zip=fs::read(&parts[0]).unwrap();
+    let half=zip.len()/2; zip[half]^=0x20;
+    fs::write(&parts[0],zip).unwrap();
+    assert!(multi_backup_core::portable::import(&bundle,&identity,
+        &tmp.path().join("tampered-import")).is_err());
+}

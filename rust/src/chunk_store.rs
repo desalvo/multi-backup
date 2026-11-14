@@ -25,7 +25,7 @@ struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: Str
 pub struct Source { pub namespace: String, pub directory: PathBuf }
 pub struct Store { root: PathBuf, cfg: Config, key: [u8;32] }
 fn sha(data: &[u8]) -> String { hex::encode(Sha256::digest(data)) }
-fn safe_hash(s: &str) -> bool {
+pub(crate) fn safe_hash(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|v| v.is_ascii_hexdigit() && !v.is_ascii_uppercase())
 }
 fn safe_path(s: &str) -> bool {
@@ -41,7 +41,7 @@ fn safe_path(s: &str) -> bool {
             "LPT3"|"LPT4"|"LPT5"|"LPT6"|"LPT7"|"LPT8"|"LPT9")
     })
 }
-fn dir(path: &Path) -> Res<()> {
+pub(crate) fn dir(path: &Path) -> Res<()> {
     if path.exists() {
         if !fs::symlink_metadata(path)?.file_type().is_dir() { return Err("Unsafe directory".into()); }
     } else { fs::create_dir_all(path)?; }
@@ -62,7 +62,7 @@ fn write_new(path: &Path, payload: &[u8]) -> Res<bool> {
         Err(error) => Err(error.error.into()),
     }
 }
-fn age(payload: &[u8], recipient: Option<&str>, identity: Option<&Path>) -> Res<Vec<u8>> {
+pub(crate) fn age(payload: &[u8], recipient: Option<&str>, identity: Option<&Path>) -> Res<Vec<u8>> {
     if recipient.is_some() == identity.is_some() { return Err("Age needs recipient XOR identity".into()); }
     let mut cmd = Command::new("age");
     if let Some(recipient) = recipient {
@@ -525,5 +525,37 @@ impl Store {
             healthy: issues.is_empty(),
             issues
         })
+    }
+}
+
+impl Store {
+    pub(crate) fn recipient(&self)->&str{&self.cfg.recipient}
+    pub(crate) fn portable_objects(&self,key:&Path,id:&str)
+        ->Res<std::collections::BTreeMap<String,PathBuf>>{
+        let backup=self.load(key,id)?;
+        let mut referenced=HashSet::new();
+        for entry in &backup.entries {
+            for chunk in &entry.chunks {referenced.insert(chunk.id.clone());}
+        }
+        let mut objects=std::collections::BTreeMap::new();
+        objects.insert("config.json.age".to_string(),self.root.join("config.json.age"));
+        objects.insert(format!("manifests/{id}.json.age"),self.manifest_path(id)?);
+        for group in self.read_protection(key)? {
+            if !group.members.iter().any(|m|referenced.contains(&m.id)){continue;}
+            for member in &group.members {referenced.insert(member.id.clone());}
+            objects.insert(format!("stripes/{}.json.age",group.id),
+                self.root.join("stripes").join(format!("{}.json.age",group.id)));
+            for i in 0..crate::parity::PARITY {
+                objects.insert(format!("parity/{}/{}/{i}.age",
+                    &group.id[..2],group.id),
+                    self.root.join("parity").join(&group.id[..2]).join(&group.id)
+                       .join(format!("{i}.age")));
+            }
+        }
+        for id in referenced {
+            objects.insert(format!("chunks/{}/{}/{}.age",&id[..2],&id[2..4],id),
+                self.chunk_path(&id)?);
+        }
+        Ok(objects)
     }
 }

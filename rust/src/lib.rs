@@ -6,6 +6,7 @@
 
 pub mod archive;
 pub mod chunk_store;
+pub mod portable;
 pub mod parity;
 pub mod archive_management;
 pub mod checkpoint_audit;

@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -134,6 +134,21 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         println!("{} {} ({} logical files)",backup.id,backup.label,backup.entries.len());
                     }
                 }
+            }
+            "export-zip" => {
+                accepted(&flags,&["--root","--identity","--id","--destination","--volume-mib"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let store=chunk_store::Store::open(root,key)?;
+                let mib=flags.get("--volume-mib").copied().unwrap_or("2048").parse()?;
+                let result=portable::export(&store,key,required(&flags,"--id")?,
+                    Path::new(required(&flags,"--destination")?),mib)?;
+                println!("Created {} portable encrypted ZIP64 volumes",result.len());
+            }
+            "import-zip" => {
+                accepted(&flags,&["--root","--identity","--bundle"])?;
+                let id=portable::import(Path::new(required(&flags,"--bundle")?),
+                    Path::new(required(&flags,"--identity")?),root)?;
+                println!("Imported and verified logical backup {id} into new storage");
             }
             "verify" => {
                 accepted(&flags, &["--root","--identity","--id"])?;
