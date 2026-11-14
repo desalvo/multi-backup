@@ -6,7 +6,7 @@ use multi_backup_core::{
     cluster_placement::{StorageLocation,StorageVisibility,SourceTransport},
     execution_policy::ExecutionLimits
 };
-use postgres::{Client,types::ToSql};
+use postgres::Client;
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
 use std::{env,fmt::Display};
@@ -52,12 +52,47 @@ CREATE INDEX IF NOT EXISTS mb_cluster_jobs_pending
  ON mb_cluster_jobs(status,priority DESC,created_at);
 CREATE INDEX IF NOT EXISTS mb_cluster_jobs_lease
  ON mb_cluster_jobs(replica_id,lease_until) WHERE status='running';
+CREATE TABLE IF NOT EXISTS mb_agent_registry (
+  agent_id TEXT PRIMARY KEY,
+  owner_user TEXT NOT NULL,
+  device_public_key TEXT NOT NULL,
+  token_sha256 TEXT NOT NULL,
+  approved BOOLEAN NOT NULL DEFAULT FALSE,
+  revoked BOOLEAN NOT NULL DEFAULT FALSE,
+  last_sequence BIGINT NOT NULL DEFAULT 0,
+  last_seen TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS mb_agent_pull_jobs (
+  job_id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
+  profile_id TEXT NOT NULL,
+  profile_sha256 TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'queued'
+    CHECK (state IN ('queued','leased','success','failed','cancelled')),
+  lease_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS mb_agent_uploads (
+  backup_id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
+  owner_user TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  cell TEXT NOT NULL,
+  volume TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  blob_path TEXT NOT NULL,
+  encrypted_bytes BIGINT NOT NULL,
+  ciphertext_sha256 TEXT NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 "#;
 fn error(message:impl Display)->BoxError{message.to_string().into()}
 fn ident(value:&str)->bool{
     !value.is_empty()&&value.len()<=128&&
     value.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-".contains(&b))
 }
+#[derive(Clone)]
 pub struct Database {dsn:String}
 impl Database {
     pub fn configured()->Result<Option<Self>,BoxError>{
@@ -75,7 +110,7 @@ impl Database {
         client.batch_execute(SCHEMA)?;
         Ok(Some(db))
     }
-    fn connect(&self)->Result<Client,BoxError>{
+    pub(crate) fn connect(&self)->Result<Client,BoxError>{
         let tls=native_tls::TlsConnector::builder().build()?;
         let connector=postgres_native_tls::MakeTlsConnector::new(tls);
         Ok(Client::connect(&self.dsn,connector)?)
