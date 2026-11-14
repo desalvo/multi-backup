@@ -1,0 +1,60 @@
+name: Rust focused validation
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+    paths:
+      - "rust/**"
+      - "rust-desktop/**"
+      - "rust-server/**"
+      - "Dockerfile"
+      - ".github/workflows/rust-focused.yml"
+  pull_request:
+    paths:
+      - "rust/**"
+      - "rust-desktop/**"
+      - "rust-server/**"
+      - "Dockerfile"
+      - ".github/workflows/rust-focused.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rust-core:
+    name: Encrypted chunk/core integration and fault injection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install age for authenticated roundtrip tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+      - name: Verify chunk store, migration and portable archives
+        run: cargo test --manifest-path rust/Cargo.toml --all-targets
+
+  rust-server:
+    name: OIDC, LDAP, SMTP, WebDAV compile and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile/test server identity, mount and notifications
+        run: cargo test --manifest-path rust-server/Cargo.toml --all-targets
+
+  rust-desktop:
+    name: Rust desktop compile without external packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native graphics dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libasound2-dev
+      - name: Compile desktop
+        run: cargo check --manifest-path rust-desktop/Cargo.toml
