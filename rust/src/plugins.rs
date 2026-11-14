@@ -67,6 +67,23 @@ pub enum AccessGate {
     LicensedExternalClient,
     OAuthScopeReview,
 }
+/// Operator-mounted open-protocol CES exports. No native IBM GPFS client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GpfsAccess {
+    CesNfs,
+    CesSmb,
+}
+impl GpfsAccess {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "ces-nfs" => Ok(Self::CesNfs),
+            "ces-smb" => Ok(Self::CesSmb),
+            _ => Err("GPFS access must be ces-nfs or ces-smb".into()),
+        }
+    }
+}
+const GPFS_CES_ACCESS: &[GpfsAccess] = &[GpfsAccess::CesNfs,GpfsAccess::CesSmb];
 /// LVM over iSCSI/FC is a policy *profile*, not a separate transport or
 /// a claim that a shared VG can be activated on multiple uncoordinated hosts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -113,6 +130,7 @@ pub struct PluginDescriptor {
     pub notes: &'static str,
     pub safety: SafetyProfile,
     pub access_gate: AccessGate,
+    pub gpfs_access: &'static [GpfsAccess],
     /// A nonempty list is supported only by iSCSI/FC SAN LVM profiles;
     /// raw LUNs omit the LVM mode and remain separately snapshot-gated.
     pub lvm_modes: &'static [LvmMode],
@@ -129,6 +147,7 @@ impl PluginDescriptor {
             restore_output: backup_source,
             consistency, notes,
             access_gate: AccessGate::ExternalProtocolOrMountedClient,
+            gpfs_access: &[],
             lvm_modes: &[],
             safety: match kind {
                 DataKind::BlockDevice | DataKind::BlockTransport =>
@@ -140,6 +159,10 @@ impl PluginDescriptor {
     }
     const fn with_access_gate(mut self, gate: AccessGate) -> Self {
         self.access_gate = gate;
+        self
+    }
+    const fn with_gpfs_ces(mut self) -> Self {
+        self.gpfs_access = GPFS_CES_ACCESS;
         self
     }
     const fn with_san_lvm(mut self) -> Self {
@@ -188,10 +211,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PLAN, PLAN,
         "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
         "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
-    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS", DataKind::DistributedFilesystem, PLAN, PLAN,
-        "Storage Scale authorized client, independent snapshot/fileset inventory and consistent read",
-        "IBM client license/entitlements are environment-specific, including restrictions on data export; never redistribute IBM components")
-        .with_access_gate(AccessGate::LicensedExternalClient),
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES", DataKind::DistributedFilesystem, PLAN, PLAN,
+        "NFSv3/v4 or SMB3 CES export on an authorized server; consistency proved separately",
+        "Use distro open-source NFS/CIFS client; no IBM native client shipped; CES server licensing, permission and snapshot fidelity remain operator responsibilities")
+        .with_gpfs_ces(),
     PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
         "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
         "Kerberos/delegation token, TLS and redirect allowlist; write only new paths, commit encrypted manifest last"),
@@ -232,6 +255,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "pg_basebackup/WAL or consistent logical snapshot", "PITR, role/grant restore and version compatibility require explicit acceptance"),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
         "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
+    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PLAN, PLAN,
+        "Existing verified SSHFS mount, strict host key, file hashes/metadata",
+        "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport and no overwrite"),
     PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware immutable vault",
         DataKind::ProtectedVault, NONE, PLAN,
         "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
@@ -260,6 +286,8 @@ pub struct Plan {
     /// snapshot are acquired by the plugin planner.
     pub input_lvm_mode: Option<LvmMode>,
     pub output_lvm_mode: Option<LvmMode>,
+    pub input_gpfs_access: Option<GpfsAccess>,
+    pub output_gpfs_access: Option<GpfsAccess>,
     pub required_preflight: Vec<&'static str>,
 }
 /// Planning never executes a plugin; it is a safe capability check. In
@@ -273,6 +301,13 @@ pub fn plan(mode: Mode, source_id: &str, destination_id: &str) -> Result<Plan, S
 pub fn plan_lvm(mode: Mode, source_id: &str, destination_id: &str,
                 input_lvm_mode: Option<LvmMode>,
                 output_lvm_mode: Option<LvmMode>) -> Result<Plan, String> {
+    plan_profiles(mode,source_id,destination_id,input_lvm_mode,output_lvm_mode,None,None)
+}
+/// Only describe prerequisites. NEVER mount storage, launch SSH or write data.
+pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
+                     input_lvm_mode: Option<LvmMode>, output_lvm_mode: Option<LvmMode>,
+                     input_gpfs_access: Option<GpfsAccess>,
+                     output_gpfs_access: Option<GpfsAccess>) -> Result<Plan, String> {
     let source = find(source_id).ok_or_else(|| format!("Unknown plugin: {source_id}"))?;
     let destination = find(destination_id).ok_or_else(|| format!("Unknown plugin: {destination_id}"))?;
     let source_stage = source.input_stage(mode);
@@ -288,10 +323,15 @@ pub fn plan_lvm(mode: Mode, source_id: &str, destination_id: &str,
         }));
     }
     let mut required_preflight = Vec::new();
-    for (plugin, layout, writing) in [
-        (source, input_lvm_mode, false),
-        (destination, output_lvm_mode, true),
+    for (plugin, layout, gpfs_mode, writing) in [
+        (source, input_lvm_mode, input_gpfs_access, false),
+        (destination, output_lvm_mode, output_gpfs_access, true),
     ] {
+        if let Some(selected) = gpfs_mode {
+            if !plugin.gpfs_access.contains(&selected) {
+                return Err(format!("Plugin {} does not support GPFS CES access",plugin.id));
+            }
+        }
         match plugin.access_gate {
             AccessGate::LicensedExternalClient =>
                 required_preflight.push("verify customer-specific vendor license, data export entitlement and separate supported client installation; never bundle proprietary code"),
@@ -312,7 +352,25 @@ pub fn plan_lvm(mode: Mode, source_id: &str, destination_id: &str,
                 required_preflight.push("publish encrypted objects into a new HDFS directory, checksum content and commit manifest last");
             }
         }
-        if plugin.id == "lustre" || plugin.id == "gpfs" {
+        if plugin.id == "gpfs" {
+            required_preflight.push("verify authorized IBM CES server/export; NFS/SMB clients require no GPFS Client license");
+            required_preflight.push("verify an existing authenticated NFSv3/v4 or CIFS/SMB3 mount provided by OS open-source tools");
+            required_preflight.push("prove out-of-band GPFS fileset snapshot consistency, ACLs/xattrs and vendor metadata fidelity");
+            if gpfs_mode.is_none() {
+                required_preflight.push("explicitly select GPFS access ces-nfs or ces-smb; no proprietary native client fallback");
+            }
+            if writing {
+                required_preflight.push("verify new isolated target, write ACL, encrypted-only upload and manifest-last commit without overwrite");
+            }
+        }
+        if plugin.id == "sshfs" {
+            required_preflight.push("verify existing patched SSHFS/FUSE mount, pinned SSH host key and secure authentication");
+            required_preflight.push("reject insecure directport bypass, symlink escapes, disconnected mount and ambiguous paths");
+            if writing {
+                required_preflight.push("verify new empty target, write ACL and encrypted-only manifest-last commit without overwrite");
+            }
+        }
+        if plugin.id == "lustre" {
             required_preflight.push("verify supported authorized mounted client, consistent namespace/fileset snapshot and recoverable filesystem metadata");
             if writing {
                 required_preflight.push("write encrypted objects only to a fresh isolated mounted destination with independent authorization");
@@ -357,7 +415,8 @@ pub fn plan_lvm(mode: Mode, source_id: &str, destination_id: &str,
             "catalog/planning only: one or both generic adapters are not wired or qualified"
         },
         confirmation_required_before_writes: true,
-        input_lvm_mode, output_lvm_mode, required_preflight,
+        input_lvm_mode, output_lvm_mode, input_gpfs_access, output_gpfs_access,
+        required_preflight,
     })
 }
 #[cfg(test)]
@@ -365,19 +424,19 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_29_user_requested_input_plugins_and_21_outputs_are_listed() {
+    fn all_30_user_requested_input_plugins_and_22_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
             "iscsi", "fc", "nvmeof", "glusterfs", "lustre", "gpfs",
-            "hdfs", "afs", "alfresco", "owncloud", "nextcloud"];
+            "hdfs", "afs", "alfresco", "owncloud", "nextcloud", "sshfs"];
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
-            "owncloud", "nextcloud"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 29);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 21);
-        assert_eq!(CATALOG.len(), 30);
+            "owncloud", "nextcloud", "sshfs"];
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 30);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 22);
+        assert_eq!(CATALOG.len(), 31);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
@@ -385,8 +444,8 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 21);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 29);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 22);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 30);
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
@@ -550,6 +609,38 @@ mod tests {
         }
         let p = plan(Mode::Backup,"posix","hdfs").unwrap();
         assert!(p.required_preflight.iter().any(|text| text.contains("manifest last")));
+    }
+    #[test]
+    fn gpfs_uses_open_ces_protocol_client_without_native_driver() {
+        let d=find("gpfs").unwrap();
+        assert_eq!(d.access_gate,AccessGate::ExternalProtocolOrMountedClient);
+        assert_eq!(d.gpfs_access,GPFS_CES_ACCESS);
+        for protocol in GPFS_CES_ACCESS {
+            let b=plan_profiles(Mode::Backup,"gpfs","sshfs",None,None,Some(*protocol),None).unwrap();
+            assert!(!b.executable);
+            let r=plan_profiles(Mode::Restore,"sshfs","gpfs",None,None,None,Some(*protocol)).unwrap();
+            assert!(r.required_preflight.iter().any(|x|x.contains("Client license")));
+            assert!(r.required_preflight.iter().any(|x|x.contains("manifest-last")));
+        }
+        assert!(GpfsAccess::parse("native").is_err());
+        assert!(plan_profiles(Mode::Backup,"sshfs","posix",None,None,
+                              Some(GpfsAccess::CesNfs),None).is_err());
+    }
+    #[test]
+    fn sshfs_source_and_target_are_planned_distinct_from_sftp() {
+        let d=find("sshfs").unwrap();
+        assert_eq!(d.kind,DataKind::Files);
+        assert_eq!(d.backup_input,Stage::Planned);
+        assert_eq!(d.backup_output,Stage::Planned);
+        assert_eq!(d.restore_input,Stage::Planned);
+        assert_eq!(d.restore_output,Stage::Planned);
+        assert_ne!(d.id,find("ssh").unwrap().id);
+        let b=plan(Mode::Backup,"sshfs","anti-ransomware-vault").unwrap();
+        assert!(b.required_preflight.iter().any(|x|x.contains("SSH host key")));
+        assert!(!b.executable);
+        let r=plan(Mode::Restore,"anti-ransomware-vault","sshfs").unwrap();
+        assert!(r.required_preflight.iter().any(|x|x.contains("manifest-last")));
+        assert!(!r.executable);
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {
