@@ -69,7 +69,7 @@ pub fn plan(job:&VolumeJob)->Result<ExecutionPlan,String>{
     match (&job.server,&job.partition){
         (None,None)=>{},
         (Some(s),Some(p))=>{
-            if !valid(s,253,host_char)||!valid(p,24,name)||!p.starts_with("/vicep"){
+            if !valid(s,253,host_char)||!p.starts_with("/vicep")||!valid(&p[6..],3,|b|b.is_ascii_lowercase()){
                 return Err("Unsafe AFS site/partition selection".into());
             }
         }
@@ -104,7 +104,7 @@ pub fn plan(job:&VolumeJob)->Result<ExecutionPlan,String>{
             if !valid(host,253,host_char)||!valid(user,64,username){
                 return Err("Invalid SSH host or remote principal".into());
             }
-            if !*afs_server && matches!(job.auth,Authentication::LocalAuth){
+            if !*afs_server && matches!(&job.auth,Authentication::LocalAuth){
                 return Err("Remote -localauth needs an explicitly attested AFS server".into());
             }
             validate_regular(identity)?;validate_regular(known_hosts)?;
@@ -131,7 +131,7 @@ pub fn plan(job:&VolumeJob)->Result<ExecutionPlan,String>{
             prerequisites.push("Acquire Kerberos tickets using locally authorized keytab, then aklog".into());
         }
         Authentication::LocalAuth=>{
-            if job.server.is_none()&&!matches!(job.execution,Execution::Local|Execution::ManagedAgent{..}){
+            if job.server.is_none()&&!matches!(&job.execution,Execution::Local|Execution::ManagedAgent{..}){
                 return Err("Remote -localauth requires explicit site and server-side authority".into());
             }
             args.push("-localauth".into());
@@ -140,7 +140,7 @@ pub fn plan(job:&VolumeJob)->Result<ExecutionPlan,String>{
     }
     Ok(ExecutionPlan{job_id:job.id.clone(),volume:job.volume.clone(),
         executable:"vos".into(),arguments:args,transport,
-        requires_host_agent:matches!(job.execution,Execution::ManagedAgent{..}),
+        requires_host_agent:matches!(&job.execution,Execution::ManagedAgent{..}),
         requires_preflight:prerequisites})
 }
 fn shell_quote(value:&str)->String{
@@ -152,14 +152,14 @@ pub fn ssh_remote_command(plan:&ExecutionPlan)->String{
         .map(shell_quote).collect::<Vec<_>>().join(" ")
 }
 pub fn spawn_local(job:&VolumeJob)->Result<std::process::Child,String>{
-    if !matches!(job.execution,Execution::Local){
+    if !matches!(&job.execution,Execution::Local){
         return Err("Local execution cannot impersonate remote SSH/managed agents".into());
     }
     let plan=plan(job)?;
-    if matches!(job.auth,Authentication::Keytab{..}){
+    if matches!(&job.auth,Authentication::Keytab{..}){
         return Err("Keytab jobs require managed credential acquisition; standalone dump refuses uninitialized Kerberos context".into());
     }
-    if matches!(job.auth,Authentication::LocalAuth){
+    if matches!(&job.auth,Authentication::LocalAuth){
         return Err("Privileged -localauth needs server-side managed command approval".into());
     }
     Command::new(&plan.executable).args(&plan.arguments)
@@ -171,7 +171,7 @@ pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
     let Execution::SshAgentless{host,user,identity,known_hosts,..}=&job.execution else{
         return Err("SSH execution requires an explicit SSH transport".into())
     };
-    if matches!(job.auth,Authentication::Keytab{..}){
+    if matches!(&job.auth,Authentication::Keytab{..}){
         return Err("Remote keytab execution requires a separately approved remote credential profile".into());
     }
     let mut cmd=Command::new("ssh");
