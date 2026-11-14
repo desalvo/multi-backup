@@ -53,6 +53,7 @@ La CI include job macOS 13+ (Apple Silicon e Intel), Windows 11 x64 e RPM per Ro
 
 ## Documentazione
 
+- [Indice della documentazione Rust r038 e stato della certificazione](docs/DOCUMENTATION_INDEX_R038.md)
 - **[Guida operativa Rust r038 — Italiano](docs/R038_OPERATIONS_IT.md)**: totale/incrementale, dimensioni, catene, verifica e schedule, restore verso utenti diversi, purge e GC confermata.
 - **[Rust r038 Operations — English](docs/R038_OPERATIONS_EN.md)**: procedure equivalenti e prerequisiti dei plugin.
 - I PDF vengono generati dalla CI con appendice r038 sperimentale; gli screenshot originali si riferiscono alla GUI r018. La migrazione dei vecchi archivi Python è facoltativa, ma il restore dei nuovi backup Rust rimane un gate obbligatorio.
