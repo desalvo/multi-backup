@@ -211,6 +211,7 @@ impl Store {
             return Err("Manifest ID conflict".into());
         }
         fs2::FileExt::unlock(&lock)?;
+        self.protect(identity, &snapshot.id)?;
         Ok(snapshot)
     }
     pub fn load(&self, identity: &Path, id: &str) -> Res<LogicalBackup> {
@@ -250,6 +251,7 @@ impl Store {
                    dest: &Path) -> Res<usize> {
         if dest.exists() { return Err("Never overwrite a restore target".into()); }
         if selection.is_some_and(|s| !safe_path(s)) { return Err("Invalid selection".into()); }
+        self.repair(identity, id)?;
         let manifest = self.load(identity, id)?;
         let parent = dest.parent().ok_or("Missing parent")?;
         if !parent.is_dir() { return Err("Restore parent must exist".into()); }
@@ -293,5 +295,147 @@ mod tests {
         let a = st.id(b"same").unwrap();
         assert_eq!(a, st.id(b"same").unwrap());
         assert_ne!(a, sha(b"same"));
+    }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Protection {
+    id: String,
+    members: Vec<ChunkRef>,
+    stripe: crate::parity::Stripe,
+}
+impl Store {
+    fn read_protection(&self, identity: &Path) -> Res<Vec<Protection>> {
+        let folder = self.root.join("stripes");
+        if !folder.exists() { return Ok(Vec::new()); }
+        let mut found = Vec::new();
+        for entry in fs::read_dir(folder)? {
+            let path = entry?.path();
+            let name = path.file_name().and_then(|x|x.to_str()).ok_or("Unsafe stripe filename")?;
+            if let Some(id) = name.strip_suffix(".json.age") {
+                if !safe_hash(id) || !fs::symlink_metadata(&path)?.file_type().is_file() {
+                    return Err("Unsafe stripe metadata".into());
+                }
+                let plain = age(&fs::read(path)?,None,Some(identity))?;
+                let stripe: Protection = serde_json::from_slice(&plain)?;
+                if stripe.id != id || stripe.members.is_empty() ||
+                    stripe.members.len() > crate::parity::DATA {
+                    return Err("Invalid authenticated stripe metadata".into());
+                }
+                found.push(stripe);
+            }
+        }
+        Ok(found)
+    }
+    /// Create 8+2 stripes over age ciphertext. Parity itself is encrypted to
+    /// the same age recipient, and stripe metadata is independently encrypted.
+    /// Existing protected chunk IDs are reused without creating duplicate parity.
+    pub fn protect(&self, identity: &Path, backup_id: &str) -> Res<usize> {
+        let backup = self.load(identity, backup_id)?;
+        let previous = self.read_protection(identity)?;
+        let protected: HashSet<String> = previous.iter().flat_map(|s|
+            s.members.iter().map(|m|m.id.clone())).collect();
+        let mut unique = HashSet::new();
+        let mut pending = Vec::new();
+        for entry in &backup.entries {
+            for item in &entry.chunks {
+                if !protected.contains(&item.id) && unique.insert(item.id.clone()) {
+                    self.read_chunk(identity, item)?; // verify before computing parity
+                    pending.push(item.clone());
+                }
+            }
+        }
+        let mut count = 0;
+        for group in pending.chunks(crate::parity::DATA) {
+            let ciphertext: Vec<Vec<u8>> = group.iter()
+                .map(|item| fs::read(self.chunk_path(&item.id)?))
+                .collect::<Result<_,_>>()?;
+            let (meta, shards) = crate::parity::encode(&ciphertext)?;
+            let mut nonce = [0u8;32];
+            rand::rngs::OsRng.fill_bytes(&mut nonce);
+            let id = hex::encode(nonce);
+            let folder = self.root.join("parity").join(&id[..2]).join(&id);
+            for offset in 0..crate::parity::PARITY {
+                let encrypted = age(&shards[crate::parity::DATA+offset],
+                    Some(&self.cfg.recipient),None)?;
+                if !write_new(&folder.join(format!("{}.age",offset)),&encrypted)? {
+                    return Err("Parity filename conflict".into());
+                }
+            }
+            let index = Protection {id:id.clone(), members:group.to_vec(),stripe:meta};
+            let protected_index = age(&serde_json::to_vec(&index)?,
+                Some(&self.cfg.recipient),None)?;
+            if !write_new(&self.root.join("stripes").join(format!("{id}.json.age")),
+                &protected_index)? {return Err("Stripe metadata conflict".into());}
+            count += 1;
+        }
+        Ok(count)
+    }
+    fn decode_cipher(&self, identity: &Path, reference: &ChunkRef,
+                     encrypted: &[u8]) -> Res<()> {
+        let compressed = age(encrypted,None,Some(identity))?;
+        let decoder = zstd::stream::Decoder::new(compressed.as_slice())?;
+        let mut plain = Vec::new();
+        decoder.take((self.cfg.chunk_bytes+1) as u64).read_to_end(&mut plain)?;
+        if plain.len()!=reference.bytes || sha(&plain)!=reference.sha256 ||
+           self.id(&plain)?!=reference.id {
+            return Err("Recovered ciphertext does not match authenticated manifest".into());
+        }
+        Ok(())
+    }
+    /// Detect corruption by the authenticated plaintext checksum; recover from
+    /// at most two absent/corrupted shards per stripe. Move damaged ciphertext
+    /// into quarantine before installing a fully verified reconstructed chunk.
+    pub fn repair(&self, identity: &Path, backup_id: &str) -> Res<usize> {
+        let backup = self.load(identity, backup_id)?;
+        let protections = self.read_protection(identity)?;
+        let mut unique = HashSet::new();
+        let mut count = 0;
+        for file in &backup.entries {
+            for item in &file.chunks {
+                if !unique.insert(item.id.clone()) {continue;}
+                if self.read_chunk(identity,item).is_ok() {continue;}
+                let protection = protections.iter().find(|s|
+                    s.members.iter().any(|m| m.id==item.id))
+                    .ok_or("Corrupt chunk has no parity protection")?;
+                let mut shards = Vec::with_capacity(crate::parity::TOTAL);
+                for member in &protection.members {
+                    shards.push(fs::read(self.chunk_path(&member.id)?).ok());
+                }
+                while shards.len()<crate::parity::DATA {shards.push(Some(vec![0;
+                    protection.stripe.shard_size]));}
+                let folder = self.root.join("parity")
+                    .join(&protection.id[..2]).join(&protection.id);
+                for p in 0..crate::parity::PARITY {
+                    let path = folder.join(format!("{p}.age"));
+                    let contents = fs::read(path).ok().and_then(|buf|
+                        age(&buf,None,Some(identity)).ok());
+                    shards.push(contents);
+                }
+                let recovered = crate::parity::recover(&protection.stripe,&shards)?;
+                let pos = protection.members.iter()
+                    .position(|m|m.id==item.id).ok_or("Missing stripe member")?;
+                let original_ciphertext = &recovered[pos];
+                self.decode_cipher(identity,item,original_ciphertext)?;
+                let target = self.chunk_path(&item.id)?;
+                let mut old = None;
+                if target.exists() {
+                    let mut nonce=[0u8;16];
+                    rand::rngs::OsRng.fill_bytes(&mut nonce);
+                    let quarantine = self.root.join("quarantine")
+                        .join(format!("{}-{}.age",item.id,hex::encode(nonce)));
+                    dir(quarantine.parent().ok_or("Unsafe quarantine")?)?;
+                    fs::rename(&target,&quarantine)?;
+                    old=Some(quarantine);
+                }
+                if let Err(error) = write_new(&target,original_ciphertext) {
+                    if let Some(ref old_path)=old {let _=fs::rename(old_path,&target);}
+                    return Err(error);
+                }
+                self.read_chunk(identity,item)?;
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 }

@@ -134,6 +134,15 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                 }
             }
+            "protect" | "repair" => {
+                accepted(&flags, &["--root","--identity","--id"])?;
+                let identity = Path::new(required(&flags, "--identity")?);
+                let store = chunk_store::Store::open(root, identity)?;
+                let id = required(&flags, "--id")?;
+                let count = if command == "protect" {store.protect(identity,id)?}
+                            else {store.repair(identity,id)?};
+                println!("{}: {} stripes/chunks processed",command,count);
+            }
             "restore" => {
                 accepted(&flags, &["--root","--identity","--id","--selection","--destination"])?;
                 let identity = Path::new(required(&flags, "--identity")?);
