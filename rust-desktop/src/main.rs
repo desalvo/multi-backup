@@ -78,6 +78,24 @@ fn default_output() -> String {
         .unwrap_or_else(|_| ".".into());
     Path::new(&home).join("Multi-Backups").display().to_string()
 }
+/// Match the legacy Python settings_path()/secure_vault.vault_path()
+/// on each supported platform. A vault is not stored in the backup output.
+fn default_vault_path() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    #[cfg(target_os = "macos")]
+    let base = Path::new(&home).join("Library/Application Support");
+    #[cfg(target_os = "windows")]
+    let base = PathBuf::from(std::env::var("APPDATA")
+        .unwrap_or_else(|_|Path::new(&home).join("AppData/Roaming")
+            .display().to_string()));
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let base = PathBuf::from(std::env::var("XDG_CONFIG_HOME")
+        .unwrap_or_else(|_|Path::new(&home).join(".config")
+            .display().to_string()));
+    base.join("multi-backup/keys/default.agevault")
+}
 fn archive_catalog(root: &Path) -> Vec<PathBuf> {
     if !root.is_dir() { return Vec::new(); }
     let mut result = Vec::new();
@@ -108,6 +126,7 @@ struct NativeApp {
     entries: Vec<PathBuf>,
     count: usize,
     vault_verified: bool,
+    must_unlock_on_start: bool,
     session_identity: Option<Arc<Zeroizing<Vec<u8>>>>,
     smoke_frames: Option<usize>,
     remote_confirm: Option<String>,
@@ -127,10 +146,11 @@ impl NativeApp {
             style.spacing.item_spacing = Vec2::new(10.0, 10.0);
             style.spacing.button_padding = Vec2::new(15.0, 9.0);
         });
+        let vault_path = default_vault_path();
+        let must_unlock_on_start = std::fs::symlink_metadata(&vault_path).is_ok();
         let fields = Fields {
             output: default_output(),
-            vault_path: Path::new(&default_output()).join("keys")
-                .join("default.agevault").display().to_string(),
+            vault_path: vault_path.display().to_string(),
             max_runs: "5".into(),
             ..Fields::default()
         };
@@ -144,6 +164,7 @@ impl NativeApp {
             hero: load_photo(ctx, "backup-hero", include_bytes!("../../assets/hero.jpg")),
             logo: load_photo(ctx, "multi-backup-logo", include_bytes!("../../assets/icon-256.png")),
             count: entries.len(), entries, vault_verified: false,
+            must_unlock_on_start,
             session_identity: None,
             smoke_frames: if smoke { Some(0) } else { None },
             remote_confirm: None,
@@ -157,6 +178,11 @@ impl NativeApp {
     }
     fn run_backup(&mut self, resume: bool) {
         if self.active { return; }
+        if !self.vault_verified || self.session_identity.is_none() {
+            self.page = Page::Vault;
+            self.status = "Crea o sblocca il vault cifrato prima di avviare un backup".into();
+            return;
+        }
         if self.fields.recipient.trim().is_empty() {
             self.status = "Serve la chiave pubblica age del vault".into();
             return;
@@ -797,6 +823,61 @@ impl NativeApp {
             self.status = "Inventario aggiornato".into();
         }
     }
+    fn unlock_screen(&mut self, ctx: &Context) {
+        egui::CentralPanel::default().frame(egui::Frame::none().fill(NAVY))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(55.0);
+                    if let Some(logo) = &self.logo {
+                        ui.image((logo.id(), Vec2::new(100.0,100.0)));
+                    }
+                    ui.heading(RichText::new("Multi Backup — Vault protetto")
+                        .size(27.0).color(INK));
+                    ui.label("Per proteggere i backup esistenti, sblocca la chiave prima di usare l'app.");
+                    ui.add_space(14.0);
+                    ui.label("Vault cifrato esistente (percorso legacy compatibile):");
+                    ui.add(egui::TextEdit::singleline(&mut self.fields.vault_path)
+                        .desired_width(460.0));
+                    ui.add_space(6.0);
+                    ui.label("Password del vault");
+                    let response = ui.add(egui::TextEdit::singleline(&mut self.fields.password)
+                        .password(true).desired_width(280.0));
+                    let proceed = ui.add(egui::Button::new("Sblocca vault")
+                        .fill(VIOLET)).clicked()
+                        || (response.lost_focus() && ui.input(|input|
+                            input.key_pressed(egui::Key::Enter)));
+                    if proceed {
+                        match vault::unlock_identity(
+                            Path::new(&self.fields.vault_path),
+                            &self.fields.password) {
+                            Ok(secret) => {
+                                self.session_identity = Some(Arc::new(secret));
+                                self.vault_verified = true;
+                                if let Ok(public) = vault::verify(
+                                    Path::new(&self.fields.vault_path), &self.fields.password) {
+                                    self.fields.recipient = public;
+                                }
+                                self.status = "Vault autenticato per questa sessione".into();
+                            },
+                            Err(_) => {
+                                self.status = "Password errata o vault non valido; accesso negato".into();
+                            }
+                        }
+                        self.fields.password.zeroize();
+                    }
+                    #[cfg(target_os = "macos")]
+                    if ui.button("Sblocca con Touch ID, se già configurato").clicked() {
+                        self.macos_biometric("unlock");
+                    }
+                    ui.add_space(18.0);
+                    ui.label(RichText::new(&self.status).color(MUTED));
+                    ui.label(RichText::new(
+                        "La chiave privata non viene mai salvata in un file in chiaro.")
+                        .color(MUTED).small());
+                });
+            });
+    }
+
     fn about(&mut self, ctx: &Context) {
         let mut open = self.about;
         egui::Window::new("About Multi Backup")
@@ -832,6 +913,11 @@ impl eframe::App for NativeApp {
             ctx.request_repaint_after(Duration::from_millis(90));
         }
         self.poll();
+        if self.must_unlock_on_start && !self.vault_verified {
+            self.unlock_screen(ctx);
+            if self.about { self.about(ctx); }
+            return;
+        }
         if self.active { ctx.request_repaint_after(Duration::from_millis(100)); }
         egui::TopBottomPanel::top("app-toolbar").frame(egui::Frame::none().fill(NAVY))
             .show(ctx, |ui| {
