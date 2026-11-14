@@ -178,6 +178,8 @@ struct NativeApp {
     update_info: Option<updater::ReleaseInfo>,
     chunk_backups: Vec<chunk_store::LogicalBackup>,
     chunk_selected: String,
+    /// (action, immutable backup id) captured when confirmation opens.
+    chunk_confirmation: Option<(String,String)>,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -244,6 +246,7 @@ impl NativeApp {
             update_info: None,
             chunk_backups: Vec::new(),
             chunk_selected: String::new(),
+            chunk_confirmation: None,
         }
     }
     fn rescan(&mut self) {
@@ -1010,6 +1013,22 @@ impl NativeApp {
                         format!("Migrati {} file in UN backup logico {}",
                             b.entries.len(),b.id)
                     },
+                    "protect-backup"=>{
+                        let changed=store.protect_backup(key,&id)
+                            .map_err(|e|e.to_string())?;
+                        format!("Backup {}: {}",&id,
+                            if changed {"PROTETTO dalla cancellazione"}else{"già protetto"})
+                    },
+                    "unprotect-backup"=>{
+                        let changed=store.unprotect_backup(key,&id,&id)
+                            .map_err(|e|e.to_string())?;
+                        format!("Backup {}: {}",&id,
+                            if changed {"protezione rimossa"}else{"già non protetto"})
+                    },
+                    "delete-backup"=>{
+                        store.delete_backup(key,&id,&id).map_err(|e|e.to_string())?;
+                        format!("Backup {} eliminato dal catalogo. Chunk condivisi conservati fino al GC sicuro.",&id)
+                    },
                     "verify"=>{
                         let r=store.verify(key,&id).map_err(|e|e.to_string())?;
                         if !r.healthy{return Err(format!("Integrità compromessa: {}",
@@ -1095,7 +1114,8 @@ impl NativeApp {
         egui::ScrollArea::vertical().max_height(300.0).show(ui,|ui|{
             for backup in backup_list {
                 let selected=self.chunk_selected==backup.id;
-                let name=format!("{} ({} file) · {}",
+                let name=format!("{} {} ({} file) · {}",
+                    if backup.protected {"🔒 PROTETTO"} else {"◯"},
                     backup.label,backup.entries.len(),&backup.id[..12]);
                 if ui.selectable_label(selected,name).clicked() {
                     self.chunk_selected=backup.id.clone();
@@ -1116,6 +1136,33 @@ impl NativeApp {
                 }
             }
         });
+        ui.separator();
+        ui.heading("Protezione del backup selezionato");
+        let selected=self.chunk_backups.iter()
+            .find(|b|b.id==self.chunk_selected).cloned();
+        if let Some(backup)=selected {
+            ui.label(if backup.protected {
+                "🔒 Questo backup è PROTETTO: retention, eliminazione manuale e GC non devono rimuoverlo."
+            } else {
+                "Questo backup non è protetto. Puoi attivare la protezione in qualsiasi momento."
+            });
+            ui.horizontal_wrapped(|ui|{
+                if !backup.protected {
+                    if ui.add_enabled(!self.active,egui::Button::new("🔒 Proteggi backup"))
+                        .clicked(){self.run_chunk_action("protect-backup");}
+                } else if ui.add_enabled(!self.active,
+                    egui::Button::new("Rimuovi protezione...")).clicked(){
+                    self.chunk_confirmation=Some(("unprotect-backup".into(),backup.id.clone()));
+                }
+                if ui.add_enabled(!self.active && !backup.protected,
+                    egui::Button::new("Elimina backup...")).clicked(){
+                    self.chunk_confirmation=Some(("delete-backup".into(),backup.id.clone()));
+                }
+            });
+        } else {
+            ui.label("Seleziona un backup logico per gestire la protezione.");
+        }
+        ui.label("La protezione applicativa è diversa dalla parità 8+2 e non sostituisce la retention WORM.");
         ui.label("File/cartelle da ripristinare (una selezione per riga; vuoto = backup completo)");
         ui.add(egui::TextEdit::multiline(&mut self.fields.chunk_selection).desired_rows(3));
         ui.label("Nuova directory destinazione (restore, ZIP, import o copia storage)");
@@ -1325,6 +1372,30 @@ impl eframe::App for NativeApp {
                 });
             });
         if self.about { self.about(ctx); }
+        if let Some((operation,backup_id))=self.chunk_confirmation.clone() {
+            let mut open=true;
+            egui::Window::new(if operation=="unprotect-backup" {
+                    "Conferma rimozione protezione"
+                } else { "Conferma eliminazione backup" })
+                .collapsible(false).resizable(false)
+                .open(&mut open).show(ctx,|ui|{
+                    ui.label(if operation=="unprotect-backup" {
+                        "Il backup tornerà eliminabile manualmente o tramite retention, se scaduto."
+                    } else {
+                        "Verrà eliminato il manifest logico. I chunk condivisi rimangono fino a GC sicura."
+                    });
+                    ui.monospace(&backup_id);
+                    ui.horizontal(|ui|{
+                        if ui.button("Annulla").clicked(){self.chunk_confirmation=None;}
+                        if ui.button("Conferma operazione").clicked(){
+                            self.chunk_confirmation=None;
+                            self.chunk_selected=backup_id.clone();
+                            self.run_chunk_action(&operation);
+                        }
+                    });
+                });
+            if !open {self.chunk_confirmation=None;}
+        }
         if let Some(provider) = self.remote_confirm.clone() {
             let mut open = true;
             egui::Window::new("Conferma ripristino remoto")

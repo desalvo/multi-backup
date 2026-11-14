@@ -92,6 +92,9 @@ pub struct BackupStamp {
     pub created_unix:u64,
     pub verified:bool,
     pub pinned:bool,
+    /// Explicit user-requested protection, independent of retention days.
+    #[serde(default)]
+    pub protected:bool,
     pub legal_hold:bool,
     pub immutable_until:Option<u64>,
 }
@@ -121,7 +124,9 @@ pub fn expiry_preview(backups:&[BackupStamp],policy:&Retention,now:u64)
         let keep:BTreeSet<&str>=group.iter().filter(|v|v.verified)
             .take(policy.keep_last_verified as usize).map(|x|x.id.as_str()).collect();
         for entry in group {
-            let why=if entry.created_unix==0||entry.created_unix>now {
+            let why=if entry.protected {
+                Some("explicit_backup_protection")
+            } else if entry.created_unix==0||entry.created_unix>now {
                 Some("unknown_or_future_timestamp")
             } else if !entry.verified {
                 Some("unverified_backup")
@@ -269,16 +274,18 @@ mod tests{
     #[test]fn retention_fail_closed_and_respects_worm(){
         let now=100*DAY;
         let make=|id:&str,age:u64|BackupStamp{id:id.into(),namespace:"lab".into(),
-            created_unix:now-age*DAY,verified:true,pinned:false,legal_hold:false,
+            created_unix:now-age*DAY,verified:true,pinned:false,protected:false,legal_hold:false,
             immutable_until:None};
         let old=make("old",70);let newest=make("newest",40);
         let mut worm=make("worm",65);worm.immutable_until=Some(now+DAY);
         let mut legal=make("legal",66);legal.legal_hold=true;
-        let preview=expiry_preview(&[old,newest,worm,legal],
+        let mut protected=make("protected",95);protected.protected=true;
+        let preview=expiry_preview(&[old,newest,worm,legal,protected],
                                     &Retention::default(),now).unwrap();
         assert_eq!(preview.expire,vec!["old"]);
         assert_eq!(preview.preserve["worm"],"immutable_retention");
         assert_eq!(preview.preserve["newest"],"keep_last_verified");
+        assert_eq!(preview.preserve["protected"],"explicit_backup_protection");
     }
     #[test]fn index_pagination(){let i=NamespaceIndex::from_paths("team/proj",[
         ("github/a/file".into(),10),("github/b/file".into(),20),
