@@ -229,6 +229,16 @@ pub fn export_recovery(source: &Path, destination: &Path,
 pub fn import_recovery(source: &Path, destination: &Path,
     recovery_password: &str, new_password: &str) -> VaultResult<String>
 {
+    // Python recovery import never creates a competing protected default
+    // while an old plaintext default.txt identity exists. Preserve that
+    // invariant during cross-version upgrades.
+    if destination.file_name().and_then(|s| s.to_str()) == Some("default.agevault") {
+        let legacy = destination.parent().unwrap_or_else(|| Path::new("."))
+            .join("default.txt");
+        if fs::symlink_metadata(legacy).is_ok() {
+            return Err("Existing legacy identity blocks recovery import".into());
+        }
+    }
     export_recovery(source, destination, recovery_password, new_password)
 }
 
