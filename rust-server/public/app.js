@@ -153,3 +153,91 @@ document.getElementById("audit-refresh").addEventListener("click",()=>{
 document.getElementById("audit-older").addEventListener("click",()=>{
   auditOffset+=10;showAudit().catch(()=>{});
 });
+
+
+// R039: same cluster view on every pod. Read-only admin information;
+// DOM textContent avoids interpreting provider-supplied names as HTML.
+const clusterRefresh=document.getElementById("cluster-refresh");
+function clusterLine(parent,headline,detail,status){
+  const card=el("div",undefined,"cluster-record");
+  const heading=el("strong",headline);
+  const sub=el("small",detail||"","muted");
+  if(status){card.dataset.status=status;}
+  card.append(heading,sub);parent.append(card);
+}
+async function loadCluster(){
+  const summary=document.getElementById("cluster-summary");
+  const output={
+    replicas:document.getElementById("cluster-replicas"),
+    storage:document.getElementById("cluster-storage"),
+    jobs:document.getElementById("cluster-jobs"),
+    agents:document.getElementById("cluster-agents")
+  };
+  clusterRefresh.disabled=true;
+  try {
+    const [clusterResponse,agentsResponse]=await Promise.all([
+      fetch("/api/cluster/status",{credentials:"same-origin",cache:"no-store"}),
+      fetch("/api/agents/admin/list",{credentials:"same-origin",cache:"no-store"})
+    ]);
+    if(clusterResponse.status===401||clusterResponse.status===403){
+      summary.textContent="Il pannello cluster è riservato all'amministratore.";
+      for(const container of Object.values(output))container.replaceChildren();
+      return;
+    }
+    if(!clusterResponse.ok){
+      summary.textContent="Cluster non configurato o non disponibile su questa replica.";
+      for(const container of Object.values(output))container.replaceChildren();
+      return;
+    }
+    const [cluster,registered]=await Promise.all([
+      clusterResponse.json(),
+      agentsResponse.ok?agentsResponse.json():Promise.resolve({agents:[]})
+    ]);
+    for(const container of Object.values(output))container.replaceChildren();
+    const nodes=Array.isArray(cluster.replicas)?cluster.replicas:[];
+    const stores=Array.isArray(cluster.storage)?cluster.storage:[];
+    const jobs=Array.isArray(cluster.jobs)?cluster.jobs:[];
+    const agents=Array.isArray(registered.agents)?registered.agents:[];
+    const active=nodes.filter(node=>node.healthy).length;
+    summary.textContent=active+"/"+nodes.length+" repliche attive · "+jobs.length+
+      " job recenti · "+agents.filter(a=>a.approved&&!a.revoked).length+
+      " agenti autorizzati";
+    for(const node of nodes){
+      clusterLine(output.replicas,(node.healthy?"● ":"○ ")+String(node.id),
+        "Capacità "+String(node.max_jobs)+" job · storage: "+
+        (Array.isArray(node.storage_ids)?node.storage_ids.join(", "):"nessuno"),
+        node.healthy?"online":"offline");
+    }
+    for(const storage of stores){
+      const isLocal=storage.visibility==="node_local";
+      clusterLine(output.storage,String(storage.id)+" · "+String(storage.backend),
+        isLocal?"Locale · owner "+String(storage.owner_replica):
+          "Condiviso · accesso verificato tramite registro",
+        isLocal?"local":"shared");
+    }
+    for(const job of jobs.slice(0,40)){
+      clusterLine(output.jobs,String(job.id)+" · "+String(job.status),
+        String(job.plugin)+" · "+String(job.storage)+" · replica "+
+        String(job.replica||"in coda")+" · "+String(job.transport),
+        String(job.status));
+    }
+    for(const agent of agents){
+      const state=agent.revoked?"revocato":agent.approved?
+        (agent.online?"online":"offline"):"in attesa";
+      clusterLine(output.agents,String(agent.id)+" · "+state,
+        "Utente "+String(agent.user)+" · seq "+String(agent.last_sequence),
+        state);
+    }
+    if(!nodes.length)clusterLine(output.replicas,"Nessuna replica","Verificare PostgreSQL e heartbeat");
+    if(!stores.length)clusterLine(output.storage,"Nessuno storage","Registrare prima i backend condivisi o locali");
+    if(!jobs.length)clusterLine(output.jobs,"Nessun job","La coda non contiene lavori recenti");
+    if(!agents.length)clusterLine(output.agents,"Nessun agente","Registrazione e approvazione richieste");
+  }catch(error){
+    summary.textContent="Impossibile aggiornare lo stato del cluster.";
+  }finally{clusterRefresh.disabled=false;}
+}
+clusterRefresh.addEventListener("click",loadCluster);
+loadCluster();
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden)loadCluster();
+});
