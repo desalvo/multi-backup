@@ -67,9 +67,14 @@ DMG="multi-backup-rust-preview-macos-$ARCH.dmg"
 rm -f "$DMG"
 STAGE="$(mktemp -d -t multi-backup-rust-stage.XXXXXXXX)"
 MOUNT="$(mktemp -d -t multi-backup-rust-mount.XXXXXXXX)"
+# Never create hdiutil logs inside STAGE: -srcfolder would package them as
+# visible files next to the app and the Applications shortcut.
+CREATE_LOG="$(mktemp -t multi-backup-rust-create-log.XXXXXXXX)"
+ATTACH_LOG="$(mktemp -t multi-backup-rust-attach-log.XXXXXXXX)"
 cleanup() {
   if mount | grep -F "$MOUNT" >/dev/null; then hdiutil detach -quiet "$MOUNT" || true; fi
   rm -rf "$STAGE"
+  rm -f "$CREATE_LOG" "$ATTACH_LOG"
   rmdir "$MOUNT" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -77,15 +82,17 @@ trap cleanup EXIT
 ditto "$APP" "$STAGE/Multi Backup Rust Preview.app"
 ln -s /Applications "$STAGE/Applications"
 test -L "$STAGE/Applications"
+# Validate the distribution source is exactly app + symlink before imaging.
+test "$(find "$STAGE" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')" = 2
 # macOS Intel runners can collide with diskimages services. Retry only
 # a confirmed transient busy error, never bypass a signing or integrity check.
 for attempt in 1 2 3 4; do
   if hdiutil create -fs HFS+ -volname "Multi Backup Rust Preview" \
-    -srcfolder "$STAGE" -format UDZO "$DMG" >"$STAGE/hdiutil-create.log" 2>&1; then
+    -srcfolder "$STAGE" -format UDZO "$DMG" >"$CREATE_LOG" 2>&1; then
     break
   fi
-  cat "$STAGE/hdiutil-create.log" >&2
-  if ! grep -Eqi 'Resource busy|Resource temporarily unavailable' "$STAGE/hdiutil-create.log" ||
+  cat "$CREATE_LOG" >&2
+  if ! grep -Eqi 'Resource busy|Resource temporarily unavailable' "$CREATE_LOG" ||
      [[ "$attempt" == 4 ]]; then exit 1; fi
   rm -f "$DMG"
   sleep "$((attempt*3))"
@@ -94,9 +101,9 @@ test -f "$DMG"
 echo "[DMG] Created $(ls -lh "$DMG" | awk '{print $5}') image for $ARCH"
 for attempt in 1 2 3 4; do
   if hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG" \
-       >"$STAGE/hdiutil-attach.log" 2>&1; then break; fi
-  cat "$STAGE/hdiutil-attach.log" >&2
-  if ! grep -Eqi 'Resource busy|Resource temporarily unavailable' "$STAGE/hdiutil-attach.log" ||
+       >"$ATTACH_LOG" 2>&1; then break; fi
+  cat "$ATTACH_LOG" >&2
+  if ! grep -Eqi 'Resource busy|Resource temporarily unavailable' "$ATTACH_LOG" ||
      [[ "$attempt" == 4 ]]; then exit 1; fi
   sleep "$((attempt*3))"
 done
