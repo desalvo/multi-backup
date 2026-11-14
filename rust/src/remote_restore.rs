@@ -5,8 +5,8 @@ use crate::archive;
 use serde_json::{json, Value};
 use std::{
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    io::Read,
+    path::Path,
     process::Command,
     time::Duration,
 };
@@ -116,7 +116,11 @@ impl DropboxWriter {
             .send_bytes(bytes);
         match response {
             Ok(value) => {
-                let content: Value = value.into_json()?;
+                let mut bytes = Vec::new();
+                value.into_reader().take(1024 * 1024).read_to_end(&mut bytes)?;
+                // Dropbox upload_session/append_v2 succeeds with an empty body.
+                let content: Value = if bytes.is_empty() { json!({}) }
+                    else { serde_json::from_slice(&bytes)? };
                 if !content.is_object() { return Err(err("Dropbox write was not acknowledged")); }
                 Ok(content)
             },

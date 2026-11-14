@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{archive, dropbox_client, github_client, progress_rgb, vault};
+use multi_backup_core::{archive, dropbox_client, github_client, progress_rgb, remote_restore, vault};
 use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver},
@@ -57,6 +57,8 @@ struct Fields {
     recovery_path: String,
     dropbox_path: String,
     max_runs: String,
+    remote_repo: String,
+    remote_file: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -103,6 +105,7 @@ struct NativeApp {
     count: usize,
     vault_verified: bool,
     smoke_frames: Option<usize>,
+    remote_confirm: Option<String>,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -135,6 +138,7 @@ impl NativeApp {
             logo: load_photo(ctx, "multi-backup-logo", include_bytes!("../../assets/icon-256.png")),
             count: entries.len(), entries, vault_verified: false,
             smoke_frames: if smoke { Some(0) } else { None },
+            remote_confirm: None,
         }
     }
     fn rescan(&mut self) {
@@ -177,6 +181,36 @@ impl NativeApp {
                     )));
                 }
                 Err(reason) => { let _ = tx.send(Event::Failure(reason)); }
+            }
+        });
+    }
+    fn run_remote_restore(&mut self, provider: String) {
+        if self.active { return; }
+        let source = self.fields.selected_archive.clone();
+        let identity = self.fields.identity.clone();
+        let repo = self.fields.remote_repo.clone();
+        let path = self.fields.remote_file.clone();
+        let (tx, rx) = mpsc::channel();
+        self.receiver = Some(rx);
+        self.active = true;
+        self.progress = None;
+        self.started = Instant::now();
+        self.last_activity = Instant::now();
+        thread::spawn(move || {
+            let _ = tx.send(Event::Status(format!("Ripristino remoto {} richiesto…", provider)));
+            let done = if provider == "github" {
+                remote_restore::github_new_repository(Path::new(&source),
+                    Path::new(&identity), &repo, true)
+                    .map_err(|e|e.to_string())
+            } else {
+                remote_restore::dropbox_new_file(Path::new(&source),
+                    Path::new(&identity), &path)
+                    .map(|r|r["path_display"].as_str().unwrap_or(&path).to_owned())
+                    .map_err(|e|e.to_string())
+            };
+            match done {
+                Ok(s) => { let _ = tx.send(Event::Success(format!("Ripristino remoto: {s}"))); },
+                Err(e) => { let _ = tx.send(Event::Failure(e)); },
             }
         });
     }
@@ -402,6 +436,16 @@ impl NativeApp {
             if ui.add_enabled(!self.active, egui::Button::new("Ripristina")
                 .fill(VIOLET)).clicked() { self.run_restore(false); }
         });
+        ui.separator();
+        ui.label("Creazione REMOTA esplicita (non sovrascrive repository o file esistenti)");
+        ui.label("Nuovo repository GitHub owner/name (privato)");
+        ui.text_edit_singleline(&mut self.fields.remote_repo);
+        if ui.add_enabled(!self.active, egui::Button::new("Crea repository da archivio"))
+            .clicked() { self.remote_confirm = Some("github".into()); }
+        ui.label("Nuovo file Dropbox /cartella/file.ext");
+        ui.text_edit_singleline(&mut self.fields.remote_file);
+        if ui.add_enabled(!self.active, egui::Button::new("Carica nuovo file su Dropbox"))
+            .clicked() { self.remote_confirm = Some("dropbox".into()); }
         ui.label(RichText::new(&self.status).color(INK));
         self.draw_progress(ui);
     }
@@ -599,6 +643,24 @@ impl eframe::App for NativeApp {
                 });
             });
         if self.about { self.about(ctx); }
+        if let Some(provider) = self.remote_confirm.clone() {
+            let mut open = true;
+            egui::Window::new("Conferma ripristino remoto")
+                .collapsible(false).resizable(false)
+                .open(&mut open).show(ctx, |ui| {
+                    ui.label(RichText::new(
+                        "Verrà creato un NUOVO repository/file remoto.                          L'operazione non sovrascrive dati esistenti."
+                    ).color(INK));
+                    ui.horizontal(|ui| {
+                        if ui.button("Annulla").clicked() { self.remote_confirm = None; }
+                        if ui.button("Conferma CREATE-NEW").clicked() {
+                            self.remote_confirm = None;
+                            self.run_remote_restore(provider.clone());
+                        }
+                    });
+                });
+            if !open { self.remote_confirm = None; }
+        }
     }
 }
 

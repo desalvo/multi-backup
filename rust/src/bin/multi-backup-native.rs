@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, vault};
+use multi_backup_core::{archive, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -24,6 +24,8 @@ fn usage() -> &'static str {
        multi-backup-native dropbox resume --output-dir PRIVATE_DIR --recipient age1KEY [--remote-path /folder]\n\
        multi-backup-native github backup --output-dir PRIVATE_DIR --recipient age1KEY [--max-runs 5]\n\
        multi-backup-native github resume --output-dir PRIVATE_DIR --recipient age1KEY [--max-runs 5]\n\
+       multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
+       multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
        multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native vault create --file NEW.agevault [--password-stdin]\n\
        multi-backup-native vault export --file SOURCE.agevault --destination RECOVERY.agevault [--password-stdin]\n\
@@ -189,6 +191,35 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if limit > 100_000 { return Err("CI run limit exceeds safety ceiling".into()); }
         let result = github_client::backup(out, recipient, command == "resume", limit)?;
         println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+    if family == "restore" {
+        if password_stdin || json { return Err("Unsupported remote restore flags".into()); }
+        if required(&flags, "--confirm")? != "CREATE-NEW" {
+            return Err("Remote restore requires explicit --confirm CREATE-NEW".into());
+        }
+        let from = Path::new(required(&flags, "--archive")?);
+        let identity = Path::new(required(&flags, "--identity")?);
+        match command {
+            "github" => {
+                accepted(&flags, &["--archive", "--identity", "--target", "--visibility", "--confirm"])?;
+                let target = required(&flags, "--target")?;
+                let visibility = flags.get("--visibility").copied().unwrap_or("private");
+                if visibility != "private" && visibility != "public" {
+                    return Err("Visibility must be private or public".into());
+                }
+                let url = remote_restore::github_new_repository(
+                    from, identity, target, visibility == "private")?;
+                println!("New GitHub repository restored: {url}");
+            },
+            "dropbox" => {
+                accepted(&flags, &["--archive", "--identity", "--path", "--confirm"])?;
+                let path = required(&flags, "--path")?;
+                let result = remote_restore::dropbox_new_file(from, identity, path)?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            _ => return Err(usage().into()),
+        }
         return Ok(());
     }
     if family == "dropbox" && (command == "backup" || command == "resume") {
