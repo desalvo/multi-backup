@@ -32,7 +32,7 @@ fn admin(state:&AppState,headers:&HeaderMap,write:bool)->Result<cluster::Databas
         return Err(error(StatusCode::FORBIDDEN,"admin_required"));
     }
     if write && (!same_origin(headers,&state.0)||
-        headers.get("x-csrf-token").and_then(|x|x.to_str().ok())!=Some(&auth.csrf)){
+        headers.get("x-csrf-token").and_then(|x|x.to_str().ok())!=Some(auth.csrf.as_str())){
         return Err(error(StatusCode::FORBIDDEN,"csrf_rejected"));
     }
     state.0.cluster.clone().ok_or_else(||
@@ -197,6 +197,14 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
         .open(&temporary).await{
         Ok(v)=>v,Err(_)=>return error(StatusCode::SERVICE_UNAVAILABLE,"encrypted_spool_unavailable")
     };
+    #[cfg(unix)]{
+        use std::os::unix::fs::PermissionsExt;
+        if tokio::fs::set_permissions(&temporary,std::fs::Permissions::from_mode(0o600))
+            .await.is_err(){
+            let _=tokio::fs::remove_file(&temporary).await;
+            return error(StatusCode::SERVICE_UNAVAILABLE,"secure_spool_permissions_failed");
+        }
+    }
     let mut stream=body.into_data_stream();
     let mut digest=Sha256::new();
     let mut bytes=0u64;
