@@ -14,6 +14,14 @@ use uuid::Uuid;
 
 type BoxError=Box<dyn std::error::Error+Send+Sync>;
 const SCHEMA:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_cluster_sessions (
+  token_sha256 TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  csrf_token TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mb_cluster_sessions_expires
+  ON mb_cluster_sessions(expires_at);
 CREATE TABLE IF NOT EXISTS mb_cluster_storage (
   storage_id TEXT PRIMARY KEY,
   backend TEXT NOT NULL,
@@ -123,6 +131,40 @@ impl Database {
         let tls=native_tls::TlsConnector::builder().build()?;
         let connector=postgres_native_tls::MakeTlsConnector::new(tls);
         Ok(Client::connect(&self.dsn,connector)?)
+    }
+    pub fn put_session(&self,token:&str,user:&str,csrf:&str)
+        ->Result<(),BoxError>{
+        if token.len()!=64 || csrf.len()!=64 ||
+           !token.bytes().all(|v|v.is_ascii_hexdigit())||
+           !csrf.bytes().all(|v|v.is_ascii_hexdigit())||
+           user.is_empty()||user.len()>512{
+            return Err(error("Invalid shared session identity"));
+        }
+        let digest=multi_backup_core::agent_protocol::hex_sha(token.as_bytes());
+        let mut db=self.connect()?;
+        db.execute("INSERT INTO mb_cluster_sessions
+            (token_sha256,user_id,csrf_token,expires_at)
+            VALUES ($1,$2,$3,now()+interval '8 hours')",
+            &[&digest,&user,&csrf])?;
+        Ok(())
+    }
+    pub fn get_session(&self,token:&str)->Result<Option<(String,String)>,BoxError>{
+        if token.len()!=64 || !token.bytes().all(|v|v.is_ascii_hexdigit()){
+            return Err(error("Invalid shared session token"));
+        }
+        let digest=multi_backup_core::agent_protocol::hex_sha(token.as_bytes());
+        let mut db=self.connect()?;
+        Ok(db.query_opt("SELECT user_id,csrf_token FROM mb_cluster_sessions
+             WHERE token_sha256=$1 AND expires_at>now()",
+            &[&digest])?.map(|r|(r.get(0),r.get(1))))
+    }
+    pub fn delete_session(&self,token:&str)->Result<(),BoxError>{
+        if token.len()!=64{return Err(error("Invalid logout token"));}
+        let digest=multi_backup_core::agent_protocol::hex_sha(token.as_bytes());
+        let mut db=self.connect()?;
+        db.execute("DELETE FROM mb_cluster_sessions WHERE token_sha256=$1",
+            &[&digest])?;
+        Ok(())
     }
     pub fn register_storage(&self,location:&StorageLocation)->Result<(),BoxError>{
         location.validate().map_err(error)?;
