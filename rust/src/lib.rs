@@ -4,6 +4,8 @@
 //! differential compatibility tests and all native E2E workflows are certified.
 //! This Rust module intentionally does not open or modify existing archives.
 
+pub mod archive;
+
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
