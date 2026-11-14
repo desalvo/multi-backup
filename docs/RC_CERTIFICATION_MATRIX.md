@@ -299,3 +299,11 @@ The current local GC is intentionally conservative. **Maximal disk
 reclamation for partially live 8+2 parity stripes is NOT yet implemented.**
 Unattended remote retention/GC and filesystem WORM are unqualified.
 Do not advertise the r038 draft as a certified or released RC.
+
+## r038 — documentation acceptance audit (2026-11-14)
+
+Audited recent Rust CLI operations, GUI settings, backup_chain/scheduler/account_restore, safe rebase and local GC against the project documents. Added authoritative [Italian](R038_OPERATIONS_IT.md) and [English](R038_OPERATIONS_EN.md) runbooks and four labelled r038 chapters per language to the reproducible PDF manual generator.
+
+**Version truth:** r018 Python/Tk remains the last published installer; r038 Rust in draft PR #10 is not yet RC-certified. Legacy Python archive conversion is optional, NOT a release gate. Current documentation does not imply a new green latest-head CI.
+
+Remaining qualification includes the current-head Production Gate, byte-identical FULL/INC and selective restore before/after GC, interruption recovery of multi-manifest rebase and GC, crash-safe compacting of mixed 8+2 stripes, provider metadata/ACL, GitHub/Dropbox real cross-account restore, scheduler GUI and installed OS runtime, signed installer/update rollback, WORM/security audit. Publication-smoke must verify that the **generated bilingual PDFs**, not just their source code, contain r038 addenda.

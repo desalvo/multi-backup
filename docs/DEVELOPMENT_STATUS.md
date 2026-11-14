@@ -605,3 +605,10 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
   live multi-account E2E remain incomplete.
 - PR #10 stays draft until passing new full CI and external restore tests.
   Historical Python archive migration is optional, not a release gate.
+
+## r038 — documentation reconciliation and operational manuals (2026-11-14)
+
+- Added bilingual Rust developer-preview operator runbooks at `docs/R038_OPERATIONS_IT.md` and `docs/R038_OPERATIONS_EN.md`, with exact CLI recipes for full/incremental backup, file/count/byte metrics, default whole-chain verification, safe selective restore, provider cross-account authorization, manifest purge/rebase, manual GC with grace/parity safeguards and schedule JSON.
+- Reconciled earlier inconsistent current-tense statements in `CHUNK_STORAGE_V1.md`, `BACKUP_PROTECTION.md`, `MAINTENANCE_POLICY.md`, `PLUGIN_API.md`, `RELEASE_CHANNELS.md`, `SECURITY.md` and `RUST_PORT_INVENTORY.md`. Historical milestones remain explicit rather than being erased.
+- Expanded bilingual PDF manual source with four explicitly labelled r038 experimental chapters per language. PDF output still must be regenerated and checked by CI; existing PDF binary may remain historic until regenerated.
+- Release policy unchanged: r018 is last distributed; Rust r038 remains a draft PR until current-head CI, real recovery tests, installer signoff and security tests pass. No merge, stable tag, Docker publication or user-data GC performed by documentation changes.

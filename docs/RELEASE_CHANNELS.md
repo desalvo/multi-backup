@@ -1,6 +1,6 @@
 # Native releases, channels, and trust
 
-**Version:** `0.1.0-r010-rc1`. Sources: GitHub repository `desalvo/multi-backup`.
+**Current baseline (r038, 2026-11-14):** the published release remains Python/Tk r018. Rust-native r038 is a draft PR #10 development preview, NOT a certified RC. Historical r010–r012 headings below record earlier packaging decisions. Source: `desalvo/multi-backup`.
 
 ## Trigger contract
 
@@ -19,7 +19,7 @@ The `rpm-repositories` workflow generates per-distribution repository metadata a
 
 GUI and CLI check the configured channel (default **stable**) at app startup and every 6 hours while GUI is open. Users may choose **early-release** in Settings. The updater queries GitHub Releases over HTTPS and will only stage an asset when GitHub provides a SHA-256 digest. Staging does not execute any executable. Replacing installed files in use requires an OS-specific installer, signature and user authorization.
 
-**Remaining production gates:** Apple Developer ID signing and notarization; Microsoft Authenticode signing; signed RPMs and `repomd.xml`; installer acceptance tests, migration tests against representative legacy backups, and checks of automatic update behavior in installed native apps. Never publish a stable release that fails these gates.
+**Remaining production gates:** Apple Developer ID signing and notarization; Microsoft Authenticode signing; signed RPMs and `repomd.xml`; installer acceptance, full/incremental new-format Rust restore with safe purge/GC, real-account GitHub/Dropbox restore to different owners, and checks of update/rollback behavior in installed native apps. Python-created archive conversion is optional. Never publish a stable release that fails these gates.
 
 ## Native build matrix
 
@@ -71,3 +71,11 @@ After the sole Production Gate the macOS Apple Silicon and Intel smoke jobs prod
 ## r012 current macOS prerelease naming
 
 Following feedback from macOS early testers, the rolling early-release uses the straightforward filenames `multi-backup-macos-arm64.dmg` and `multi-backup-macos-x86_64.dmg` (no `TEST-ONLY` label and no `-test` suffix). The GitHub Actions smoke artifacts are named `macos-arm64-preview` and `macos-x86_64-preview`. Old `-test.dmg` assets are removed on the next successful publication. This changes **only labels**, not the prerelease trust policy: packages remain ad-hoc signed, unnotarized and require explicit user approval if blocked by Gatekeeper. The stable channel still requires Apple Developer ID, notarization and independent acceptance tests, alongside Windows/RPM signing.
+
+
+## r038 — manual and operational document status
+
+- Current Rust source-of-truth: [manuale operativo IT](R038_OPERATIONS_IT.md) and [English operations](R038_OPERATIONS_EN.md).
+- The original bilingual PDF manual chapters and screenshots document the previously distributed r018 Python/Tk interface. The report generator `scripts/build-publications.py` has separately labelled r038 Rust development-preview addendum chapters; `publications-smoke` must regenerate and text-verify them.
+- Historical brochures remain promotional documentation for their earlier release; they do NOT certify native Rust GC, cross-account metadata migration or production adapter readiness.
+- Stable packages require independent platform signing/notarization, real recovery drills, installed upgrade/rollback and production security qualification. Documentation changes do not publish a release.

@@ -59,10 +59,7 @@ native adapters (none currently declared).
   core; one user backup remains **one logical backup**, not multiple objects
   shown as independent backups.
 
-The common engine eventually composes any eligible input with any eligible
-output; plugins are allowed to specialize metadata but cannot circumvent the
-encryption, audit, retention, vault or two-phase commit rules. Runtime
-orchestration is **not implemented by this catalog commit**.
+The generic engine is in partial development: five preview filesystem source→POSIX pairs execute through the common Rust runtime; the majority of catalog combinations remain declarative only. Every adapter must respect encryption, permissions, vault, audit, retention and two-phase commit semantics.
 
 ## Security / platform boundaries
 
@@ -286,3 +283,12 @@ test in the Production Gate and macOS/Windows/Debian packaging jobs. Catalog:
 fail closed. GitHub/Dropbox still have dedicated preview engines outside this
 generic dispatch and require live-service E2E. Legacy Python archive migration
 is explicitly optional and no longer a promotion gate.
+
+
+## r038 — source/target user separation and incremental contract
+
+- An account-scoped restore must store **source account as provenance**, but independently authorize the destination with target-specific credentials and least privilege. Never reuse source API secrets in another user's account by implication.
+- Rust dedicated preview paths: GitHub new repository under an explicitly matched target owner; Dropbox add-only upload of one file using an independently verified target write-token account ID/email. Remote arbitrary selection, multi-account metadata/ACL transfer and full-account restore remain open.
+- Backup plugins must eventually implement both **FULL** and **INCREMENTAL** from CLI/manual schedules, with signed/authenticated lineage, reference full and complete per-snapshot metrics. Verification of incrementals defaults to the full chain, with explicit opt-out.
+- Deletion of any full or increment must preserve all surviving restore points: rebase descendants, promote successors to FULL if necessary, never physically delete live chunks during purge, and leave actual ciphertext reclamation to a separately authorized GC. Protected children block automatic lineage changes.
+- Local GC retains partially live parity 8+2 stripes for redundancy; crash-safe repacking and remote GC remain unqualified. Details: [IT operations](R038_OPERATIONS_IT.md), [EN operations](R038_OPERATIONS_EN.md) and [RC matrix](RC_CERTIFICATION_MATRIX.md).

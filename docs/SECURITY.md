@@ -9,7 +9,7 @@
 3. Archive paths are validated against traversal, symlink and tar device entries. Encrypted output is written as `.partial`, finalized with atomic rename and verified by independent SHA-256 sidecars.
 4. Failed or interrupted runs preserve checkpoints and verified archives; old backups are not overwritten by `--restart`. Migration of monolithic archives keeps the source immutable until split archives pass integrity checks.
 5. CI artifact deletion is disabled by default. When selected, the engine scans the current GitHub inventory, protects live and unclassified dependencies, offers dry run, reports per-repository progress and totals. Third-party unreported dependencies cannot be proven safe to delete.
-6. Dropbox backend calls only read-only API endpoints. It has no purge or delete methods, and it does not delete expired historical content already stored locally.
+6. Dropbox **backup reading** calls only read-only API endpoints and does not delete source content. Separately, an explicitly confirmed restore may upload a NEW Dropbox file using a destination-specific write token. The Rust restore verifies that token's target account and refuses overwrites. Live cross-user testing is still required.
 7. Network update requests require HTTPS and an allowlisted release asset domain; download requires a supplied GitHub SHA-256 digest. The app does not silently execute installers. Production auto-install needs platform signing and explicit secure policy.
 8. Native releases require least-privilege CI permissions, artifact integrity, dependency scanning and signed runtime packaging; currently missing signature secrets are release blockers for unattended updates.
 
@@ -53,3 +53,12 @@ by scripts/check-confidential-artifacts.py in the Production Gate.
 A private repository remains preferable even for ciphertext because
 Git objects are widely copyable and password guessing can be attempted
 offline. Never share the PDF password in chat, commits, CLI arguments or CI.
+
+
+## r038 — additional native safeguards and unqualified boundaries
+
+- The source account of a provider snapshot is historical provenance, not write authority. Restore into a different user requires independent destination credentials and explicit target selection; current GitHub new-repository and Dropbox new-file routes are narrow previews.
+- Full/incremental manifests and chunk references are age authenticated; the *multi-manifest* child-rebase path still needs forced-power-loss/fault-injection qualification before production use.
+- Logical purge changes/manages manifests only and does not reclaim ciphertext. A separate, operator-confirmed local GC uses a common store lock, verifies all surviving backup chains and parity, and applies a 48-hour default orphan grace (minimum 24). Mixed live/dead parity stripes are deliberately retained until crash-safe repacking works.
+- The persistent-state scheduler is in development. Keep JSON/state files private and secret-free; OS service isolation, monitoring, retention legal holds, independent WORM and remote GC are NOT certified.
+- [Runbook IT](R038_OPERATIONS_IT.md), [runbook EN](R038_OPERATIONS_EN.md), [release gates](RC_CERTIFICATION_MATRIX.md).

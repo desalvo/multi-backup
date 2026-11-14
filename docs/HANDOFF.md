@@ -514,3 +514,10 @@ older green r037 CI is not proof for r038. Preserve the private vault,
 never permit silent deletion or remote source credential reuse. Source and
 destination accounts are independent, and destination credentials must
 authorize destination access. Signed stable release remains blocked.
+
+## r038 handoff — audited documentation and operational procedures
+
+- **Source of truth for the Rust preview:** `docs/R038_OPERATIONS_IT.md` and `docs/R038_OPERATIONS_EN.md`. Both include commands, account-target permissions, scheduler JSON, restore, backup full/incremental, chain verification, rebase/purge and separate confirmed GC.
+- Documentation in older milestones and PDF screenshots reflects r018 Python/Tk; `scripts/build-publications.py` now produces four r038-specific *development-preview* chapters in each bilingual manual. After CI, verify PDFs really contain new text and re-render correctly. Brochures describe earlier delivery and must not claim r038 certification.
+- Current branch PR #10, not merged. Published r018 preserved. Old Python format migration optional. New Rust end-to-end recovery and safe storage lifecycle are mandatory.
+- Do not confuse metadata-only purge with later physical GC. Mixed live/dead 8+2 parity stripe repack and actual authenticated cross-user multi-object restore remain unimplemented. Check latest PR CI, fix regressions, certify independent real data restores and operating-system signatures before merge/release.
