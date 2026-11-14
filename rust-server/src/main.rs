@@ -118,6 +118,16 @@ fn secure_headers<R:IntoResponse>(response:R)->Response {
     result
 }
 async fn health()->impl IntoResponse {(StatusCode::OK,"ok")}
+async fn readiness(State(state):State<AppState>)->Response{
+    if let Some(db)=&state.0.cluster{
+        let probe=db.clone();
+        let healthy=tokio::task::spawn_blocking(move||probe.status()).await;
+        if !matches!(healthy,Ok(Ok(_))){
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
+    secure_headers((StatusCode::OK,"ready"))
+}
 async fn css()->Response {
     ([(header::CONTENT_TYPE,"text/css; charset=utf-8")],
         include_str!("../public/app.css")).into_response()
@@ -570,7 +580,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         last_smtp_test:Mutex::new(None),
         cluster,agent_proxy_key,
     }));
-    let app=Router::new().route("/healthz",get(health))
+    let app=Router::new().route("/healthz",get(health)).route("/readyz",get(readiness))
         .route("/login",get(login_page).post(do_login))
         .route("/oidc/start",get(oidc_start))
         .route("/oidc/callback",get(oidc_callback))
