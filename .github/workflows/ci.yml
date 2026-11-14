@@ -68,6 +68,8 @@ jobs:
         run: |
           cargo --version
           cargo test --manifest-path rust/Cargo.toml
+          cargo build --manifest-path rust/Cargo.toml --release
+          python -m unittest discover -s tests -p test_rust_bridge.py -v
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
 

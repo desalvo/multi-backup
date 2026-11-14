@@ -42,7 +42,7 @@ def gui_smoke():
         assert application.resume_button.caption == 'Resume · Riprendi backup'
         assert callable(application.start_button.command)
         assert callable(application.resume_button.command)
-        assert application.menu_button.caption == 'Hide navigation'
+        assert application.menu_button.caption == 'Nascondi navigazione'
         assert not application.ignore_ci_artifact_errors.get()
         application._startup_security()
         assert not application._locked
@@ -56,9 +56,16 @@ def gui_smoke():
         application._show('Encryption')
         application._toggle_sidebar()
         assert not application.sidebar_visible
+        assert application.menu_button.caption == 'Mostra navigazione'
         application._toggle_sidebar()
         assert application.sidebar_visible
+        assert application.menu_button.caption == 'Nascondi navigazione'
+        application.progress.set_running(True)
+        application.progress.note_activity()
+        assert application.progress.pulse.running
         application.progress.set_percent(50)
+        application.progress.set_running(False)
+        assert not application.progress.pulse.running
         application.update_idletasks()
     finally:
         application.destroy()

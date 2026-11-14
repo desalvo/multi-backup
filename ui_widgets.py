@@ -6,8 +6,11 @@ paint their own labelled surfaces; no platform-specific button styling is requir
 from __future__ import annotations
 
 import colorsys
+import time
 import tkinter as tk
 from tkinter import font as tkfont, ttk
+
+from rust_bridge import native_progress_color
 
 SURFACE = '#F5F8FC'
 NAVY = '#163451'
@@ -44,6 +47,11 @@ def _blend(left: tuple[int, int, int], right: tuple[int, int, int],
 
 def progress_color(percent: float) -> str:
     """Red at 0%, yellow at midpoint, and green at 100%, inclusive."""
+    # Prefer the tested Rust-native colour kernel when it is bundled; the
+    # mathematical Python fallback keeps old/source builds fully compatible.
+    native = native_progress_color(percent)
+    if native is not None:
+        return native
     value = max(0., min(100., float(percent)))
     red, green, blue = colorsys.hsv_to_rgb(value / 300., 0.86, 0.91)
     return '#%02X%02X%02X' % (round(red * 255), round(green * 255),
@@ -184,34 +192,170 @@ class PremiumButton(tk.Canvas):
                          font=self._font, fill=foreground, anchor='center')
 
 
+class HamburgerButton(PremiumButton):
+    """Compact, accessible hamburger with 4x-antialiased rounded vector bars."""
+
+    def __init__(self, parent, *, command=None, expanded=True):
+        # Reuse native keyboard, hover, click and focus handling, but draw only
+        # the familiar icon (not an English 'Hide navigation' label).
+        super().__init__(parent, text='', command=command,
+                         style='Dark.TButton', width=56, height=42)
+        self._width = 56
+        self.configure(width=56)
+        self.expanded = bool(expanded)
+        self.caption = 'Nascondi navigazione' if expanded else 'Mostra navigazione'
+        self._draw()
+
+    def set_expanded(self, value):
+        self.expanded = bool(value)
+        self.caption = ('Nascondi navigazione' if self.expanded
+                        else 'Mostra navigazione')
+        self._draw()
+
+    def _draw(self):
+        from PIL import Image, ImageDraw, ImageTk
+        from render_quality import SCALE, glossy_patch
+        w = max(12, self.winfo_width() if self.winfo_width() > 1 else
+                getattr(self, '_width', 56))
+        h = max(12, self.winfo_height() if self.winfo_height() > 1 else 42)
+        base = Image.new('RGBA', (w, h), (*_rgb(self._surface), 255))
+        base.alpha_composite(glossy_patch(
+            w, h, top='#6674BD' if self.hover else '#4C5DA8',
+            bottom='#354783' if self.hover else '#263976',
+            border='#A3B4EA', radius=14, focused=self.focused))
+        big = Image.new('RGBA', (w * SCALE, h * SCALE))
+        pen = ImageDraw.Draw(big)
+        ink = '#F7FAFF' if self.expanded else '#BEEBFF'
+        bar_left, bar_right = 17 * SCALE, (w - 17) * SCALE
+        for y in (12, 20, 28):
+            y0 = y * SCALE - 1.5 * SCALE
+            pen.rounded_rectangle((bar_left, round(y0), bar_right,
+                                   round(y0 + 3 * SCALE)),
+                                  radius=round(1.5 * SCALE), fill=ink)
+        base.alpha_composite(big.resize((w, h), Image.Resampling.LANCZOS))
+        self._photo = ImageTk.PhotoImage(base)
+        self.delete('all')
+        self.create_image(0, 0, image=self._photo, anchor='nw')
+
+
+class ActivityPulse:
+    """Pure state machine: animate on fresh real events, freeze on a stall."""
+
+    def __init__(self, idle_after=8.0):
+        self.idle_after = float(idle_after)
+        self.running = False
+        self.phase = 0.0
+        self.last_activity = 0.0
+
+    def set_running(self, value, *, now=None):
+        self.running = bool(value)
+        if self.running:
+            self.last_activity = time.monotonic() if now is None else float(now)
+            self.phase = 0.0
+
+    def note_activity(self, *, now=None):
+        if self.running:
+            self.last_activity = time.monotonic() if now is None else float(now)
+
+    def advance(self, *, now=None):
+        current = time.monotonic() if now is None else float(now)
+        if not self.running or current - self.last_activity > self.idle_after:
+            return False
+        self.phase = (self.phase + 0.0225) % 1.0
+        return True
+
+
 class GradientProgress(tk.Canvas):
-    """Rounded glass progress pill, with a true red→yellow→green position gradient."""
+    """Smooth red→yellow→green fill plus an event-driven animated busy bead.
+
+    Bar colours are mapped to absolute progress: red at 0%, green at 100%.
+    A tiny cached 4x-antialiased activity image moves only while the backup
+    process is active and the engine has reported an event recently.
+    """
 
     def __init__(self, parent, *, width=440):
-        super().__init__(parent, height=43, width=width, bg=SURFACE,
+        from PIL import ImageTk
+        from render_quality import activity_patch
+        self._surface = _parent_background(parent)
+        super().__init__(parent, height=43, width=width, bg=self._surface,
                          highlightthickness=0, borderwidth=0)
         self.percent = 0.
+        self.pulse = ActivityPulse()
         self._photo = None
+        self._activity_photo = ImageTk.PhotoImage(activity_patch())
+        self._activity_id = None
+        self._timer = None
         self.bind('<Configure>', lambda _event: self._draw())
+        self.bind('<Destroy>', self._on_destroy)
         self._draw()
 
-    def set_percent(self, value) -> None:
+    def _on_destroy(self, event):
+        if event.widget is self and self._timer is not None:
+            try:
+                self.after_cancel(self._timer)
+            except tk.TclError:
+                pass
+            self._timer = None
+
+    def set_running(self, running):
+        self.pulse.set_running(running)
+        self._draw()
+        if running:
+            self._schedule_tick()
+        elif self._timer is not None:
+            self.after_cancel(self._timer)
+            self._timer = None
+
+    def note_activity(self):
+        self.pulse.note_activity()
+        if self.pulse.running:
+            self._schedule_tick()
+
+    def _schedule_tick(self):
+        if self._timer is None:
+            self._timer = self.after(95, self._tick)
+
+    def _indicator_x(self):
+        w = max(80, self.winfo_width())
+        extent = max(5, w - 32)
+        # A triangle wave visibly bounces without altering reported percentage.
+        bounce = 1.0 - abs(2.0 * self.pulse.phase - 1.0)
+        return 16 + bounce * extent
+
+    def _tick(self):
+        self._timer = None
+        if not self.pulse.advance():
+            return
+        if self._activity_id is not None:
+            self.coords(self._activity_id, self._indicator_x(), 20)
+        self._schedule_tick()
+
+    def set_percent(self, value):
         try:
-            self.percent = max(0., min(100., float(value)))
+            next_percent = max(0., min(100., float(value)))
         except (ValueError, TypeError):
-            self.percent = 0.
-        self._draw()
+            next_percent = 0.
+        if not (0 <= next_percent <= 100):  # guard NaN too
+            next_percent = 0.
+        was = round(self.percent)
+        self.percent = next_percent
+        # Skip the expensive full-width re-rasterization for same integer %.
+        if round(next_percent) != was:
+            self._draw()
 
-    def _draw(self) -> None:
+    def _draw(self):
         from PIL import ImageTk
         from render_quality import progress_patch
-
         width = max(80, self.winfo_width())
-        height = 43
-        img = progress_patch(width, height, self.percent, SURFACE,
+        img = progress_patch(width, 43, self.percent, self._surface,
                              progress_color)
         self._photo = ImageTk.PhotoImage(img)
         self.delete('all')
-        self.create_image(0, 0, anchor='nw', image=self._photo)
+        self.create_image(0, 0, image=self._photo, anchor='nw')
         self.create_text(width - 38, 20, text=f'{round(self.percent):d}%',
                          fill='#FFFFFF', font=('Helvetica Neue', 10, 'bold'))
+        self._activity_id = None
+        if self.pulse.running:
+            self._activity_id = self.create_image(
+                self._indicator_x(), 20, image=self._activity_photo)
+

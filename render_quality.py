@@ -157,6 +157,31 @@ def progress_patch(width, height, percent, background, gradient_at, *,
     return high.resize((width, height), Image.Resampling.LANCZOS)
 
 
+def activity_patch(size=28, *, scale=SCALE):
+    """Premultiplied-looking translucent busy dot rasterized at Retina density.
+
+    Draw the indicator once, then move the existing Tk image by coordinates:
+    no costly full-width bar re-render and no pixelated Canvas oval edges.
+    """
+    side = int(size)
+    if side < 12:
+        raise ValueError('Activity indicator is too small')
+    high = Image.new('RGBA', (side * scale, side * scale), (0, 0, 0, 0))
+    pen = ImageDraw.Draw(high)
+    center = side * scale / 2
+    for radius, fill in ((12.0, (103, 194, 255, 28)),
+                         (9.0, (110, 215, 255, 55)),
+                         (6.0, (15, 33, 67, 240)),
+                         (4.5, (244, 250, 255, 255))):
+        rr = radius * scale
+        pen.ellipse((round(center - rr), round(center - rr),
+                     round(center + rr), round(center + rr)), fill=fill)
+    pen.arc((round(center - 5 * scale), round(center - 5 * scale),
+             round(center + 5 * scale), round(center + 5 * scale)),
+            195, 348, fill=(109, 243, 255, 255), width=scale)
+    return high.resize((side, side), Image.Resampling.LANCZOS)
+
+
 def smooth_polyline(image, points, colour, line_width=2, *, scale=SCALE):
     """Downsample only the local bounds of a decorative curved line."""
     points = list(points)

@@ -22,7 +22,7 @@ from tkinter import ttk,filedialog,messagebox,simpledialog
 from archive_ops import catalog,list_members,read_member,extract_archive,checkout_git,mount_archive
 from settings import load_settings,save_settings,set_backend_enabled
 from version import VERSION, BUILD, AUTHOR
-from ui_widgets import PremiumButton, GradientProgress
+from ui_widgets import PremiumButton, GradientProgress, HamburgerButton
 from premium_dashboard import DashboardView
 from archive_management import deletion_plan,delete_local_archive,ArchiveDeletionError
 from backup_sessions import dropbox_active_manifest
@@ -275,8 +275,8 @@ class BackupGUI(tk.Tk):
         self.content=tk.Frame(self,bg='#0D1A3D');self.content.pack(fill='both',expand=True)
         toolbar=tk.Frame(self.content,bg='#0D1A3D')
         toolbar.pack(fill='x',padx=(16,18),pady=(5,3))
-        self.menu_button=PremiumButton(toolbar,text='Hide navigation',style='Dark.TButton',
-                                       command=self._toggle_sidebar)
+        self.menu_button=HamburgerButton(
+            toolbar,command=self._toggle_sidebar,expanded=True)
         self.menu_button.pack(side='left')
         PremiumButton(toolbar,text='About',style='Dark.TButton',
                       command=self._show_about,width=115,height=36).pack(
@@ -329,8 +329,7 @@ class BackupGUI(tk.Tk):
             self.sidebar.pack(side='left',fill='y',before=self.content)
         else:
             self.sidebar.pack_forget()
-        self.menu_button.set_text('Hide navigation' if self.sidebar_visible
-                                  else 'Show navigation')
+        self.menu_button.set_expanded(self.sidebar_visible)
 
     def _resize_page_host(self,event):
         self.page_canvas.itemconfigure(self.page_window,width=event.width)
@@ -1244,6 +1243,7 @@ class BackupGUI(tk.Tk):
             if self.skiplogs.get():args+=['--skip-ci-logs']
         elif self.dropbox_path.get():
             args+=['--dropbox-path',self.dropbox_path.get()]
+        self.progress.set_running(False)
         self.progress.set_percent(0)
         self._backup_had_omissions=False
         self._log(
@@ -1263,8 +1263,10 @@ class BackupGUI(tk.Tk):
             self.start_button['state']='normal'
             self.resume_button['state']='normal'
             self.stop_button['state']='disabled'
+            self.progress.set_running(False)
             messagebox.showerror('Start failed',str(exc))
             return
+        self.progress.set_running(True)
         readers=[]
         for kind,stream in [('out',self.proc.stdout),('err',self.proc.stderr)]:
             worker=threading.Thread(target=self._read,args=(kind,stream),daemon=True)
@@ -1287,6 +1289,7 @@ class BackupGUI(tk.Tk):
         if self.proc and self.proc.poll() is None:
             try:self.proc.send_signal(signal.CTRL_BREAK_EVENT if os.name=='nt' else signal.SIGINT)
             except Exception:self.proc.terminate()
+            self.progress.set_running(False)
             self.status.set('Stopping safely; checkpoints remain available…')
 
     def _poll(self):
@@ -1294,6 +1297,7 @@ class BackupGUI(tk.Tk):
             for _ in range(100):
                 kind,payload=self.events.get_nowait()
                 if kind=='finished':
+                    self.progress.set_running(False)
                     self.start_button['state']='normal'
                     self.resume_button['state']='normal'
                     self.stop_button['state']='disabled'
@@ -1313,6 +1317,7 @@ class BackupGUI(tk.Tk):
                     try:
                         obj=json.loads(payload)
                         if obj.get('type')=='progress':
+                            self.progress.note_activity()
                             self.progress.set_percent(obj.get('percent',0))
                             self.status.set(obj.get('message',''))
                             if obj.get('stage') in (
@@ -1326,6 +1331,9 @@ class BackupGUI(tk.Tk):
                                     f"({obj.get('percent',0)}%)")
                         else:self._log(payload)
                     except ValueError:self._log(payload)
+                elif kind=='out':
+                    self.progress.note_activity()
+                    self._log(payload)
                 elif kind=='github-login':
                     login,force=payload
                     if force or not self.github_user.get().strip():
