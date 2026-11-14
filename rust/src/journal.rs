@@ -20,9 +20,16 @@ fn no_symlink(path: &Path) -> JournalResult<()> {
     Ok(())
 }
 fn private_dir(path: &Path) -> JournalResult<()> {
+    let new_directory = !path.exists();
     no_symlink(path)?;
     fs::create_dir_all(path)?;
     no_symlink(path)?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        if new_directory {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        }
+    }
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
         let mode = fs::metadata(path)?.permissions().mode();
@@ -259,7 +266,7 @@ mod tests {
     }
     #[test] fn durable_start_resume_and_guard() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = tmp.path().join(".state"); fs::create_dir(&state).unwrap();
+        let state = tmp.path().join(".state"); private_dir(&state).unwrap();
         let cfg = json!({"recipient": "age1example", "max_runs_per_repo": 5});
         let file = tmp.path().join("sample.tar.gz.age");
         fs::write(&file, b"ciphertext fixture").unwrap();

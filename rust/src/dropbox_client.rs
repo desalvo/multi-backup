@@ -24,9 +24,14 @@ const API: &str = "https://api.dropboxapi.com/2/files/";
 const DOWNLOAD: &str = "https://content.dropboxapi.com/2/files/download";
 
 fn private_directory(path: &Path) -> DropboxResult<()> {
+    let new_directory = fs::symlink_metadata(path).is_err();
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.file_type().is_symlink() { return Err(err("Symlink backup directory denied")); }
     } else { fs::create_dir_all(path)?; }
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        if new_directory { fs::set_permissions(path, fs::Permissions::from_mode(0o700))?; }
+    }
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
         if fs::metadata(path)?.permissions().mode() & 0o077 != 0 {

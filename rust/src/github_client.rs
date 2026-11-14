@@ -23,10 +23,15 @@ fn safe_slug(slug: &str) -> GithubResult<(&str, &str)> {
     Ok((parts[0], parts[1]))
 }
 fn private_dir(path: &Path) -> GithubResult<()> {
+    let new_directory = fs::symlink_metadata(path).is_err();
     if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(err("Unsafe symlinked backup directory"));
     }
     fs::create_dir_all(path)?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        if new_directory { fs::set_permissions(path, fs::Permissions::from_mode(0o700))?; }
+    }
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
         if fs::metadata(path)?.permissions().mode() & 0o077 != 0 {
