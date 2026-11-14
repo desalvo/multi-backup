@@ -5,7 +5,7 @@ use crate::{archive, journal};
 use chrono::Utc;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs::{self, File}, io::Write, path::{Path, PathBuf}, process::Command};
+use std::{fs::{self, File}, io::Write, path::Path, process::{Command, Stdio}};
 use tempfile::TempDir;
 
 pub type GithubResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -161,8 +161,11 @@ fn metadata_for(slug: &str, root: &Path, max_runs: usize) -> GithubResult<Value>
         json_file(&where_to.join("run.json"), run)?;
         // CI download is conservative: never count a run as complete when its
         // declared artifacts cannot be downloaded. An older run backfills it.
-        let has_artifacts = run["artifacts_url"].as_str().is_some();
-        if has_artifacts && run["artifacts_count"].as_u64().unwrap_or(0) > 0 {
+        let artifacts = api(&format!(
+            "/repos/{slug}/actions/runs/{id}/artifacts?per_page=100"))?;
+        let artifact_count = artifacts["total_count"].as_u64()
+            .ok_or_else(|| err("Actions artifact inventory missing total_count"))?;
+        if artifact_count > 0 {
             let directory = where_to.join("artifacts");
             private_dir(&directory)?;
             let Some(dest) = directory.to_str() else { return Err(err("Invalid CI artifact staging path")); };
@@ -174,17 +177,18 @@ fn metadata_for(slug: &str, root: &Path, max_runs: usize) -> GithubResult<Value>
         }
         // Store run metadata for all successful candidates. Logs are
         // retrieved by a dedicated read-only GitHub API endpoint.
-        let logs = Command::new("gh").args([
-            "api", &format!("/repos/{slug}/actions/runs/{id}/logs")
-        ]).output();
-        match logs {
-            Ok(output) if output.status.success() && !output.stdout.is_empty() => {
-                fs::write(where_to.join("logs.zip"), output.stdout)?;
-            }
-            _ => {
-                rejected.push(id);
-                continue;
-            }
+        // Archive logs directly to disk; never collect arbitrarily large
+        // Actions log ZIPs in Rust process memory.
+        let path = where_to.join("logs.zip");
+        let sink = File::create(&path)?;
+        let status = Command::new("gh")
+            .args(["api", &format!("/repos/{slug}/actions/runs/{id}/logs")])
+            .stdout(Stdio::from(sink)).stderr(Stdio::null()).status();
+        if !matches!(status, Ok(s) if s.success()) ||
+           fs::metadata(&path)?.len() == 0 {
+            let _ = fs::remove_file(path);
+            rejected.push(id);
+            continue;
         }
         archived += 1;
     }
