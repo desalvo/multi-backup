@@ -65,3 +65,16 @@ recoverability or an external security certification.
 - Multi-selection restore and responsive file-manager-like web browse.
 
 These features require full post-merge qualification before marking them production certified. Reverse conversion, production native signing, live mount, OIDC/LDAPS and SMTP remain explicit release blockers.
+
+
+## r023 outstanding integration certification
+
+The native Rust storage pane, relocated store, SMTP(S), LDAPS and OIDC
+backends have been implemented as development code. Their presence is
+not certification. Validate latest CI, OIDC issuer/JWKS rotation/nonce,
+LDAP directory group membership and TLS, SMTP actual delivery and
+certificate rejection, external identity authorization and audit
+before enabling remote production access.
+
+Live filesystem mounts, in-memory age session interoperability and
+direct provider-to-chunk ingestion remain absent; stable promotion is blocked.

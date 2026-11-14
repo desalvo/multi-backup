@@ -24,6 +24,32 @@ spec:
             - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: /run/secrets/age-identity}
             - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
             - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
+          {{- if .Values.auth.ldap.enabled }}
+            - {name: MULTI_BACKUP_LDAP_URL, value: {{ .Values.auth.ldap.url | quote }}}
+            - {name: MULTI_BACKUP_LDAP_USER_DN_TEMPLATE, value: {{ .Values.auth.ldap.userDnTemplate | quote }}}
+            {{- if .Values.auth.ldap.requiredGroupDn }}
+            - {name: MULTI_BACKUP_LDAP_REQUIRED_GROUP_DN, value: {{ .Values.auth.ldap.requiredGroupDn | quote }}}
+            {{- end }}
+            - {name: MULTI_BACKUP_LDAP_ALLOWED_USERS, value: {{ .Values.auth.ldap.allowedUsers | quote }}}
+            - {name: MULTI_BACKUP_LDAP_GROUP_MEMBER_ATTRIBUTE, value: {{ .Values.auth.ldap.groupMemberAttribute | quote }}}
+          {{- end }}
+          {{- if .Values.auth.oidc.enabled }}
+            - {name: MULTI_BACKUP_OIDC_ISSUER, value: {{ .Values.auth.oidc.issuer | quote }}}
+            - {name: MULTI_BACKUP_OIDC_CLIENT_ID, value: {{ .Values.auth.oidc.clientId | quote }}}
+            - {name: MULTI_BACKUP_OIDC_ALLOWED_SUBJECTS, value: {{ .Values.auth.oidc.allowedSubjects | quote }}}
+            - {name: MULTI_BACKUP_OIDC_SECRET_FILE, value: /run/secrets/oidc-client-secret}
+          {{- end }}
+          {{- if .Values.auth.smtp.enabled }}
+            - {name: MULTI_BACKUP_SMTP_HOST, value: {{ .Values.auth.smtp.host | quote }}}
+            - {name: MULTI_BACKUP_SMTP_PORT, value: {{ .Values.auth.smtp.port | quote }}}
+            - {name: MULTI_BACKUP_SMTP_TLS, value: {{ .Values.auth.smtp.tls | quote }}}
+            - {name: MULTI_BACKUP_SMTP_FROM, value: {{ .Values.auth.smtp.from | quote }}}
+            - {name: MULTI_BACKUP_SMTP_TO, value: {{ .Values.auth.smtp.to | quote }}}
+            {{- if .Values.auth.smtp.username }}
+            - {name: MULTI_BACKUP_SMTP_USER, value: {{ .Values.auth.smtp.username | quote }}}
+            - {name: MULTI_BACKUP_SMTP_PASSWORD_FILE, value: /run/secrets/smtp-password}
+            {{- end }}
+          {{- end }}
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: credentials, mountPath: /run/secrets, readOnly: true}

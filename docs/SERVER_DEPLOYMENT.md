@@ -163,3 +163,42 @@ Non utilizzare le immagini come produzione fino a validazione e pubblicazione.
 ## Browser gerarchico (revisione r022)
 
 Il frontend web include un albero per cartelle con icone, ricerca dei path, commutatore lista/griglia, selezione multipla con checkbox e `Esporta selezione`. La richiesta HTTPS autenticata invia `selections: [path, ...]` insieme all'ID del **solo backup logico** interessato. Il server usa `restore_many` in un'unica nuova directory, senza overwrite dell'origine. L'export è ancora **server-side**: il download diretto sullo smartphone, il mount live e il restore-in-place devono essere implementati e certificati prima della release.
+
+
+## Identity and SMTP(S) options — r023 development
+
+External providers are always disabled by default, and require trusted
+secrets/certificates and explicit authorization policies. These integrations
+are awaiting testing against real directory and identity providers.
+
+| Variable | Example | Safety behavior |
+| --- | --- | --- |
+| MULTI_BACKUP_LDAP_URL | ldaps://ldap.example.org:636 | LDAPS only, validated TLS |
+| MULTI_BACKUP_LDAP_USER_DN_TEMPLATE | uid={user},ou=People,dc=example,dc=org | Escapes username before DN bind |
+| MULTI_BACKUP_LDAP_REQUIRED_GROUP_DN | cn=backup,ou=Groups,dc=example,dc=org | Optional required LDAP group |
+| MULTI_BACKUP_LDAP_ALLOWED_USERS | alice,bob | Explicit authorization allow-list |
+| MULTI_BACKUP_LDAP_GROUP_MEMBER_ATTRIBUTE | member / uniqueMember / memberUid | Controlled group membership check |
+| MULTI_BACKUP_OIDC_ISSUER | https://sso.example.org/realms/backup | HTTPS, no HTTP redirect following |
+| MULTI_BACKUP_OIDC_CLIENT_ID | multi-backup | Required OIDC audience |
+| MULTI_BACKUP_OIDC_SECRET_FILE | /run/secrets/oidc-client-secret | Secret-file only |
+| MULTI_BACKUP_OIDC_ALLOWED_SUBJECTS | uuid-1,uuid-2 | Required stable subject allow-list |
+| MULTI_BACKUP_SMTP_HOST | mail.example.org | Server TLS verification |
+| MULTI_BACKUP_SMTP_TLS | smtps / starttls | No plaintext SMTP |
+| MULTI_BACKUP_SMTP_PORT | 465 / 587 | Relay port |
+| MULTI_BACKUP_SMTP_FROM / MULTI_BACKUP_SMTP_TO | mailbox addresses | Fixed sender/recipient |
+| MULTI_BACKUP_SMTP_USER | account | Optional SMTP account |
+| MULTI_BACKUP_SMTP_PASSWORD_FILE | /run/secrets/smtp-password | Password stored in Secret |
+
+OIDC callback URL must exactly match
+https://YOUR_PUBLIC_ORIGIN/oidc/callback at your identity provider.
+Code+PKCE, state, nonce, cryptographically verified ID token and subject
+allow-list are required. Local admin login cannot be impersonated by LDAP.
+
+SMTP test endpoint: POST /api/smtp/test requires a valid session and CSRF
+header, sends only to the configured recipient, and returns no secrets.
+
+Helm auth.ldap, auth.oidc and auth.smtp are opt-in. Kubernetes Secret
+multi-backup-auth must contain admin-hash, age-identity and, when enabled,
+the optional oidc-client-secret and smtp-password keys. For production,
+role-based authorization, audit integrity, abuse controls and live provider
+interoperability remain explicit acceptance requirements.

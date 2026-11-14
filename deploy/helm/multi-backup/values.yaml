@@ -22,3 +22,26 @@ storage:
 resources:
   requests: {cpu: 250m, memory: 256Mi}
   limits: {cpu: "2", memory: 2Gi}
+
+# External identity providers and SMTP are disabled until configured.
+auth:
+  ldap:
+    enabled: false
+    url: ""
+    userDnTemplate: ""
+    requiredGroupDn: ""
+    allowedUsers: ""
+    groupMemberAttribute: member
+  oidc:
+    enabled: false
+    issuer: ""
+    clientId: ""
+    allowedSubjects: ""
+  smtp:
+    enabled: false
+    host: ""
+    port: 587
+    tls: starttls
+    from: ""
+    to: ""
+    username: ""

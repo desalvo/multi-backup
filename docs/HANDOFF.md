@@ -236,3 +236,17 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
 ## r022 continuation point
 
 On PR #9 the Rust backend has health verification, portable ZIP64 bundles, multiple-selection restore, and streaming legacy archive migration. Native eframe build correction, OCI and OS packaging requalification remain ongoing. Use the latest commit SHA, not the last successful older workflow. Do not merge or promote stable before signed installer E2E, real GitHub/Dropbox recovery and identity/auth integrations. Consult docs/RC_CERTIFICATION_MATRIX.md.
+
+
+## r023 development continuation
+
+- Main remains unchanged; PR #9 is draft.
+- Storage v1 relocation, Rust desktop integrated storage UI, SMTP(S),
+  LDAPS and OIDC code are on branch. All new integrations require current
+  CI and real hardware/service acceptance.
+- Helm optional auth flags are disabled by default and Secret-backed.
+- Mac DMG now has app + Applications shortcut and DiskImages transient retries.
+- Crucial blockers: actual mount live, full age vault-in-memory, provider
+  direct chunk backup, comprehensive reverse storage conversion, independent
+  security review, notarization/Authenticode, OIDC/LDAP/SMTP live testing.
+- Do not promote stable or Docker images based on a prior green commit.

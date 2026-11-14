@@ -328,3 +328,22 @@ a verified inventory with explicit scope and acceptance gates exists.
 - Responsive web browser now supports nested folders, search, list/grid and selection across a single logical backup.
 - Publication policy now gates both OCI and native images on the Rust cross-platform matrix, and keeps stable opt-in disabled by default.
 - Never claim completed certification on a compile-only gate; details in docs/RC_CERTIFICATION_MATRIX.md.
+
+
+## r023 — v1 relocation and desktop GUI; SMTP(S), LDAPS, OIDC (2026-11-14)
+
+- Implemented v1 storage relocation to a new directory with dry-run and
+  source/destination SHA-256, age/HMAC and parity verification. The source
+  is never deleted by relocation.
+- Added Rust native GUI storage pane showing ONE logical backup per cycle,
+  selectable virtual files, restore, parity check/repair, ZIP64 portable
+  archive, legacy streaming import and storage relocation.
+- Added optional server SMTP(S) with secret file and authenticated test,
+  optional LDAPS verified TLS and allow-list/group policy, and OIDC code
+  flow with PKCE/state/nonce and explicit authorized subjects.
+- Hardened macOS Rust DMG to include native app and Applications shortcut,
+  and retry only transient DiskImages contention.
+- Outstanding: mount live FUSE/WinFsp; in-memory age vault for new storage;
+  direct GitHub/Dropbox chunk ingest; complete reverse format conversion;
+  production signing; audited user/role model and external IdP acceptance.
+- CI needs requalification on latest head, not older 43615775732 green run.

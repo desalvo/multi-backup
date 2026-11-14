@@ -238,3 +238,16 @@ signed installers, production identity vault compatibility, real provider
 backup+restore, signed/verified releases, TLS/OIDC/LDAP/SMTP integration,
 live filesystem mounts and migration/upgrade rollback are still missing.
 See [certification matrix](docs/RC_CERTIFICATION_MATRIX.md).
+
+
+### r023 development: storage UI and server identity backends
+
+Rust native desktop includes a Storage chunk section for one logical backup
+per cycle, with encrypted chunk verification, selective restore, ZIP64
+import/export, migration and non-destructive relocation. It currently
+requires an external age identity file, pending vault memory integration.
+
+Server optional authentication: local Argon2id, LDAPS, and OIDC
+authorization-code/PKCE. SMTP(S) can send a session/CSRF-protected test email.
+No external providers are enabled by default; see SERVER_DEPLOYMENT.md
+and RC_CERTIFICATION_MATRIX.md for required secrets and acceptance tests.
