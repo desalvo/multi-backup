@@ -104,3 +104,32 @@ fn zip64_portable_roundtrip_and_tamper_detection(){
     assert!(multi_backup_core::portable::import(&bundle,&identity,
         &tmp.path().join("tampered-import")).is_err());
 }
+
+#[test]
+fn one_logical_backup_multi_selection_restores_cross_provider_files(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(tmp.path()) else{return};
+    let store_dir=tmp.path().join("store");let github=tmp.path().join("git");
+    let ci=tmp.path().join("ci");let dropbox=tmp.path().join("db");
+    for d in [&github,&ci,&dropbox]{fs::create_dir(d).unwrap();}
+    fs::write(github.join("git.txt"),b"repo").unwrap();
+    fs::write(ci.join("ci.txt"),b"workflow").unwrap();
+    fs::write(dropbox.join("file.txt"),b"cloud").unwrap();
+    Store::init(&store_dir,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&store_dir,&key).unwrap();
+    let backup=store.backup(&key,"unified",&[
+        Source{namespace:"github".into(),directory:github},
+        Source{namespace:"ci".into(),directory:ci},
+        Source{namespace:"dropbox".into(),directory:dropbox}]).unwrap();
+    assert_eq!(backup.entries.len(),3);
+    let selected=vec!["github".into(),"dropbox/file.txt".into()];
+    let dest=tmp.path().join("multi-restore");
+    assert_eq!(store.restore_many(&key,&backup.id,&selected,&dest).unwrap(),2);
+    assert_eq!(fs::read(dest.join("github/git.txt")).unwrap(),b"repo");
+    assert_eq!(fs::read(dest.join("dropbox/file.txt")).unwrap(),b"cloud");
+    assert!(!dest.join("ci/ci.txt").exists());
+    assert!(store.restore_many(&key,&backup.id,&selected,&dest).is_err());
+    let unsafe_selected=vec!["../etc".into()];
+    assert!(store.restore_many(&key,&backup.id,&unsafe_selected,
+        &tmp.path().join("unsafe")).is_err());
+}

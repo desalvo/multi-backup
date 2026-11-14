@@ -32,7 +32,7 @@ struct Session { csrf: String, until: Instant }
 struct Login { username: String, password: String }
 impl Drop for Login { fn drop(&mut self) { self.password.zeroize(); } }
 #[derive(Deserialize)]
-struct Export { backup_id: String, selection: Option<String> }
+struct Export { backup_id: String, selection: Option<String>, selections: Option<Vec<String>> }
 
 fn random_token() -> String {
     let mut bytes=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut bytes);hex::encode(bytes)
@@ -143,7 +143,11 @@ async fn export(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<Ex
     let dir=state.0.exports.join(format!("export-{}",&random_token()[..24]));
     let store=multi_backup_core::chunk_store::Store::open(&state.0.root,identity)
         .map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"storage_unavailable"}))))?;
-    let result=store.restore(identity,&req.backup_id,req.selection.as_deref(),&dir)
+    if req.selection.is_some() && req.selections.is_some() {
+        return Err((StatusCode::BAD_REQUEST,Json(json!({"error":"ambiguous_selection"}))));
+    }
+    let selections=req.selections.unwrap_or_else(||req.selection.into_iter().collect());
+    let result=store.restore_many(identity,&req.backup_id,&selections,&dir)
         .map_err(|_|(StatusCode::BAD_REQUEST,Json(json!({"error":"restore_failed_integrity_or_selection"}))))?;
     audit(&state.0,"selective_export_completed");
     Ok(Json(json!({"files":result,"server_directory":dir.to_string_lossy()})))

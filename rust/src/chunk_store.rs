@@ -258,27 +258,41 @@ impl Store {
     /// Restore a file, folder, or whole logical backup into a fresh directory.
     pub fn restore(&self, identity: &Path, id: &str, selection: Option<&str>,
                    dest: &Path) -> Res<usize> {
-        if dest.exists() { return Err("Never overwrite a restore target".into()); }
-        if selection.is_some_and(|s| !safe_path(s)) { return Err("Invalid selection".into()); }
-        self.repair(identity, id)?;
-        let manifest = self.load(identity, id)?;
-        let parent = dest.parent().ok_or("Missing parent")?;
-        if !parent.is_dir() { return Err("Restore parent must exist".into()); }
-        let stage = tempfile::Builder::new().prefix(".mb-restore-").tempdir_in(parent)?;
-        let mut count = 0;
-        for file in &manifest.entries {
-            if let Some(sel) = selection {
-                if file.path != sel && !file.path.starts_with(&format!("{sel}/")) {continue;}
-            }
-            let target = stage.path().join(&file.path);
-            dir(target.parent().ok_or("Invalid target")?)?;
-            let mut output = OpenOptions::new().write(true).create_new(true).open(target)?;
-            for chunk in &file.chunks { output.write_all(&self.read_chunk(identity, chunk)?)?; }
-            output.sync_all()?;
-            count += 1;
+        let selected: Vec<String> = selection.iter().map(|s|s.to_string()).collect();
+        self.restore_many(identity,id,&selected,dest)
+    }
+    /// Multi-select file manager restore, combining arbitrary files/folders in
+    /// the SAME logical backup, with a single atomic fresh destination.
+    pub fn restore_many(&self, identity: &Path, id: &str, selections:&[String],
+                   dest: &Path) -> Res<usize> {
+        if dest.exists(){return Err("Never overwrite a restore target".into());}
+        if selections.len()>1000||selections.iter().any(|s|!safe_path(s)){
+            return Err("Invalid file/folder selection".into());
         }
-        if count == 0 && selection.is_some() { return Err("Selection not found".into()); }
-        fs::rename(stage.path(), dest)?;
+        self.repair(identity,id)?;
+        let manifest=self.load(identity,id)?;
+        let parent=dest.parent().ok_or("Missing parent")?;
+        if !parent.is_dir(){return Err("Restore parent missing".into());}
+        let stage=tempfile::Builder::new().prefix(".mb-restore-").tempdir_in(parent)?;
+        let mut count=0;
+        for file in &manifest.entries {
+            if !selections.is_empty()&&!selections.iter().any(|sel|
+                file.path==*sel||file.path.starts_with(&format!("{sel}/"))){
+                continue;
+            }
+            let target=stage.path().join(&file.path);
+            dir(target.parent().ok_or("Invalid target")?)?;
+            let mut output=OpenOptions::new().write(true).create_new(true).open(target)?;
+            for chunk in &file.chunks {
+                output.write_all(&self.read_chunk(identity,chunk)?)?;
+            }
+            output.sync_all()?;
+            count+=1;
+        }
+        if count==0 && !selections.is_empty() {
+            return Err("No matching selected files or folders".into());
+        }
+        fs::rename(stage.path(),dest)?;
         Ok(count)
     }
 }
