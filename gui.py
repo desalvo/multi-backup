@@ -192,7 +192,33 @@ class BackupGUI(tk.Tk):
                  fg='#C6D4F9',bg=SIDEBAR_BG).pack(anchor='center',pady=(2,0))
         tk.Frame(self.sidebar,height=1,bg=SIDEBAR_SEPARATOR).pack(fill='x',padx=18,pady=(0,12))
 
-        self.nav={}
+        # The footer and the complete photographic inset stay anchored at
+        # the bottom. The navigation itself scrolls on shorter notebook screens
+        # rather than clipping the last route or overlapping author/build data.
+        nav_holder = tk.Frame(self.sidebar, bg=SIDEBAR_BG)
+        nav_holder.pack(side='top', fill='both', expand=True)
+        self.nav_scroller = tk.Canvas(nav_holder, bg=SIDEBAR_BG,
+                                      borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(nav_holder, orient='vertical',
+                                  command=self.nav_scroller.yview)
+        self.nav_scroller.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        self.nav_scroller.pack(side='left', fill='both', expand=True)
+        self.nav_content = tk.Frame(self.nav_scroller, bg=SIDEBAR_BG)
+        self._nav_window = self.nav_scroller.create_window(
+            (0, 0), window=self.nav_content, anchor='nw')
+        self.nav_content.bind(
+            '<Configure>', lambda _ev: self.nav_scroller.configure(
+                scrollregion=self.nav_scroller.bbox('all')))
+        self.nav_scroller.bind(
+            '<Configure>', lambda ev: self.nav_scroller.itemconfigure(
+                self._nav_window, width=ev.width))
+        for item in (self.nav_scroller, self.nav_content):
+            item.bind('<MouseWheel>', self._scroll_sidebar)
+            item.bind('<Button-4>', self._scroll_sidebar)
+            item.bind('<Button-5>', self._scroll_sidebar)
+
+        self.nav = {}
         translated={'Dashboard':'Dashboard','Backup':'Backup','Archives':'Archivi',
                     'Restore':'Ripristina','Plugins':'Plugin',
                     'Encryption':'Vault e chiavi','Updates':'Aggiornamenti',
@@ -200,12 +226,15 @@ class BackupGUI(tk.Tk):
         for name,icon in NAV_ITEMS:
             if name in ('Dashboard','Encryption'):
                 section='IL TUO SPAZIO' if name=='Dashboard' else 'PREFERENZE'
-                tk.Label(self.sidebar,text=section,font=('Helvetica Neue',9,'bold'),
+                tk.Label(self.nav_content,text=section,font=('Helvetica Neue',9,'bold'),
                          fg=SIDEBAR_HEADING,bg=SIDEBAR_BG,
                          anchor='w').pack(fill='x',padx=25,
                                           pady=(10 if name=='Dashboard' else 19,6))
-            btn=SidebarNavItem(self.sidebar,translated[name],icon,lambda n=name:self._show(n))
+            btn=SidebarNavItem(self.nav_content,translated[name],icon,
+                               lambda n=name:self._show(n))
             btn.pack(fill='x',padx=13,pady=2)
+            for wheel in ('<MouseWheel>','<Button-4>','<Button-5>'):
+                btn.bind(wheel, self._scroll_sidebar)
             self.nav[name]=btn
         foot=tk.Frame(self.sidebar,bg=SIDEBAR_BG)
         foot.pack(side='bottom',fill='x',padx=18,pady=(6,17))
@@ -275,6 +304,18 @@ class BackupGUI(tk.Tk):
         self._build_encryption(self.pages['Encryption'])
         self._build_updates(self.pages['Updates'])
         self._build_settings(self.pages['Settings'])
+
+    def _scroll_sidebar(self, event):
+        if getattr(event, 'num', None) == 4:
+            direction = -1
+        elif getattr(event, 'num', None) == 5:
+            direction = 1
+        elif getattr(event, 'delta', 0):
+            direction = -1 if event.delta > 0 else 1
+        else:
+            return 'break'
+        self.nav_scroller.yview_scroll(direction * 2, 'units')
+        return 'break'
 
     def _toggle_sidebar(self):
         if self._locked:return
