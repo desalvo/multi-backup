@@ -30,7 +30,23 @@ install -Dpm0644 assets/icon-256.png "$stage/usr/share/icons/hicolor/256x256/app
 install -Dpm0644 LICENSE "$stage/usr/share/doc/multi-backup-rust/copyright"
 install -dm0755 "$stage/DEBIAN"
 # Compute runtime dependencies from the target Debian system's shared libraries.
-dependencies="$(dpkg-shlibdeps -O -e"$stage/usr/bin/multi-backup-rust" -e"$stage/usr/bin/multi-backup-native")"
+# dpkg-shlibdeps requires a source package's debian/control, even in direct
+# package builds. Keep this metadata confined to the temporary build root.
+mkdir -p "$stage/debian"
+cat >"$stage/debian/control" <<'EOF'
+Source: multi-backup-rust
+Section: utils
+Priority: optional
+Maintainer: Multi Backup project <desalvo@users.noreply.github.com>
+Standards-Version: 4.6.2
+
+Package: multi-backup-rust
+Architecture: any
+Description: compiled Rust backup preview
+ Native encrypted backup manager.
+EOF
+dependencies="$(cd "$stage" && dpkg-shlibdeps -O -e"$stage/usr/bin/multi-backup-rust" -e"$stage/usr/bin/multi-backup-native")"
+rm -rf "$stage/debian"
 case "$dependencies" in
   shlibs:Depends=*) libdeps="${dependencies#shlibs:Depends=}" ;;
   *) echo 'No dynamic library dependency inventory' >&2; exit 1 ;;
