@@ -1,35 +1,76 @@
-# Multi Backup r038 — indice documentazione e stato di verifica
+# Multi Backup — r038 documentation index and coverage audit
 
-**Aggiornamento:** 14 novembre 2026. **Branch:** `feature/r038-rust-primary-plugin-executor` (PR #10, draft). **Ultimo pacchetto pubblicato:** Python/Tk r018; Rust r038 è un'anteprima compilata, non una RC certificata. La migrazione dei vecchi archivi Python è facoltativa.
+**Audit date:** 2026-11-14. **Current engineering branch:** PR #10,
+\`feature/r038-rust-primary-plugin-executor\`. Status: **Rust development
+preview; not a published RC**. This page is the point of entry for users,
+release reviewers and future development handoff.
 
-## Dove trovare ogni procedura aggiornata
+## Current documents by audience
 
-| Argomento | Procedura operativa | Architettura/contratti | Stato |
-|---|---|---|---|
-| Inizializzazione store e chiavi age | [IT](R038_OPERATIONS_IT.md#2-preparazione-di-un-laboratorio-cifrato) · [EN](R038_OPERATIONS_EN.md#2-preparing-encrypted-test-storage) | [Security](SECURITY.md), [Protection](BACKUP_PROTECTION.md) | Anteprima Rust; vault storage ancora parziale |
-| Backup FULL/INC manuale | [IT](R038_OPERATIONS_IT.md#3-backup-manuale-totale-e-incrementale) · [EN](R038_OPERATIONS_EN.md#3-manual-full-and-incremental-backups) | [CHUNK_STORAGE_V1](CHUNK_STORAGE_V1.md) | Implementato in codice, qualificazione E2E aperta |
-| Numero file e quattro metriche di dimensione | [IT](R038_OPERATIONS_IT.md#4-informazioni-dei-backup-e-catena) · [EN](R038_OPERATIONS_EN.md#4-backup-information-sizes-and-verification) | [CHUNK_STORAGE_V1](CHUNK_STORAGE_V1.md) | Calcolo Rust disponibile; test su dataset reali mancanti |
-| Verifica catena completa (default) | [IT](R038_OPERATIONS_IT.md#5-verifica-manuale-o-programmata) · [EN](R038_OPERATIONS_EN.md#4-backup-information-sizes-and-verification) | [Maintenance](MAINTENANCE_POLICY.md) | Manuale/scheduler Rust; allarmi e UI completi da certificare |
-| Restore totale/parziale | [IT](R038_OPERATIONS_IT.md#6-restore-integrale-e-parziale) · [EN](R038_OPERATIONS_EN.md#5-restore-and-cross-account-operation) | [Protection](BACKUP_PROTECTION.md) | Restore locale Rust, target solo nuovo |
-| Restore su utente GitHub/Dropbox diverso | [IT](R038_OPERATIONS_IT.md#6-restore-integrale-e-parziale) · [EN](R038_OPERATIONS_EN.md#5-restore-and-cross-account-operation) | [Plugin API](PLUGIN_API.md), [Security](SECURITY.md) | Un repository nuovo/un file nuovo in preview; multi-item ancora aperto |
-| Montaggi NFS/SMB/SSHFS/GPFS CES | [IT](R038_OPERATIONS_IT.md#3-backup-manuale-totale-e-incrementale) · [EN](R038_OPERATIONS_EN.md#3-manual-full-and-incremental-backups) | [Plugin matrix](PLUGIN_MATRIX.md), [Plugin API](PLUGIN_API.md) | Solo mount Linux preesistente, esatto e read-only |
-| Cancellazione incrementi/full e rebase | [IT](R038_OPERATIONS_IT.md#7-cancellazione-rebase-del-successore-e-purge-logico) · [EN](R038_OPERATIONS_EN.md#6-chain-aware-logical-deletion-purge) | [Protection](BACKUP_PROTECTION.md), [Maintenance](MAINTENANCE_POLICY.md) | Manifest-only Rust; power loss non certificato |
-| GC con anteprima e conferma | [IT](R038_OPERATIONS_IT.md#8-garbage-collection-recuperare-spazio-senza-perdere-dati) · [EN](R038_OPERATIONS_EN.md#7-separate-explicit-garbage-collection) | [Maintenance](MAINTENANCE_POLICY.md), [CHUNK_STORAGE](CHUNK_STORAGE_V1.md) | GC locale Rust; stripe miste trattenute; repack e GC remota aperti |
-| Schedule manuale/periodica e JSON | [IT](R038_OPERATIONS_IT.md#9-esecuzione-manuale-e-scheduler-rust) · [EN](R038_OPERATIONS_EN.md#8-manual-and-scheduled-backups-and-integrity-checks) | [Maintenance](MAINTENANCE_POLICY.md) | Runner/daemon sperimentali, niente servizio OS certificato |
-| Build macOS/Windows/Linux e policy release | [Release channels](RELEASE_CHANNELS.md) | [Rust inventory](RUST_PORT_INVENTORY.md) | Preview non firmata/certificata |
-| Criteri di merge/RC e test di accettazione | [RC matrix](RC_CERTIFICATION_MATRIX.md) | [Development status](DEVELOPMENT_STATUS.md), [Handoff](HANDOFF.md) | Blocchi aperti, ultimo head CI da verificare |
+| Audience | Primary source | Coverage / authority |
+| --- | --- | --- |
+| Italian operator | [OPERATIONS_R038_IT.md](OPERATIONS_R038_IT.md) | Rust CLI workflows, restore, schedule, full/incremental, purge, GC/repack, provider account setup |
+| English operator | [OPERATIONS_R038_EN.md](OPERATIONS_R038_EN.md) | Same operational contract, English |
+| Product/release reviewer | [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md) | Implemented vs Preview vs Planned vs Blocked, explicit certification gaps |
+| Storage engineer | [CHUNK_STORAGE_V1.md](CHUNK_STORAGE_V1.md) | age+zstd/HMAC, full/incremental manifest, 8+2 parity and crash-safe repack |
+| Maintenance operator | [MAINTENANCE_POLICY.md](MAINTENANCE_POLICY.md) | Scheduling/verification, safe purge, GC, protection and 48h repack grace |
+| Plugin developer | [PLUGIN_API.md](PLUGIN_API.md), [PLUGIN_MATRIX.md](PLUGIN_MATRIX.md) | Directional provider contracts, real executor scope, source vs destination account authorization |
+| Security reviewer | [SECURITY.md](SECURITY.md), [BACKUP_PROTECTION.md](BACKUP_PROTECTION.md) | Key boundaries, holds, fail-closed operations, independent WORM |
+| Installer/release | [RELEASE_CHANNELS.md](RELEASE_CHANNELS.md), [RC_CERTIFICATION_MATRIX.md](RC_CERTIFICATION_MATRIX.md) | Native packaging, early/stable separation, release-blocking evidence |
+| Future development | [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md), [HANDOFF.md](HANDOFF.md), [RUST_PORT_INVENTORY.md](RUST_PORT_INVENTORY.md) | Revision timeline, open tasks, source code and continuation context |
 
-## Stato della documentazione PDF
+## Full r038 operational coverage checklist
 
-- Generatore: `scripts/build-publications.py`. I manuali IT/EN hanno quattro capitoli aggiunti sulla r038 Rust, ciascuno marcato *development preview*, mantenendo le immagini e procedure storiche della r018.
-- **Attenzione:** i PDF tracciati in `docs/manuals` possono ancora riferirsi alla r018 finché la CI non li rigenera e la release non li pubblica. Per la r038 utilizzare **questi runbook Markdown** come riferimento attuale.
-- Il job `publications-smoke` rigenera entrambi i PDF e controlla via `pdftotext` la presenza dei comandi `verify-chain`, `gc-collect` e della sezione `Rust r038:`.
-- Le brochure descrivono l'offerta storica e NON certificano le funzioni sperimentali r038.
+- [x] Rust native startup, key setup, v1 store and data safety
+- [x] Manual full and incremental snapshots and immutable chunk deduplication
+- [x] Four requested file/byte statistics and exact full/incremental lineage
+- [x] Verified full-chain-by-default and selective new-directory restore
+- [x] User confirmation, protected successor checks and chain-preserving purge
+- [x] Separate GC preview/execute and delayed physical reclaim
+- [x] Automatic mixed 8+2 parity stripe repack; encrypted successor index published last
+- [x] Crash-before-index orphan parity cleanup and post-commit grace-period description
+- [x] Source account vs independently authorized destination account
+- [x] GitHub full repo and Dropbox one-file cross-account limitations
+- [x] Manual/scheduled Rust actions and scheduler configuration example
+- [x] Current plugin registry vs executed/production-certified role distinction
+- [x] Explicit external proof gaps and real-data recovery requirements
+- [x] User decision: old Python archive conversion is optional
+- [ ] Signed/notarized public RC and actual live-provider/tested install/rollback evidence
+- [ ] Cross-provider generic writer and authenticated partial remote restore
+- [ ] Persisted native GUI schedule editor and dynamic verify-latest backup selector
+- [ ] Crash-fault-injection qualification of repack across all OS/filesystem targets
 
-## Evidenze non sostituibili dai documenti
+Checklist checkmarks in this section mean **documentation present**, not
+production certification.
 
-La compilazione del codice, la presenza di un comando, il successo di test fittizi e la generazione di un PDF non dimostrano recuperabilità reale. Servono ancora CI verde sull'ultimo head, restore su provider effettivi e utenti distinti, fault/power-loss, compattazione sicura della parità, protezione WORM, signed/notarized installer e upgrade/rollback. Non dichiarare la RC completa senza tali evidenze.
+## Legacy document separation
 
-## Regola di aggiornamento
+The PDF manuals/brochures under \`docs/manuals/\` and \`docs/brochures/\`
+originated from the **r018 Python/Tk** interface and may show Tk screenshots.
+They must not be described as screenshots of the Rust GUI. The publication
+generator now appends the r038 Rust operational procedures and labels the
+historical screenshots as such. The canonical r038 instructions remain the
+version-controlled Markdown manuals above until the generated PDF outputs
+have been rebuilt and independently inspected.
 
-Ad ogni macroarea Rust chiusa: aggiornare nell'ordine (1) procedure IT/EN, (2) documento specialistico corrispondente, (3) inventory e RC matrix, (4) `DEVELOPMENT_STATUS.md` e `HANDOFF.md`, (5) generatore dei PDF e gate `publications-smoke`. I PDF già pubblicati non devono essere retroattivamente descritti come r038 se non rigenerati e verificati.
+Historical r010-r037 sections remain in the individual engineering files to
+preserve development provenance. **The most recent r038 section at the top
+or end of each file overrides older status statements**. A green PR #9 CI
+does not qualify later PR #10 functional changes.
+
+## Documentation maintenance contract
+
+For any new command, setting, behavior or security rule:
+1. Update the affected Rust code and acceptance test.
+2. Update both \`OPERATIONS_R038_IT.md\` and \`OPERATIONS_R038_EN.md\`
+   with executable examples, defaults, limitations and failure behavior.
+3. Update \`FEATURE_INVENTORY_R038.md\` and the relevant engineering reference.
+4. Update \`DEVELOPMENT_STATUS.md\`, \`HANDOFF.md\` and the RC matrix, including
+   the exact CI run / SHA only after results are actually available.
+5. Regenerate bilingual PDF manuals/brochures from
+   \`scripts/build-publications.py\`; distinguish legacy Tk screenshots from
+   Rust native screenshot evidence. Inspect text and rendered pages.
+6. Run \`python scripts/check-documentation-consistency.py\` inside the
+   Production Gate; do not merge if any required operational coverage is lost.
+7. Do not claim signed RC, fully migrated plugin roles, WORM, live backup
+   certification or physical user installation without independent proof.
