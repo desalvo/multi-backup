@@ -20,7 +20,9 @@ fn usage() -> &'static str {
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--mode full|incremental] [--parent BACKUP_ID] [--top-namespace PATH]\n\
        multi-backup-native storage info --root DIR --identity IDENTITY --id HASH [--json]\n\
        multi-backup-native storage verify-chain --root DIR --identity IDENTITY --id HASH [--no-chain] [--json]\n\
-       multi-backup-native storage delete-backup --root DIR --identity IDENTITY --id HASH --confirm-id HASH [--rebase-dependents]\n\
+       multi-backup-native storage delete-backup --root DIR --identity IDENTITY --id HASH --confirm-id HASH (automatically rebase dependents)\n\
+       multi-backup-native storage gc-preview --root DIR --identity IDENTITY [--grace-hours 48] [--json]\n\
+       multi-backup-native storage gc-collect --root DIR --identity IDENTITY --confirm ERASE-ORPHANS [--grace-hours 48] [--json]\n\
        multi-backup-native storage retention-preview --root DIR --identity IDENTITY [--days 30] [--keep-last 1] [--json]\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
@@ -357,13 +359,24 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let key=Path::new(required(&flags,"--identity")?);
                 let id=required(&flags,"--id")?;
                 let store=chunk_store::Store::open(root,key)?;
-                if flags.contains_key("--rebase-dependents") {
-                    let count=store.delete_backup_rebase(key,id,required(&flags,"--confirm-id")?)?;
-                    println!("Rebased {count} direct descendants; deleted {id}; all shared ciphertext preserved");
-                } else {
-                    store.delete_backup(key,id,required(&flags,"--confirm-id")?)?;
-                    println!("Deleted logical manifest {id}; shared ciphertext preserved");
+                let count=store.delete_backup_rebase(key,id,required(&flags,"--confirm-id")?)?;
+                println!("Safely rebased {count} immediate descendants and purged manifest {id}. No chunks or parity deleted until separate GC.");
+            }
+            "gc-preview" | "gc-collect" => {
+                accepted(&flags,&["--root","--identity","--grace-hours","--confirm"])?;
+                let perform=command=="gc-collect";
+                if perform {
+                    if required(&flags,"--confirm")?!="ERASE-ORPHANS" {
+                        return Err("GC execution requires explicit --confirm ERASE-ORPHANS".into());
+                    }
+                } else if flags.contains_key("--confirm") {
+                    return Err("GC preview must never accept an execution confirmation".into());
                 }
+                let hours=flags.get("--grace-hours").copied().unwrap_or("48").parse()?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let report=chunk_store::Store::open(root,key)?
+                    .garbage_collect(key,hours,perform)?;
+                println!("{}",serde_json::to_string_pretty(&report)?);
             }
             "info" => {
                 accepted(&flags,&["--root","--identity","--id"])?;
