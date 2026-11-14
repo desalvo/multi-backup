@@ -83,23 +83,89 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Install native windowing and OpenGL smoke dependencies
+      - name: Install native windowing, crypto and provider helper dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb xauth pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libgl1-mesa-dri
+          sudo apt-get install -y xvfb xauth pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libgl1-mesa-dri age gh git-lfs
       - name: Compile standalone Rust GUI (no Python / PyInstaller)
         run: |
           cargo build --manifest-path rust-desktop/Cargo.toml --release
           rust-desktop/target/release/multi-backup-desktop --self-test
-      - name: Start real native window under Xvfb, verify clean close
+      - name: Package Python-free Ubuntu 24.04 binary preview with native helpers
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path rust/Cargo.toml --release
+          mkdir -p dist-rust-linux/bin
+          cp rust-desktop/target/release/multi-backup-desktop dist-rust-linux/MultiBackupRust
+          cp rust/target/release/multi-backup-native dist-rust-linux/bin/
+          for helper in age age-keygen gh git-lfs; do
+            cp -L "$(command -v "$helper")" "dist-rust-linux/bin/$helper"
+          done
+          cp LICENSE README.md README.IT.md dist-rust-linux/
+          dist-rust-linux/MultiBackupRust --self-test
+          dist-rust-linux/bin/multi-backup-native --version
+          tar czf multi-backup-rust-preview-ubuntu24-x64.tar.gz -C dist-rust-linux .
+          sha256sum multi-backup-rust-preview-ubuntu24-x64.tar.gz > checksums-rust-ubuntu24.txt
+      - name: Start packaged Rust native window under Xvfb and verify clean close
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" rust-desktop/target/release/multi-backup-desktop --smoke
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" dist-rust-linux/MultiBackupRust --smoke
       - uses: actions/upload-artifact@v4
         with:
-          name: rust-only-desktop-linux-preview
-          path: rust-desktop/target/release/multi-backup-desktop
-          retention-days: 7
+          name: rust-only-desktop-linux-ubuntu24-preview
+          path: |
+            multi-backup-rust-preview-ubuntu24-x64.tar.gz
+            checksums-rust-ubuntu24.txt
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-macos-native-preview:
+    name: Python-free Rust macOS DMG (${{ matrix.arch }})
+    needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native Rust helper dependencies
+        run: brew install age gh git-lfs
+      - name: Build and verify Python-free Rust .app and single-app DMG
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+        run: bash scripts/package-rust-macos-preview.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-only-macos-${{ matrix.arch }}-preview
+          path: |
+            multi-backup-rust-preview-macos-${{ matrix.arch }}.dmg
+            multi-backup-rust-preview-macos-${{ matrix.arch }}.dmg.sha256
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-windows-native-preview:
+    name: Python-free Rust Windows x64 setup
+    needs: [production-gate]
+    runs-on: windows-2025
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify standalone compiled Rust installer
+        shell: pwsh
+        run: ./scripts/package-rust-windows-preview.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-only-windows-x64-preview
+          path: |
+            multi-backup-rust-preview-windows-x64.zip
+            installers/multi-backup-rust-preview-windows-x64.exe
+            checksums-rust-windows-x64.txt
+          retention-days: 14
           if-no-files-found: error
 
   publications-smoke:
