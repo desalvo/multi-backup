@@ -496,7 +496,15 @@ class PluginTests(unittest.TestCase):
         self.assertIn('  native-release:',ci)
         self.assertIn('    needs: [production-gate]',ci)
         self.assertIn('  publications-smoke:',ci)
-        self.assertIn('    needs: [production-gate, macos-smoke, publications-smoke]',ci)
+        self.assertIn(
+            '    needs: [production-gate, macos-smoke, publications-smoke, '
+            'rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, '
+            'rust-windows-native-preview, rust-linux-rpm-native-preview]', ci)
+        self.assertIn(
+            '    needs: [production-gate, rust-server-validation, rust-desktop-smoke, '
+            'rust-macos-native-preview, rust-windows-native-preview, '
+            'rust-linux-rpm-native-preview, publications-smoke]', ci)
+        self.assertIn('ENABLE_STABLE_RUST',ci)
         self.assertIn('MAC_UNSIGNED_SMOKE',ci)
         self.assertIn('macos-${{ matrix.arch }}-preview',ci)
         self.assertNotIn('TEST-ONLY-macos-',ci)
