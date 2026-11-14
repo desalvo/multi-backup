@@ -88,7 +88,7 @@ pub fn list(db:&Database)->Res<Value>{
 pub struct ChangeLimits {pub agent_id:String,pub limits:ExecutionLimits}
 pub fn update_limits(db:&Database,update:&ChangeLimits)->Res<bool>{
     if !wire::valid_id(&update.agent_id){return Err(fail("Invalid agent ID"));}
-    update.limits.validate().map_err(fail)?;
+    update.limits.validate().map_err(|reason|fail(&reason))?;
     let limits=serde_json::to_value(&update.limits)?;
     let mut conn=db.connect()?;
     Ok(conn.execute("UPDATE mb_agent_registry SET execution_limits=$2
@@ -148,7 +148,7 @@ pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
     let approved:bool=row.get(4);
     let revoked:bool=row.get(5);
     let limits:ExecutionLimits=serde_json::from_value(row.get::<_,Value>(6))?;
-    limits.validate().map_err(fail)?;
+    limits.validate().map_err(|reason|fail(&reason))?;
     if !approved||revoked||owner!=proof.user{
         return Err(fail("Agent account not approved or revoked"));
     }
