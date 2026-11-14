@@ -529,3 +529,26 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
   blocks manual logical delete and retention preview. Legacy local
   archives have their own guarded protection sidecars. The runtime
   scheduler and safe chunk GC are not yet certified or activated.
+
+## r037 — nested top-level namespaces and retention preview
+
+- The chunk store now offers `Store::backup_in_namespace` and CLI
+  `storage backup --top-namespace PATH`; GUI has an optional namespace
+  field supporting nested segments (e.g. `Rome/Cluster/VM`).
+  Existing `Store::backup` and manifests remain backwards compatible.
+- New manifests store creation Unix time and optional top namespace.
+  Migrated/legacy manifests with unknown timestamps are preserved
+  indefinitely by automatic retention until classified explicitly.
+- Added `Store::preview_retention` and CLI `storage retention-preview`:
+  read-only age-authenticated snapshot load/integrity checks followed by
+  the 30-day retention policy. The protection flag is read directly
+  from encrypted hold state, NEVER trusted from user-provided records.
+- Test checks nested source paths, traversal rejection, future 30-day
+  expiry preview still preserves a protected backup, and restored data
+  under the nested namespace. Rust focused CI `43638279897` passed
+  all 3 jobs for commit `901608a5`; full CI on that revision is pending.
+- Automatic scheduler execution and real mark-and-sweep GC are NOT
+  enabled; protected shared chunks may not be reclaimed by an unsafe
+  age-based cleanup. Output plugin-level capacity is partially supported
+  for pre-mounted filesystems; cloud API quotas/namespace index
+  persistence still require integration and live verification.

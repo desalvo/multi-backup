@@ -97,3 +97,25 @@ CI test: `cargo test --manifest-path rust/Cargo.toml --all-targets`,
 `cargo test --manifest-path rust-server/Cargo.toml --all-targets`,
 and `cargo check --manifest-path rust-desktop/Cargo.toml`. Green compile
 is not independent multi-provider recovery certification.
+
+## r037 — nested namespaces and retention preview tied to real encrypted holds
+
+New native backups may be created within an optional nested top namespace
+without changing paths of existing backups:
+
+```bash
+multi-backup-native storage backup --root STORE --identity KEY --label "Nightly" \
+  --sources-json sources.json --top-namespace "Rome/Cluster/VM"
+multi-backup-native storage retention-preview --root STORE --identity KEY \
+  --days 30 --keep-last 1 --json
+```
+
+The manifest records its `top_namespace` and UTC creation timestamp.
+Existing manifests without these fields remain readable; unknown legacy
+timestamps are **never auto-expired**. The retention preview reads
+`Store::list`, verifies each backup's encrypted chunks and protection
+status, and passes the *authoritative encrypted hold flag* to the
+30-day policy. A protected backup always remains in the preserve set,
+including when it is older than 30 days. No deletion is performed by
+`retention-preview`. The full recurring scheduler and garbage collector
+are not yet operational.
