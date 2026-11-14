@@ -276,3 +276,26 @@ PR #9 was merged to `main` as `b7e757d9378d2503b57fa43267577a3a55f60fd2`. The pr
 The user confirmed Python-produced archives are not in critical active use and **old archive format migration is not a release blocker**. Keep optional conversion source and existing files, without automatic deletion. Require instead native encrypted backup/verify/full and selective restore, real live GitHub/Dropbox account acceptance (LFS, CI metadata, throttling and resumable jobs), genuine native GUI functionality, protected retention/GC, installed upgrade/rollback and production signing. Rust preview packaged binaries exist but are not yet a certified RC.
 
 A narrow common Rust plugin execution path is now coded: POSIX→POSIX and Linux read-only mounted NFS/SMB/SSHFS/GPFS CES→POSIX encrypted store, followed by POSIX→POSIX verified restore. Remote snapshot consistency/ACL/xattr fidelity are **not proven** by a mount probe or attestation flag. These are previews, not production Ready adapters. PR #10 CI must succeed before merge.
+
+
+## r038 — incremental rebase and ciphertext GC safety gate
+
+New Rust functionality on draft PR #10 must pass:
+1. Full F0 -> I1 -> I2: delete I1, reparent I2 to F0 while preserving byte-
+   identical restore and complete chain verify.
+2. Delete F0 with I1/I2 surviving: I1 becomes a full, I2 remains a linked
+   incremental, with no plaintext copy or data loss.
+3. Protected successors: refuse their implicit metadata rewrite, require
+   explicit unprotect; corrupted ancestor/child likewise blocks purge.
+4. Purge never removes physical chunks or parity. GC preview never mutates.
+5. GC verifies ALL remaining manifests+parity under lock, observes 48h default
+   grace, deletes only fully dead parity groups and nonreferenced ciphertext,
+   and leaves mixed live/dead groups untouched for a future safe repack.
+6. Restore after GC must be byte-identical; multi-OS real age roundtrip,
+   error injection, interruption/recovery, mixed stripe compaction and
+   independent recovery certification remain release gates.
+
+The current local GC is intentionally conservative. **Maximal disk
+reclamation for partially live 8+2 parity stripes is NOT yet implemented.**
+Unattended remote retention/GC and filesystem WORM are unqualified.
+Do not advertise the r038 draft as a certified or released RC.
