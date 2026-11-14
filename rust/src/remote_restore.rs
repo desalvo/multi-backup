@@ -112,19 +112,39 @@ struct DropboxWriter {
     token: String,
 }
 impl DropboxWriter {
-    fn new() -> RestoreResult<Self> {
+    fn new(expected_account:Option<&str>) -> RestoreResult<Self> {
         let token = std::env::var("MULTI_BACKUP_DROPBOX_WRITE_TOKEN")?;
         if token.len() < 12 || token.contains('\n') || token.contains('\r') {
             return Err(err("Dropbox write token not provided"));
         }
-        Ok(Self {
+        let result=Self {
             agent: AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(20))
                 .timeout_read(Duration::from_secs(180))
                 .timeout_write(Duration::from_secs(180))
                 .redirects(0).build(),
             token,
-        })
+        };
+        if let Some(expected)=expected_account {
+            if expected.len()>254 || expected.is_empty() ||
+               expected.contains(['\n','\r']) {
+                return Err(err("Invalid Dropbox destination account"));
+            }
+            // This is the WRITE token, not the origin user's read token.
+            // Never infer the destination account from an archived manifest.
+            let response=result.agent.post("https://api.dropboxapi.com/2/users/get_current_account")
+                .set("Authorization",&format!("Bearer {}",result.token))
+                .set("Content-Type","application/json")
+                .send_json(json!({}))?;
+            let body:Value=response.into_json()?;
+            let actual_id=body["account_id"].as_str().unwrap_or("");
+            let actual_email=body["email"].as_str().unwrap_or("");
+            if !expected.eq_ignore_ascii_case(actual_id) &&
+               !expected.eq_ignore_ascii_case(actual_email) {
+                return Err(err("Dropbox write token is not authorized for the explicitly selected destination account"));
+            }
+        }
+        Ok(result)
     }
     fn upload(&self, name: &str, payload: &Value, bytes: &[u8]) -> RestoreResult<Value> {
         if !["upload_session/start", "upload_session/append_v2",
@@ -156,14 +176,22 @@ impl DropboxWriter {
 }
 pub fn dropbox_new_file(archive_path: &Path, identity: &Path,
                         target: &str) -> RestoreResult<Value> {
-    dropbox_new_file_with(archive_path, Identity::File(identity), target)
+    dropbox_new_file_with(archive_path, Identity::File(identity), target,None)
 }
 pub fn dropbox_new_file_from_memory(archive_path: &Path, secret: &[u8],
                                     target: &str) -> RestoreResult<Value> {
-    dropbox_new_file_with(archive_path, Identity::Memory(secret), target)
+    dropbox_new_file_with(archive_path, Identity::Memory(secret), target,None)
+}
+pub fn dropbox_new_file_for_account(archive_path:&Path,identity:&Path,
+                                    target:&str,target_account:&str)->RestoreResult<Value>{
+    dropbox_new_file_with(archive_path,Identity::File(identity),target,Some(target_account))
+}
+pub fn dropbox_new_file_for_account_from_memory(archive_path:&Path,secret:&[u8],
+                                    target:&str,target_account:&str)->RestoreResult<Value>{
+    dropbox_new_file_with(archive_path,Identity::Memory(secret),target,Some(target_account))
 }
 fn dropbox_new_file_with(archive_path: &Path, identity: Identity<'_>,
-                        target: &str) -> RestoreResult<Value> {
+                        target: &str,expected_account:Option<&str>) -> RestoreResult<Value> {
     dropbox_target(target)?;
     let temp = TempDir::new()?;
     let extracted = temp.path().join("decoded");
@@ -180,7 +208,7 @@ fn dropbox_new_file_with(archive_path: &Path, identity: Identity<'_>,
     let total = fs::metadata(payload)?.len();
     let hash = crate::dropbox_hash::hash_file(payload)?;
     let mut file = File::open(payload)?;
-    let writer = DropboxWriter::new()?;
+    let writer = DropboxWriter::new(expected_account)?;
     let chunk_size = 8 * 1024 * 1024;
     let mut buffer = vec![0u8; chunk_size];
     let first = file.read(&mut buffer)?;
