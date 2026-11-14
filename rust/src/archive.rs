@@ -79,7 +79,13 @@ fn verify_sidecar(path: &Path) -> ArchiveResult<()> {
         return Err(err("Invalid SHA-256 sidecar"));
     }
     let mut hasher = Sha256::new();
-    io::copy(&mut File::open(path)?, &mut hasher)?;
+    let mut stream = File::open(path)?;
+    let mut buf = [0u8; 65_536];
+    loop {
+        let n = stream.read(&mut buf)?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
     if format!("{:x}", hasher.finalize()) != digest.to_ascii_lowercase() {
         return Err(err("Encrypted archive SHA-256 mismatch"));
     }
@@ -113,10 +119,14 @@ fn with_reader<T>(
         let mut remaining = archive.into_inner().into_inner();
         io::copy(&mut remaining, &mut io::sink())?;
         drop(remaining);
-        let status = child.wait_with_output()?;
-        if !status.status.success() {
+        let status = child.wait()?;
+        if !status.success() {
+            let mut stderr = Vec::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.take(4096).read_to_end(&mut stderr);
+            }
             return Err(err(format!("age decryption failed: {}",
-                String::from_utf8_lossy(&status.stderr)
+                String::from_utf8_lossy(&stderr)
                     .chars().take(360).collect::<String>())));
         }
         Ok(output)
@@ -299,7 +309,7 @@ pub fn create(source: &Path, destination: &Path, recipient: &str, prefix: &str)
             let metadata = fs::symlink_metadata(path)?;
             if metadata.file_type().is_symlink() ||
                (if *is_dir { !metadata.is_dir() } else { !metadata.is_file() }) ||
-               metadata.len() != *size && !is_dir {
+               (!*is_dir && metadata.len() != *size) {
                 return Err(err("Source mutated while archiving"));
             }
             let member = prefix.join(relative);
@@ -334,7 +344,13 @@ pub fn create(source: &Path, destination: &Path, recipient: &str, prefix: &str)
                 .chars().take(360).collect::<String>())));
     }
     let mut hasher = Sha256::new();
-    io::copy(&mut File::open(temporary.path())?, &mut hasher)?;
+    let mut file = File::open(temporary.path())?;
+    let mut buf = [0u8; 65_536];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
     let digest = format!("{:x}", hasher.finalize());
     temporary.persist_noclobber(destination).map_err(|e| e.error)?;
     let mut sidecar = NamedTempFile::new_in(parent)?;
