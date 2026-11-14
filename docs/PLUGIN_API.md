@@ -292,3 +292,9 @@ is explicitly optional and no longer a promotion gate.
 - Backup plugins must eventually implement both **FULL** and **INCREMENTAL** from CLI/manual schedules, with signed/authenticated lineage, reference full and complete per-snapshot metrics. Verification of incrementals defaults to the full chain, with explicit opt-out.
 - Deletion of any full or increment must preserve all surviving restore points: rebase descendants, promote successors to FULL if necessary, never physically delete live chunks during purge, and leave actual ciphertext reclamation to a separately authorized GC. Protected children block automatic lineage changes.
 - Local GC retains partially live parity 8+2 stripes for redundancy; crash-safe repacking and remote GC remain unqualified. Details: [IT operations](R038_OPERATIONS_IT.md), [EN operations](R038_OPERATIONS_EN.md) and [RC matrix](RC_CERTIFICATION_MATRIX.md).
+
+## r038 — Cross-account e rebase/GC condivisi
+
+Per ogni plugin autenticato l'identità dell'account sorgente è sola provenienza: il restore verso altro utente richiede autorizzazione indipendente dell'account di destinazione. GitHub crea un nuovo repository su un proprietario target autorizzato; Dropbox verifica l'account del token WRITE per il nuovo file. I restore remoti parziali generici e le combinazioni cloud-to-cloud NON sono certificati.
+
+La destinazione POSIX Rust supporta FULL/INCREMENTAL, purge con rebase, verifica catena completa e GC separata con repack automatico 8+2. Non implica che gli altri plugin catalogati siano adapter eseguibili. Leggere [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md) e [OPERATIONS_R038_EN.md](OPERATIONS_R038_EN.md).
