@@ -5,8 +5,6 @@ the network. The project link opens only after an explicit user action.
 """
 from __future__ import annotations
 
-import math
-import sys
 import tkinter as tk
 import webbrowser
 from pathlib import Path
@@ -111,7 +109,7 @@ class AboutDialog(tk.Toplevel):
                                self._image('hero.jpg'))
         if self._raw_photo is not None:
             # ImageOps.contain preserves the entire photograph without stretch/crop.
-            photo = ImageOps.contain(self._raw_photo, (width, 174),
+            photo = ImageOps.contain(self._raw_photo, (int(width * .36), 174),
                                      method=Image.Resampling.LANCZOS)
             photo = ImageEnhance.Color(photo).enhance(1.12)
             image.alpha_composite(photo, (width - photo.width,
@@ -131,9 +129,9 @@ class AboutDialog(tk.Toplevel):
                    fill=(27, 168, 241, 67))
         image.alpha_composite(glow.filter(ImageFilter.GaussianBlur(40)))
 
-        rounded_overlay(image, (24, 192, width - 24, height - 16), 23,
+        rounded_overlay(image, (24, 192, width - 24, height - 9), 23,
                         (26, 41, 90, 234), (151, 170, 252, 105))
-        rounded_overlay(image, (48, 339, width - 48, 402), 15,
+        rounded_overlay(image, (48, 399, width - 48, 442), 15,
                         (31, 57, 115, 220), (151, 183, 255, 80))
         self._background = ImageTk.PhotoImage(image.convert('RGB'))
         canvas = self.surface
@@ -146,11 +144,11 @@ class AboutDialog(tk.Toplevel):
                                         method=Image.Resampling.LANCZOS)
                 self._icon = ImageTk.PhotoImage(icon)
         if self._icon is not None:
-            canvas.create_image(54, 50, image=self._icon, anchor='nw')
+            canvas.create_image(47, 49, image=self._icon, anchor='nw')
 
-        canvas.create_text(151, 51, text='MULTI BACKUP', anchor='nw',
-                           font=('Helvetica Neue', 26, 'bold'), fill=TEXT)
-        canvas.create_text(153, 98, text='Encrypted backup & recovery',
+        canvas.create_text(144, 55, text='MULTI BACKUP', anchor='nw',
+                           font=('Helvetica Neue', 24, 'bold'), fill=TEXT)
+        canvas.create_text(145, 98, text='Encrypted recovery',
                            anchor='nw', font=('Helvetica Neue', 12),
                            fill='#D1E5FF')
         canvas.create_text(50, 211, text='About this application',
@@ -161,20 +159,18 @@ class AboutDialog(tk.Toplevel):
             ('License', 'EUPL-1.2'), ('Channel', 'Release Candidate'),
         ]
         for i, (label, value) in enumerate(entries):
-            y = 255 + i * 29
-            if i >= 3:
-                y += 54
+            y = 252 + i * 28
             canvas.create_text(53, y, text=label, anchor='nw',
                                font=('Helvetica Neue', 11, 'bold'), fill=MUTED)
             canvas.create_text(186, y, text=value, anchor='nw',
                                font=('Helvetica Neue', 11), fill=TEXT,
                                width=max(160, width - 239))
 
-        canvas.create_text(53, 350, text='GitHub  ·  Dropbox  ·  age encryption',
+        canvas.create_text(53, 410, text='GitHub  ·  Dropbox  ·  age encryption',
                            anchor='nw', font=('Helvetica Neue', 12, 'bold'),
                            fill='#93E1FF')
         canvas.create_text(
-            50, min(height - 41, 466),
+            50, min(height - 43, 459),
             text='Early releases are test builds. Stable distribution requires '
                  'production signing,\nnotarization and complete recovery testing.',
             anchor='nw', font=('Helvetica Neue', 10),
