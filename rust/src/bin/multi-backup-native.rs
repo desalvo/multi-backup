@@ -32,6 +32,8 @@ fn usage() -> &'static str {
        multi-backup-native archive verify --archive FILE.tar.gz.age --vault PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native archive extract --archive FILE.tar.gz.age --identity AGE_KEY --destination NEW_DIR\n\
        multi-backup-native archive delete --root PRIVATE_BACKUP_ROOT --archive FILE.tar.gz.age --confirm EXACT_FILENAME\n\
+       multi-backup-native archive protect --root PRIVATE_BACKUP_ROOT --archive FILE.tar.gz.age\n\
+       multi-backup-native archive unprotect --root PRIVATE_BACKUP_ROOT --archive FILE.tar.gz.age --confirm EXACT_FILENAME\n\
        multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
        multi-backup-native journal start --directory STATE_DIR --config CONFIG.json\n\
        multi-backup-native journal resume --directory STATE_DIR --config CONFIG.json\n\
@@ -532,6 +534,22 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         accepted(&flags, &["--file"])?;
         let file = Path::new(required(&flags, "--file")?);
         println!("{}", dropbox_hash::hash_file(file)?);
+        return Ok(());
+    }
+    if family == "archive" && (command == "protect" || command == "unprotect") {
+        accepted(&flags,&["--root","--archive","--confirm"])?;
+        if password_stdin {return Err("Archive protection uses no plaintext password input".into());}
+        let root=Path::new(required(&flags,"--root")?);
+        let file=Path::new(required(&flags,"--archive")?);
+        let result=if command=="protect" {
+            if flags.contains_key("--confirm"){return Err("--confirm not used for protection".into());}
+            archive_management::protect(root,file)?
+        }else{
+            archive_management::unprotect(root,file,required(&flags,"--confirm")?)?
+        };
+        println!("Legacy archive {}: {}",
+            if command=="protect"{"protection"}else{"unprotection"},
+            if result {"changed"}else{"already in requested state"});
         return Ok(());
     }
     if family == "archive" && command == "delete" {
