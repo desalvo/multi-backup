@@ -193,7 +193,10 @@ jobs:
           set -euo pipefail
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb || dnf config-manager --set-enabled powertools || true
-          dnf install -y rpm-build gcc gcc-c++ make findutils tar gzip git curl pkgconf-pkg-config             libX11-devel libXi-devel libXcursor-devel libXrandr-devel libXinerama-devel             libxkbcommon-devel wayland-devel mesa-libGL-devel
+          # Minimal EL9 images include curl-minimal; installing the full curl
+          # package conflicts with it and fails the otherwise valid RPM job.
+          dnf install -y rpm-build gcc gcc-c++ make findutils tar gzip git pkgconf-pkg-config             libX11-devel libXi-devel libXcursor-devel libXrandr-devel libXinerama-devel             libxkbcommon-devel wayland-devel mesa-libGL-devel
+          command -v curl >/dev/null || dnf install -y curl-minimal
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           source "$HOME/.cargo/env"
           cargo test --manifest-path rust/Cargo.toml --lib
