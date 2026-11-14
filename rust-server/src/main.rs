@@ -9,6 +9,7 @@ mod security;
 mod cluster;
 mod agent_registry;
 mod agent_api;
+mod cluster_worker;
 use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
@@ -510,6 +511,12 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
             .unwrap_or_default().split(',').filter(|s|!s.is_empty())
             .map(str::to_owned).collect::<Vec<_>>();
         db.heartbeat_replica(&replica,budget,&accessible)?;
+        if std::env::var("MULTI_BACKUP_CLUSTER_EXECUTOR").ok().as_deref()==Some("enabled"){
+            // Explicit opt-in only: shared filesystem jobs can be processed by
+            // any replica. Local filesystems stay pinned to their owner.
+            // Fencing of commits after lease loss is still an RC requirement.
+            tokio::spawn(cluster_worker::spawn(db.clone(),replica.clone()));
+        }
         let db=db.clone();
         tokio::spawn(async move {
             let mut beat=tokio::time::interval(std::time::Duration::from_secs(20));
