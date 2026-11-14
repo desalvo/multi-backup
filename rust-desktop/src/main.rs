@@ -5,6 +5,8 @@ use multi_backup_core::{archive, archive_management, dropbox_client, github_clie
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
+    process::{Command, Stdio},
+    io::Write,
     thread,
     time::{Duration, Instant},
 };
@@ -543,11 +545,115 @@ impl NativeApp {
             if ui.button("Importa recupero").clicked() { self.vault_action("import"); }
             if ui.button("Cambia password").clicked() { self.vault_action("change"); }
         });
+        #[cfg(target_os = "macos")]
+        {
+            ui.separator();
+            ui.label("Touch ID — disponibile sui Mac con impronta registrata");
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Sblocca con Touch ID").clicked() {
+                    self.macos_biometric("unlock");
+                }
+                if ui.add_enabled(self.vault_verified,
+                    egui::Button::new("Abilita Touch ID (reinserisci password)")).clicked() {
+                    self.macos_biometric("enroll");
+                }
+                if ui.button("Disabilita Touch ID").clicked() {
+                    self.macos_biometric("disable");
+                }
+            });
+        }
         ui.label(RichText::new(if self.vault_verified {
             "Vault sbloccato in RAM fino alla chiusura dell'app" }
             else { "Vault non sbloccato" }).color(MUTED));
         ui.label(RichText::new(&self.status).color(INK));
     }
+    /// Existing native Swift LocalAuthentication + device-bound Keychain
+    /// helper. Only the vault password crosses a local pipe, never argv/logs.
+    /// Touch ID cannot bypass the Rust vault's AES-GCM authentication.
+    #[cfg(target_os = "macos")]
+    fn macos_biometric(&mut self, action: &str) {
+        let response = (|| -> Result<Option<Zeroizing<String>>, String> {
+            let exe = std::env::current_exe().map_err(|e|e.to_string())?;
+            let bin = exe.parent().and_then(|p|p.parent())
+                .ok_or_else(||"Native Mac app path not found".to_string())?
+                .join("Resources/bin/multi-backup-biometric");
+            if !std::fs::symlink_metadata(&bin)
+                .is_ok_and(|m|m.file_type().is_file()) {
+                return Err("Verified native Touch ID helper is missing".into());
+            }
+            match action {
+                "enroll" => {
+                    if !self.vault_verified {
+                        return Err("First unlock the protected vault with its password".into());
+                    }
+                    let password = &self.fields.password;
+                    vault::verify(Path::new(&self.fields.vault_path), password)
+                        .map_err(|_|"Incorrect vault password for enrollment".to_owned())?;
+                    let mut child = Command::new(&bin).arg("enroll")
+                        .stdin(Stdio::piped()).stdout(Stdio::null())
+                        .stderr(Stdio::null()).spawn().map_err(|e|e.to_string())?;
+                    {
+                        let mut stdin = child.stdin.take().ok_or("No biometric input pipe")?;
+                        stdin.write_all(password.as_bytes()).map_err(|e|e.to_string())?;
+                    }
+                    if !child.wait().map_err(|e|e.to_string())?.success() {
+                        return Err("Touch ID enrollment refused (may already be enabled)".into());
+                    }
+                    Ok(None)
+                }
+                "unlock" => {
+                    let result = Command::new(&bin).arg("unlock")
+                        .stderr(Stdio::null()).output().map_err(|e|e.to_string())?;
+                    if !result.status.success() {
+                        return Err("Touch ID unavailable, not enrolled or denied".into());
+                    }
+                    let secret = Zeroizing::new(result.stdout);
+                    if secret.len() < 12 || secret.len() > 1024 {
+                        return Err("Biometric credential size rejected".into());
+                    }
+                    let password = Zeroizing::new(
+                        String::from_utf8(secret.to_vec()).map_err(|e|e.to_string())?);
+                    Ok(Some(password))
+                }
+                "disable" => {
+                    let status = Command::new(&bin).arg("disable")
+                        .stdout(Stdio::null()).stderr(Stdio::null())
+                        .status().map_err(|e|e.to_string())?;
+                    if !status.success() {
+                        return Err("Could not disable Touch ID credential".into());
+                    }
+                    Ok(None)
+                }
+                _ => Err("Unsupported biometric action".into()),
+            }
+        })();
+        match response {
+            Ok(password) => {
+                if let Some(password) = password {
+                    match vault::unlock_identity(
+                        Path::new(&self.fields.vault_path), &password) {
+                        Ok(secret) => {
+                            self.session_identity = Some(Arc::new(secret));
+                            self.vault_verified = true;
+                            if let Ok(recipient) = vault::verify(
+                                Path::new(&self.fields.vault_path), &password) {
+                                self.fields.recipient = recipient;
+                            }
+                            self.status = "Vault sbloccato con Touch ID per questa sessione".into();
+                        }
+                        Err(_) => {
+                            self.status = "Touch ID non ha sbloccato il vault selezionato".into();
+                        }
+                    }
+                } else {
+                    self.status = format!("Touch ID: {action} eseguito");
+                }
+            }
+            Err(error) => self.status = error,
+        }
+        self.fields.password.zeroize();
+    }
+
     fn vault_action(&mut self, action: &str) {
         let original = Path::new(&self.fields.vault_path);
         let extra = Path::new(&self.fields.recovery_path);
