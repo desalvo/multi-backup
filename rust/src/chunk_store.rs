@@ -1351,7 +1351,7 @@ impl Store {
                 }
                 if known.contains(id) {continue;}
                 let meta=fs::symlink_metadata(&folder)?;
-                if now.duration_since(meta.modified()?).is_err_or(|age|age<min_age){
+                if now.duration_since(meta.modified()?).map_or(true,|age|age<min_age){
                     continue;
                 }
                 let mut candidates=Vec::new();
