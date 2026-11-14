@@ -29,6 +29,16 @@ def validate():
     assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
     assert jobs['publications-smoke']['needs']==['production-gate'], 'GUI capture must follow the security gate'
     assert jobs['rust-desktop-smoke']['needs']==['production-gate'], 'Rust-only desktop must follow the security gate'
+    assert jobs['rust-macos-native-preview']['needs']==['production-gate'], 'Rust-only macOS DMGs must follow production gate'
+    assert jobs['rust-windows-native-preview']['needs']==['production-gate'], 'Rust-only Windows setup must follow production gate'
+    mac_matrix=jobs['rust-macos-native-preview']['strategy']['matrix']['include']
+    assert {x['arch'] for x in mac_matrix}=={'arm64','x86_64'}, 'Both native Mac architectures are mandatory'
+    assert 'package-rust-macos-preview.sh' in str(jobs['rust-macos-native-preview']['steps']), 'Native Mac DMG packaging missing'
+    assert 'package-rust-windows-preview.ps1' in str(jobs['rust-windows-native-preview']['steps']), 'Native Windows installer packaging missing'
+    assert 'multi-backup-rust-preview-ubuntu24-x64.tar.gz' in str(jobs['rust-desktop-smoke']['steps']), 'Native Linux preview archive missing'
+    assert (ROOT/'packaging/windows/rust-native-preview.iss').is_file(), 'Native Windows installer definition missing'
+    assert (ROOT/'scripts/package-rust-macos-preview.sh').is_file(), 'Native Mac packager missing'
+    assert (ROOT/'scripts/package-rust-windows-preview.ps1').is_file(), 'Native Windows packager missing'
     assert 'rust-desktop/Cargo.toml' in str(jobs['rust-desktop-smoke']['steps'])
     assert '--smoke' in str(jobs['rust-desktop-smoke']['steps'])
 

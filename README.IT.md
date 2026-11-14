@@ -76,3 +76,7 @@ Dalla pagina **Encryption** si può creare una **copia di recupero**, confermand
 La nuova pagina **Restore** consente il recupero tramite lo stesso plugin con cui è stato creato l'archivio. La destinazione locale deve essere nuova. Il ripristino remoto GitHub richiede l'autenticazione e crea un nuovo repository; quello Dropbox chiede un token temporaneo con permessi di scrittura e carica un nuovo file, anche tramite sessioni per file grandi. I dati GitHub di configurazione, le CI e i metadata possono essere estratti localmente; la loro ricostruzione remota completa non è certificata.
 
 Tutte le pagine sono scorrevoli; la sidebar include Restore e rimane collassabile. È possibile navigare con Ctrl+1…Ctrl+8. L'eventuale cleanup delle CI viene confermato esplicitamente a ogni backup. Gli aggiornamenti in early-release verificano i certificati TLS usando il bundle di CA incluso nell'app senza disabilitare la verifica SSL.
+
+### Anteprime Rust native — test installazione
+
+La CI della PR r020 genera pacchetti **senza Python** separati dalla r018: DMG a singola app macOS ARM64/Intel con firma ad hoc, installer Inno Setup e ZIP Windows x64, archivio eseguibile Ubuntu 24.04 x64. Sono anteprime non notarizzate Apple e non firmate Windows, senza ancora gli RPM Rust Rocky/Alma. La r018 rimane disponibile e invariata.

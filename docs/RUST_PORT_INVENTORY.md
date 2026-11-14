@@ -13,7 +13,7 @@ Goal: a fully compiled, independently usable Rust app that preserves all 0.1.0 e
 | Dropbox backup plugin | Native read-only TLS listing/download, revision validation, encrypted object and manifest writer, explicit Start/Resume implemented in Rust CLI | Real-provider E2E and upgrade/migration qualification before default switch |
 | GitHub/Dropbox remote restoration | Rust CLI explicit CREATE-NEW for GitHub repo (mirror+LFS) and Dropbox add-only upload sessions; Rust GUI has confirmation dialog | Real-provider restore E2E, cancellation/rollback and parity audits |
 | Native GUI and graphical About | Standalone egui/Rust desktop prototype with photographic dashboard, hamburger, About, archive/restore/vault and direct native provider actions; CI graphical smoke in Xvfb | Complete pixel parity, accessibility, full feature coverage and signed macOS/Windows/Linux installation |
-| Installer delivery | Rust helper embedded in Mac/Windows PyInstaller bundles | Rust-only Mac/Windows/Rocky/Alma distributions, release signing/notarization |
+| Installer delivery | Rust-only macOS DMG (ARM64/x86_64), Windows Inno Setup ZIP+installer and Ubuntu 24 x64 tar.gz added as gated preview builds | Qualify installed apps, full Rocky/Alma native RPMs, Developer ID notarization and stable signing |
 | Complete app compatibility | Partial | Independent cross-version backups/restores and secure upgrade/rollback |
 
 There is deliberately no percentage: functional areas differ enormously in scope, and a numeric estimate would be misleading.
