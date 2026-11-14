@@ -62,3 +62,8 @@ offline. Never share the PDF password in chat, commits, CLI arguments or CI.
 - Logical purge changes/manages manifests only and does not reclaim ciphertext. A separate, operator-confirmed local GC uses a common store lock, verifies all surviving backup chains and parity, and applies a 48-hour default orphan grace (minimum 24). Mixed live/dead parity stripes are deliberately retained until crash-safe repacking works.
 - The persistent-state scheduler is in development. Keep JSON/state files private and secret-free; OS service isolation, monitoring, retention legal holds, independent WORM and remote GC are NOT certified.
 - [Runbook IT](R038_OPERATIONS_IT.md), [runbook EN](R038_OPERATIONS_EN.md), [release gates](RC_CERTIFICATION_MATRIX.md).
+
+## r038 — Sicurezza di restore tra utenti, purge e repack automatico
+
+Le credenziali del proprietario originale sono soltanto provenienza, non autorizzazione a scrivere nel nuovo account. Il restore GitHub verifica lo slug del nuovo owner e richiede gh autorizzato; Dropbox può verificare l'account del token WRITE della destinazione. Il purge modifica solo manifest cifrati e blocca successori protetti. La GC esamina tutti i backup sotto lock, esegue automaticamente il repack delle stripe 8+2 miste preparando e verificando nuovi shard prima del commit dell'indice autenticato, conserva la vecchia parità fino al grace del successore e rimuove soltanto ciphertext orfano dopo conferma. Non è WORM indipendente; restano da certificare crash, multiwriter e comportamento remoto.
+
