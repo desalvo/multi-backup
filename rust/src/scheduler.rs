@@ -13,7 +13,7 @@ use serde::{Deserialize,Serialize};
 use std::{
     collections::{BTreeMap,HashSet},
     fs::{self,File,OpenOptions},
-    io::{Read,Write},
+    io::Write,
     path::{Path,PathBuf}
 };
 use tempfile::NamedTempFile;
@@ -148,13 +148,16 @@ pub fn run_once(config_path:&Path,state_path:&Path,force:bool,now:u64)
 {
     let config=load_config(config_path)?;
     let state_parent=state_path.parent().ok_or("Missing scheduler state parent")?;
-    if !state_parent.is_dir(){return Err("Scheduler state directory missing".into());}
+    if !fs::symlink_metadata(state_parent)?.file_type().is_dir(){
+        return Err("Scheduler state parent must be a real directory".into());
+    }
     let lock_path=state_path.with_extension("lock");
-    let metadata=fs::symlink_metadata(&lock_path);
-    if let Ok(md)=metadata {
-        if !md.file_type().is_file(){return Err("Unsafe scheduler lock file".into());}
-    }else if let Err(error)=metadata{
-        if error.kind()!=std::io::ErrorKind::NotFound{return Err(error.into());}
+    match fs::symlink_metadata(&lock_path) {
+        Ok(md) if !md.file_type().is_file() =>
+            return Err("Unsafe scheduler lock file".into()),
+        Err(error) if error.kind()!=std::io::ErrorKind::NotFound =>
+            return Err(error.into()),
+        _=>{},
     }
     let lock=OpenOptions::new().write(true).create(true).open(&lock_path)?;
     lock.lock_exclusive()?;
