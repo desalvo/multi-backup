@@ -259,3 +259,25 @@ The Rust web server can optionally expose one logical backup as a read-only WebD
 
 
 **Reverse compatibility:** the Rust Storage chunk page and CLI can export a complete logical v1 backup to one age-encrypted legacy tar.gz.age stream. Existing source data is never overwritten. The multipart ZIP64 format remains the preferred portable transport.
+
+
+## Debian 12 / 13 native Rust packages (experimental)
+
+The Production CI and early-release workflow now build and install verified
+native Rust **.deb** packages on Debian 12 Bookworm (LTS) and Debian 13 Trixie
+(stable), for **amd64** and **arm64**. Each binary is compiled on the target
+architecture and Debian runtime, and packaging checks the exact executables,
+desktop entry, license, runtime library dependencies and SHA-256.
+The package is named multi-backup-rust and installs the GUI executable
+multi-backup-rust and CLI multi-backup-native. These are preview artifacts;
+signatures and independent recovery certification are not yet complete.
+
+## Private anti-ransomware architecture handoff
+
+See docs/PRIVATE_ARCHITECTURE_WORKFLOW.md for the offline AES-256-encrypted
+PDF workflow. The diagram source and any actual topology, credentials, keys
+or infrastructure parameters must remain **outside this public repo**.
+GitHub CI rejects plaintext/private artifacts under docs/private. The
+operator chooses the PDF password locally; no password is sent to CI or
+ChatGPT. No encrypted final PDF can be committed until the operator has
+created and validated it with their chosen password.

@@ -265,3 +265,27 @@ Store::export_legacy now provides non-destructive streaming v1 -> legacy tar.gz.
 ## r026 update
 
 Audit read-only admin API/UI with 10-per-page searching added; safe file type validation. Focused Rust CI now runs on push only, avoiding duplicate PR+push workloads. External audit retention/immutability not yet certified.
+
+
+## r027 handoff -- Debian and offline confidential design
+
+Public PR #9 remains the development branch and main is unaffected.
+Supported new Rust Linux build targets: Debian 12 and 13 x amd64/arm64
+(package-rust-debian-preview.sh, rust-linux-debian-native-preview,
+native-release linux-deb). Production Gate and release collectors now
+require all four .deb artifacts, in addition to existing RPM/macOS/Windows.
+
+Private architecture reference is generated **offline**, not stored as
+plaintext in Git; the operator-only kit has reportlab/PyMuPDF generator
+that creates an AES-256 R6 encrypted PDF with a locally chosen password.
+Public documentation: docs/PRIVATE_ARCHITECTURE_WORKFLOW.md.
+CI validator: scripts/check-confidential-artifacts.py. Only
+docs/private/architecture-encrypted.pdf may be committed, once created
+locally by the operator; none exists on the PR yet. For cross-chat
+continuation, the operator can provide locally decrypted excerpts or
+a sanitized handoff. Do not request the private PDF password in chat.
+Prefer a separate private GitHub repo over a public encrypted blob.
+
+Track latest full CI, not previously green SHA; do not merge or label
+stable while Debian packaging, OS signing or complete recovery acceptance
+is incomplete.

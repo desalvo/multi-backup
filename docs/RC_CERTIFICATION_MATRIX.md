@@ -88,3 +88,18 @@ WebDAV read-only mount endpoint implemented as development code, with streaming 
 ## r025 conversion acceptance
 
 The code path for v1 -> legacy archive export (streaming) and legacy -> v1 import is implemented and has a round-trip test. **Certification pending** on actual GitHub, Dropbox, LFS and large datasets. Do not delete original archives until independent restore and checksum validation pass.
+
+
+## r027 -- Debian and private architecture qualification
+
+Native Debian 12 Bookworm and Debian 13 Trixie x AMD64/ARM64 must each
+pass cargo compile, independent .deb dependency resolution, installation,
+native CLI version, GUI self-test, byte-identical extraction and SHA-256.
+Their release outputs must include all four .deb files.
+
+Private design confidentiality: verify a password-chosen AES-256 R6 PDF
+is locally generated without intermediate plaintext files, rejects incorrect
+passwords, is never disclosed in GitHub Actions, and only encrypted bytes
+are optionally added. The public repository must contain **no private
+diagram source or live topology**. This is a process safeguard, not
+an international security certification or resistance guarantee.

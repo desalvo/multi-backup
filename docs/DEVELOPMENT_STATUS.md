@@ -360,3 +360,22 @@ a verified inventory with explicit scope and acceptance gates exists.
 ## r025 streaming reverse archive conversion
 
 The v1 Store exports a complete unified logical backup to a new encrypted tar.gz.age using age/tar/gzip streaming, authenticated contents and a roundtrip test; no plaintext tar file is staged. Native GUI exposes the action. Tests on real large archives remain part of the release gate.
+
+
+## r027 -- Debian and confidential architecture safeguard (2026-11-14)
+
+- Added native Debian 12/13 AMD64/ARM64 package builder for compiled Rust GUI
+  and CLI. Four .deb CI jobs test installability and use explicit release
+  publication dependencies. Debian packages have SHA-256 sidecar files.
+- Production Gate asserts all four Debian targets and blocks release
+  publishing if the matrix or .deb artifacts are missing. Signing, platform
+  runtime testing and external restore drills remain acceptance gates.
+- Added docs/PRIVATE_ARCHITECTURE_WORKFLOW.md and a CI check that rejects
+  plaintext or non-AES-256-R6 documents under docs/private. Only the named
+  encrypted PDF may be committed; no password, private diagram source or
+  vault topology is kept in Git.
+- The private architecture PDF generator is delivered separately to the
+  operator as an offline kit; the final encrypted PDF has NOT been published
+  because the operator must choose the password on their own computer.
+- Do not mark Debian or the security architecture as production certified
+  until the latest GitHub Actions run passes all required jobs.

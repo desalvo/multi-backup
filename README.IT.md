@@ -84,3 +84,20 @@ La CI della PR r020 genera pacchetti **senza Python** separati dalla r018: DMG a
 La GUI Rust r020 conserva la chiave age decifrata soltanto in RAM dopo lo sblocco del vault e permette ripristini locali/remoti senza un file di chiave privata in chiaro. Per macOS è predisposto il supporto Touch ID nativo (da validare su hardware reale); la CI include anche sei RPM Rust per Rocky/AlmaLinux 8/9/10. I pacchetti rimangono anteprime non stabili e non firmate per la produzione. Consultare [l'inventario della migrazione](docs/RUST_PORT_INVENTORY.md).
 
 La GUI Rust verifica il vault nella directory delle impostazioni già usata dalla r018 e, se presente, ne impone lo sblocco all'avvio prima di mostrare i comandi. È disponibile il controllo degli aggiornamenti stable/early con download e SHA-256 verificato, mai installato automaticamente. La r020 resta un'anteprima finché non saranno certificate tutte le prove funzionali e le firme di distribuzione.
+
+
+## Debian: pacchetti nativi Rust
+
+La CI ora prevede quattro pacchetti .deb: Debian 12 Bookworm (LTS) e
+Debian 13 Trixie, entrambi per amd64 e arm64. Ogni pacchetto viene compilato
+sull'architettura/distribuzione di destinazione, verificato e installato
+in una fase della CI. Rimane una preview finché non saranno validati
+firma, aggiornamenti, sicurezza e restore reale.
+
+## Documento architetturale riservato
+
+Consulta docs/PRIVATE_ARCHITECTURE_WORKFLOW.md. Il diagramma operativo,
+i dati di rete e le credenziali non vanno mai pubblicati nel repository.
+Il PDF viene generato/cifrato localmente con AES-256 e password scelta
+dall'operatore; GitHub conserva al massimo il PDF cifrato, dopo un controllo
+di crittografia. L'originale e il generatore privato restano offline.
