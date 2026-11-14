@@ -16,8 +16,12 @@ fn credentials(root:&Path)->(String,PathBuf){
 fn old(path:&Path){
     // Avoid waiting 48 hours for the release-policy grace window.
     let timestamp=SystemTime::now()-Duration::from_secs(72*3600);
-    fs::OpenOptions::new().write(true).open(path).unwrap()
-        .set_modified(timestamp).unwrap();
+    if path.is_dir() {
+        fs::File::open(path).unwrap().set_modified(timestamp).unwrap();
+    } else {
+        fs::OpenOptions::new().write(true).open(path).unwrap()
+            .set_modified(timestamp).unwrap();
+    }
 }
 fn chunk(root:&Path,id:&str)->PathBuf{
     root.join(".multi-backup-v1/chunks")
@@ -142,6 +146,7 @@ fn shared_parity_prevents_unsafe_space_reclamation(){
         b"content retained across cycles");
 }
 
+#[cfg(unix)]
 #[test]
 fn incomplete_parity_repack_preparation_is_ignored_then_garbage_collected(){
     let temp=tempdir().unwrap();
