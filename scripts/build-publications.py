@@ -428,6 +428,89 @@ refresh_r016_instructions()
 
 
 
+
+def append_r038_rust_preview_chapters():
+    """Keep the bilingual user manuals in sync with the real r038 Rust CLI.
+
+    These chapters are deliberately labelled DEVELOPMENT PREVIEW. Historical
+    r018 instructions and screenshots remain valid for that distributed app,
+    not proof that the r038 Rust UI has passed physical installation testing.
+    """
+    EN.extend([
+        ('Rust r038: scope and safe first use', [
+            'DEVELOPMENT PREVIEW ONLY: r038 is a compiled Rust CLI and standalone GUI under PR #10, not the currently published stable/RC installer. Existing r018 PDF screenshots describe the older Python/Tk interface, not an installed Rust r038 recovery test. Preserve the old backups and keys, but old Python archive wire-format migration no longer blocks the Rust RC.',
+            'Run the Rust CLI with age/age-keygen installed. The native store uses an external age identity path for some operations; store the key separately from encrypted data, on a private encrypted volume. NFS, SMB, SSHFS and GPFS CES inputs are Linux-only previews, strictly existing read-only mountpoints; the snapshot-attestation flag does not independently establish application consistency.'
+        ], [
+            'A catalogued plugin is not a certified executor. Five filesystem backup pairs are in preview, none production-certified.',
+            'No production or remote deletion is authorized solely by these examples.',
+            'The authoritative CLI recipes and limitations are in docs/R038_OPERATIONS_EN.md.'
+        ], None, '', 'multi-backup-native --version\nmulti-backup-native plugins list --json\nmulti-backup-native storage init --root STORE --recipient age1PUBLIC_RECIPIENT'),
+        ('Rust r038: full, incremental, size metrics and chain verification', [
+            'Choose FULL to establish a reference point, or INCREMENTAL with the ID of an existing full or the previous increment. Each incremental contains a complete authenticated file-reference inventory, while unchanged age-encrypted chunks are shared with preceding snapshots.',
+            'The Storage UI supports full/incremental selection, backup details and chain verification. Storage info reports file count, uncompressed bytes, zstd-compressed bytes, compressed-and-deduplicated bytes, newly introduced compressed bytes, added/modified/deleted files and every ancestor back to the reference full. These are NOT a physical on-disk total with encryption/parity overhead.',
+            'Chain verification is enabled by default from the reference full to the selected increment; --no-chain explicitly checks only the selected snapshot. Run independent full/selective restore drills in new directories.'
+        ], [
+            'The top-level namespace must remain identical along an incremental chain.',
+            'A new restore destination must not already exist; never overwrite source data.',
+            'Never treat a successful integrity check as a substitute for a restore acceptance test.'
+        ], None, '', 'multi-backup-native storage backup --root STORE --identity KEY --label Full --sources-json sources.json --mode full\nmulti-backup-native storage backup --root STORE --identity KEY --label Inc --sources-json sources.json --mode incremental --parent FULL_ID\nmulti-backup-native storage info --root STORE --identity KEY --id INC_ID\nmulti-backup-native storage verify-chain --root STORE --identity KEY --id INC_ID'),
+        ('Rust r038: safe purge and separate garbage collection', [
+            'Deleting an increment re-links its immediate descendants to the previous valid backup; deleting a full promotes its following incremental to a new full. Each successor already has the complete encrypted chunk-reference inventory for its own point in time. A protected or corrupt dependent prevents deletion until separately reconciled. The purge removes a logical manifest only: it does not remove encrypted chunks, parity or reclaim disk space.',
+            'After separately verifying surviving backups, run GC preview to list eligible orphan ciphertext. A distinct, explicit GC confirmation can remove only old unreferenced objects after the grace period (48 hours default, at least 24 hours). The engine retains partially live 8+2 parity groups and their obsolete member chunks until a crash-safe repacker is independently qualified. Automatic remote GC and WORM enforcement are not certified.'
+        ], [
+            'Unprotect a protected descendant only after a separate explicit decision.',
+            'A GC preview NEVER mutates storage; the physical collection requires --confirm ERASE-ORPHANS.',
+            'Do not interpret the maximum theoretical deduplicated savings as the immediately reclaimable capacity.'
+        ], None, '', 'multi-backup-native storage delete-backup --root STORE --identity KEY --id DELETE_ID --confirm-id DELETE_ID\nmulti-backup-native storage gc-preview --root STORE --identity KEY --grace-hours 48\nmulti-backup-native storage gc-collect --root STORE --identity KEY --confirm ERASE-ORPHANS --grace-hours 48'),
+        ('Rust r038: schedules and restore to another user account', [
+            'The native one-shot schedule runner and polling daemon accept a private JSON file with full/incremental or integrity-verification jobs, intervals in seconds, independent age/store paths and durable state. A first incremental requires a valid parent; later runs of that same job remember the last backup ID. A separate verification job requires an explicit backup ID and checks the complete chain by default.',
+            'An archived GitHub or Dropbox account is provenance, NOT a credential for restore. Destination credentials must be separately authorized. The Rust dedicated CLI can create a new GitHub repository under an explicitly selected owner, or one new Dropbox file with an independently validated destination write-token account; existing targets are not overwritten. Cross-account multi-repository/multi-file selection and permission fidelity still need implementation and real-account certification.'
+        ], [
+            'Keep job JSON and scheduler state private; no access tokens or passwords in those files.',
+            'The scheduling daemon is not yet a certified installed OS service; GUI schedule configuration is incomplete.',
+            'For full JSON examples, account permissions and incident procedures see docs/R038_OPERATIONS_EN.md.'
+        ], None, '', 'multi-backup-native schedule run --config jobs.json --state /private/scheduler-state.json\nmulti-backup-native restore github --archive REPO.tar.gz.age --identity KEY --target target-owner/new-repo --target-account target-owner --confirm CREATE-NEW')
+    ])
+    IT.extend([
+        ('Rust r038: ambito, preparazione e limiti', [
+            'SOLO ANTEPRIMA DI SVILUPPO: r038 è una CLI compilata in Rust con GUI separata nel branch PR #10; non è ancora il programma RC/stable distribuito. Le schermate presenti nei capitoli precedenti sono della GUI Python/Tk r018 e non provano un restore sulla nuova GUI. Conservare i vecchi archivi e le chiavi, ma la loro migrazione di formato non è più un blocco per la RC Rust.',
+            'Usare la CLI Rust con age/age-keygen installati. Il chunk store richiede ancora il percorso a una identity age per alcune operazioni; custodirla separatamente dallo storage su volume privato e cifrato. Input NFS, SMB, SSHFS e GPFS CES sono preview solo Linux, da mount esatti in sola lettura: la dichiarazione di snapshot NON prova automaticamente la consistenza applicativa.'
+        ], [
+            'Un plugin nel catalogo non è automaticamente eseguibile o certificato: cinque coppie filesystem sono preview.',
+            'Non usare questi comandi distruttivi sulla sola copia di dati importanti.',
+            'Le procedure complete aggiornate sono in docs/R038_OPERATIONS_IT.md.'
+        ], None, '', 'multi-backup-native --version\nmulti-backup-native plugins list --json\nmulti-backup-native storage init --root STORE --recipient age1PUBLIC_RECIPIENT'),
+        ('Rust r038: backup totale, incrementale e verifica', [
+            'Con FULL si crea il punto di riferimento. Con INCREMENTAL si indica il backup FULL o incrementale precedente mediante il suo ID. Ogni incrementale include un inventario completo e autenticato dei file del proprio punto di ripristino, riutilizzando i chunk cifrati immutati senza ricopiarli.',
+            'La GUI Storage consente Totale/Incrementale, consultazione del backup e verifica della catena. Storage info espone numero file, dimensioni non compresse, compresse zstd, compresse e deduplicate, nuovi byte compressi, file aggiunti/modificati/cancellati e tutti gli incrementi fino al full di riferimento. Questi valori NON equivalgono allo spazio effettivo occupato con cifratura e parità.',
+            'La verifica esamina di default l’intera catena dal FULL all’incrementale richiesto. --no-chain controlla solo il backup selezionato. Provare periodicamente restore completi e selettivi su una directory nuova.'
+        ], [
+            'Il namespace superiore deve rimanere coerente fra gli incrementi.',
+            'La destinazione di restore non deve esistere: non sovrascrivere mai i dati sorgenti.',
+            'La verifica crittografica non sostituisce un vero test di ripristino.'
+        ], None, '', 'multi-backup-native storage backup --root STORE --identity KEY --label Full --sources-json sources.json --mode full\nmulti-backup-native storage backup --root STORE --identity KEY --label Inc --sources-json sources.json --mode incremental --parent FULL_ID\nmulti-backup-native storage info --root STORE --identity KEY --id INC_ID\nmulti-backup-native storage verify-chain --root STORE --identity KEY --id INC_ID'),
+        ('Rust r038: purge, promozione e garbage collection', [
+            'Cancellare un incremento ricollega i successori al backup precedente; cancellare un FULL promuove l’incremento successivo a nuovo FULL. I dati dei backup superstiti rimangono ripristinabili perché ogni manifest conserva tutti i riferimenti ai chunk del proprio stato. La presenza di figli protetti o corrotti blocca l’operazione. Il purge modifica soltanto i manifest cifrati: NON elimina chunk/parità né libera immediatamente spazio.',
+            'Dopo una verifica indipendente dei backup superstiti, usare GC preview per analizzare gli oggetti cifrati orfani. La GC fisica richiede una conferma distinta e rispetta il periodo di sicurezza (48 ore predefinite, minimo 24). Le stripe 8+2 con membri ancora utilizzati vengono conservate interamente fino al repack crash-safe, non ancora certificato. GC remota e protezione WORM non sono implementazioni qualificate.'
+        ], [
+            'Rimuovere la protezione di un figlio soltanto con scelta esplicita separata.',
+            'GC preview non modifica nulla; la raccolta fisica richiede --confirm ERASE-ORPHANS.',
+            'Non confondere i risparmi teorici della deduplica con spazio effettivamente liberabile.'
+        ], None, '', 'multi-backup-native storage delete-backup --root STORE --identity KEY --id DELETE_ID --confirm-id DELETE_ID\nmulti-backup-native storage gc-preview --root STORE --identity KEY --grace-hours 48\nmulti-backup-native storage gc-collect --root STORE --identity KEY --confirm ERASE-ORPHANS --grace-hours 48'),
+        ('Rust r038: schedule e restore verso utenti differenti', [
+            'Il runner Rust può eseguire job manuali o schedulati da JSON: backup full, incrementale o verifica, con intervalli in secondi e stato durevole. Il primo incrementale deve riferirsi a un backup valido; poi il medesimo job riusa l’ultimo ID salvato. Un job di verifica separato richiede un backup_id esplicito e controlla di default tutta la catena.',
+            'L’account di origine nel backup è un’informazione storica, non una credenziale autorizzata a scrivere altrove. La destinazione richiede autenticazione indipendente. I percorsi Rust dedicati possono creare un nuovo repository GitHub per un proprietario scelto, oppure un nuovo file Dropbox verificando l’account del token WRITE. Non sovrascrivono risorse esistenti. Restore multi-repository, selezione di più file, ACL/metadata e test reali tra utenti diversi sono ancora da completare.'
+        ], [
+            'Proteggere file JSON e stato dello scheduler, senza inserirvi token o password.',
+            'Il daemon non è ancora un servizio OS certificato e la configurazione GUI delle schedule è incompleta.',
+            'Esempi JSON completi e prerequisiti dei provider: docs/R038_OPERATIONS_IT.md.'
+        ], None, '', 'multi-backup-native schedule run --config jobs.json --state /private/scheduler-state.json\nmulti-backup-native restore github --archive REPO.tar.gz.age --identity KEY --target altro-owner/nuovo-repo --target-account altro-owner --confirm CREATE-NEW')
+    ])
+
+append_r038_rust_preview_chapters()
+
+
+
 def manual(lang):
     filename=('Multi-Backup-User-Manual-EN.pdf' if lang=='EN' else 'Multi-Backup-Manuale-Utente-IT.pdf')
     output=OUTMAN/filename
