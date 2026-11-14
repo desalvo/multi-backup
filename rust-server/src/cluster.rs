@@ -63,6 +63,14 @@ CREATE TABLE IF NOT EXISTS mb_agent_registry (
   last_seen TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS mb_agent_request_nonces (
+  agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
+  sequence BIGINT NOT NULL,
+  accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(agent_id,sequence)
+);
+CREATE INDEX IF NOT EXISTS mb_agent_nonce_time
+ ON mb_agent_request_nonces(accepted_at);
 CREATE TABLE IF NOT EXISTS mb_agent_pull_jobs (
   job_id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
