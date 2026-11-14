@@ -1,9 +1,6 @@
 # Multi Backup — storage a chunk e backup logico unificato
 
-**Stato: prototipo sperimentale r021, PR #9 (NON una release stabile).**
-Il formato v1 è opt-in e **non sostituisce né modifica automaticamente** i
-vecchi archivi `tar.gz.age`. Prima del rilascio servono test di compatibilità,
-restore multi-TB, fault injection e review di sicurezza indipendente.
+**Stato corrente: Rust r038 nella PR #10 (anteprima di sviluppo, NON release stable).** Il formato v1 non cancella vecchi archivi. La migrazione di archivi creati con Python è ora facoltativa, non un gate della RC. Restano necessari test reali di restore, crash, sicurezza, metadati, firma e rollback. [Guida IT](R038_OPERATIONS_IT.md) · [EN](R038_OPERATIONS_EN.md).
 
 ![Architettura logica e oggetti cifrati](images/chunk-architecture.svg)
 
@@ -148,7 +145,7 @@ speciali non sono ancora supportati nel formato sperimentale.
 | Conversione storage | copia -> verifica -> switch atomico -> conservazione sorgente | da implementare |
 | Migrazione da tar.gz.age | più archivi legacy -> chunk -> manifest logico unico senza tar plaintext | prototipo Rust implementato; real dataset QA pendente |
 | S3/NFS/Ceph backend | driver e lock coerenti per oggetti immutabili | da implementare |
-| Garbage collection | mark-and-sweep da manifest e parità; dry-run | da implementare |
+| Garbage collection | verifica e rimozione separata dei ciphertext orfani oltre grace di sicurezza | preview ed esecuzione locali presenti nella r038; compattazione di stripe miste e GC remoto NON certificati |
 
 Gli ZIP portabili conterranno chunk age già cifrati, metadata cifrati e
 indice dei volumi (ID, dimensioni, checksum) senza renderli in plaintext.
@@ -164,8 +161,7 @@ Un volume incompleto non deve risultare importabile.
 5. Commuta la destinazione solo dopo un commit completo e atomico.
 6. Conserva vecchio storage fino ad approvazione esplicita dell'eliminazione.
 
-**Non è ancora implementata:** nessun pulsante UI deve fingere di fare questa
-conversione finché i passi non sono stati certificati.
+**Nota storica:** un percorso Rust di copia/relocate è ora disponibile in anteprima, ma lo switch con rollback e la sicurezza in condizioni di crash NON sono certificati.
 
 ## Test minimi richiesti
 
@@ -179,8 +175,7 @@ conversione finché i passi non sono stati certificati.
 - Export ZIP multipart e import in ordine arbitrario, volume mancante.
 - Compilazione e restore indipendente su macOS/Windows/EL8–10/Linux container.
 
-**Gate:** nessuna produzione/stable finché i test reali, le migrazioni e
-l'interoperabilità con il vault protetto non saranno conclusi.
+**Gate attuale r038:** niente pubblicazione stable prima di prove reali di restore, fault injection, controllo delle chiavi, firma degli installer, upgrade/rollback e review di sicurezza. Il trasferimento di archivi storici Python NON è obbligatorio.
 
 
 ## Comandi aggiunti nella revisione r022
@@ -201,3 +196,12 @@ CLI: multi-backup-native storage export-legacy --root STORAGE --identity KEY
 This is a compatibility/export bridge, not the preferred content-addressed
 storage mode. Verify the restored repository and LFS metadata with production
 data before deleting any older backup.
+
+
+## r038 — full/incremental, purge e GC
+
+Ogni full/incrementale conserva un **inventario completo di riferimenti ai chunk** per il proprio punto di ripristino; gli incrementi riutilizzano chunk condivisi. Le metriche esposte comprendono numero file, dimensioni non compresse, zstd compresse e zstd deduplicate, oltre ai nuovi chunk dell'incremento. Non includono l'overhead fisico di age/parità.
+
+Cancellare un incremento ricollega i suoi successori al predecessore; cancellare un full promuove il suo successore incrementale a full. Un backup o figlio protetto non viene modificato automaticamente. **Purge = solo manifest, nessun chunk cancellato.**
+
+La GC è una seconda operazione con anteprima e conferma distinta, controllo di tutti i backup/parità vivi, lock comune e grace default 48 ore (minimo 24). I gruppi 8+2 misti (chunk vivi e orfani) restano intatti finché il repack crash-safe non è certificato. Nessuna GC remota o WORM indipendente è ancora qualificata. Per comandi, cautele ed esempi vedere [IT](R038_OPERATIONS_IT.md) e [EN](R038_OPERATIONS_EN.md).

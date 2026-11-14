@@ -53,12 +53,7 @@ large namespace trees. That remains a required performance gate.
 
 ## Remaining release gates
 
-The UI for changing schedules/retention/GC must persist settings, trigger
-a real durable scheduler, survive crashes/restarts and audit any deletion.
-A full GC implementation requires cross-provider reference ownership,
-append-only vault integrity, rate limiting, quarantine and independent
-recovery drills. Never report these policy-only pieces as automated
-production cleanup. See `docs/BACKUP_PROTECTION.md`.
+Rust r038 adds a persistent-state schedule run/daemon and manual local POSIX GC, but the GUI scheduler configuration, installed OS service, crash-safe multi-manifest transaction, remote GC and audit notifications are NOT qualified. The GC keeps partially live parity stripes intact; crash-safe repacking is still missing. Independent vault WORM, rate limiting and real recovery drills remain mandatory before unattended production cleanup. See `docs/BACKUP_PROTECTION.md`.
 
 
 ## r038 — full/incremental chain purge and garbage collection contract

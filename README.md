@@ -75,6 +75,8 @@ The early release points to [GitHub Releases: early-release](https://github.com/
 
 ## Documentation
 
+**Guide operative Rust r038, anteprima di sviluppo:** [Italiano](docs/R038_OPERATIONS_IT.md) · [English](docs/R038_OPERATIONS_EN.md). La r018 Python/Tk rimane l'ultima release distribuita. I manuali PDF generati includeranno un'appendice r038 separatamente identificata; gli screenshot storici sono della r018.
+
 - [User manual, English (PDF)](docs/manuals/Multi-Backup-User-Manual-EN.pdf)
 - [Manuale utente, italiano (PDF)](docs/manuals/Multi-Backup-Manuale-Utente-IT.pdf)
 - [Brochure, English (PDF)](docs/brochures/Multi-Backup-Brochure-EN.pdf)
