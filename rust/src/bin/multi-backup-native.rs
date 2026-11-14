@@ -13,6 +13,7 @@ fn usage() -> &'static str {
        multi-backup-native archive create --source DIR --output FILE.tar.gz.age --recipient age1... [--prefix multi-backup]\n\
        multi-backup-native archive list --archive FILE.tar.gz.age --identity AGE_KEY [--json]\n\
        multi-backup-native archive verify --archive FILE.tar.gz.age --identity AGE_KEY\n\
+       multi-backup-native archive verify --archive FILE.tar.gz.age --vault PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native archive extract --archive FILE.tar.gz.age --identity AGE_KEY --destination NEW_DIR\n\
        multi-backup-native archive delete --root PRIVATE_BACKUP_ROOT --archive FILE.tar.gz.age --confirm EXACT_FILENAME\n\
        multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
@@ -134,8 +135,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("Vault {command} authenticated for recipient {recipient}; private identity not exported");
         return Ok(());
     }
-    if password_stdin {
-        return Err("--password-stdin is only accepted by vault operations".into());
+    if password_stdin && family != "archive" {
+        return Err("--password-stdin requires vault or protected archive".into());
     }
     if family == "journal" {
         if password_stdin { return Err("--password-stdin not valid for journals".into()); }
@@ -257,6 +258,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match command {
         "create" => {
             accepted(&flags, &["--source", "--output", "--recipient", "--prefix"])?;
+            if password_stdin { return Err("No password accepted for archive creation".into()); }
             if json { return Err("--json not valid for create".into()); }
             let source = Path::new(required(&flags, "--source")?);
             let output = Path::new(required(&flags, "--output")?);
@@ -267,19 +269,42 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         },
         "list" | "verify" | "extract" => {
             let known = if command == "extract" {
-                vec!["--archive", "--identity", "--destination"]
+                vec!["--archive", "--identity", "--vault", "--destination"]
             } else {
-                vec!["--archive", "--identity"]
+                vec!["--archive", "--identity", "--vault"]
             };
             accepted(&flags, &known)?;
             if json && command != "list" {
                 return Err("--json valid only for list".into());
             }
             let path = Path::new(required(&flags, "--archive")?);
-            let key = Path::new(required(&flags, "--identity")?);
+            let plain = flags.get("--identity").copied();
+            let protected = flags.get("--vault").copied();
+            if plain.is_some() == protected.is_some() {
+                return Err("Specify exactly one --identity or --vault".into());
+            }
+            if password_stdin && protected.is_none() {
+                return Err("--password-stdin requires an encrypted --vault".into());
+            }
+            let unlocked = if let Some(vault_file) = protected {
+                let password = if password_stdin {
+                    let mut bytes = Zeroizing::new(Vec::new());
+                    io::stdin().take(1026).read_to_end(&mut *bytes)?;
+                    let line = std::str::from_utf8(&bytes)?;
+                    Zeroizing::new(line.trim_end_matches(['\r', '\n']).to_string())
+                } else {
+                    Zeroizing::new(rpassword::prompt_password("Vault password: ")?)
+                };
+                Some(vault::unlock_identity(Path::new(vault_file), &password)?)
+            } else { None };
+            let plain_path = plain.map(Path::new);
             match command {
                 "list" => {
-                    let members = archive::list(path, key)?;
+                    let members = if let Some(secret) = &unlocked {
+                        archive::list_from_memory(path, secret)?
+                    } else {
+                        archive::list(path, plain_path.unwrap())?
+                    };
                     if json {
                         println!("{}", serde_json::to_string_pretty(&members)?);
                     } else {
@@ -291,12 +316,20 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                 }
                 "verify" => {
-                    let count = archive::verify(path, key)?;
+                    let count = if let Some(secret) = &unlocked {
+                        archive::verify_from_memory(path, secret)?
+                    } else {
+                        archive::verify(path, plain_path.unwrap())?
+                    };
                     println!("Verified {count} members, encrypted stream integrity checked");
                 }
                 _ => {
                     let destination = Path::new(required(&flags, "--destination")?);
-                    let members = archive::extract(path, key, destination)?;
+                    let members = if let Some(secret) = &unlocked {
+                        archive::extract_from_memory(path, secret, destination)?
+                    } else {
+                        archive::extract(path, plain_path.unwrap(), destination)?
+                    };
                     println!("Restored {} members safely to {}", members.len(), destination.display());
                 }
             }

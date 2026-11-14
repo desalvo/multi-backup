@@ -4,11 +4,11 @@ use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2}
 use multi_backup_core::{archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, vault};
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver},
+    sync::{mpsc::{self, Receiver}, Arc},
     thread,
     time::{Duration, Instant},
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const VERSION: &str = "0.1.0-r020-native-preview";
 const AUTHOR: &str = "Alessandro De Salvo";
@@ -105,6 +105,7 @@ struct NativeApp {
     entries: Vec<PathBuf>,
     count: usize,
     vault_verified: bool,
+    session_identity: Option<Arc<Zeroizing<Vec<u8>>>>,
     smoke_frames: Option<usize>,
     remote_confirm: Option<String>,
 }
@@ -138,6 +139,7 @@ impl NativeApp {
             hero: load_photo(ctx, "backup-hero", include_bytes!("../../assets/hero.jpg")),
             logo: load_photo(ctx, "multi-backup-logo", include_bytes!("../../assets/icon-256.png")),
             count: entries.len(), entries, vault_verified: false,
+            session_identity: None,
             smoke_frames: if smoke { Some(0) } else { None },
             remote_confirm: None,
         }
@@ -229,8 +231,9 @@ impl NativeApp {
         if self.active { return; }
         let path = self.fields.selected_archive.clone();
         let identity = self.fields.identity.clone();
-        if path.trim().is_empty() || identity.trim().is_empty() {
-            self.status = "Seleziona archivio cifrato e file chiave age".into();
+        let secret = self.session_identity.clone();
+        if path.trim().is_empty() || (identity.trim().is_empty() && secret.is_none()) {
+            self.status = "Seleziona un archivio e sblocca il vault oppure scegli la chiave age".into();
             return;
         }
         let dest = self.fields.destination.clone();
@@ -247,13 +250,19 @@ impl NativeApp {
         thread::spawn(move || {
             let _ = tx.send(Event::Status("Autenticazione age e verifica archivio…".into()));
             let outcome = if verify_only {
-                archive::verify(Path::new(&path), Path::new(&identity))
-                    .map(|size| format!("Archivio verificato: {size} elementi"))
+                (if let Some(secret) = &secret {
+                    archive::verify_from_memory(Path::new(&path), secret)
+                } else {
+                    archive::verify(Path::new(&path), Path::new(&identity))
+                }).map(|size| format!("Archivio verificato: {size} elementi"))
             } else {
-                archive::extract(Path::new(&path), Path::new(&identity), Path::new(&dest))
-                    .map(|members| format!(
-                        "Ripristinati {} elementi in {}", members.len(), dest
-                    ))
+                (if let Some(secret) = &secret {
+                    archive::extract_from_memory(Path::new(&path), secret, Path::new(&dest))
+                } else {
+                    archive::extract(Path::new(&path), Path::new(&identity), Path::new(&dest))
+                }).map(|members| format!(
+                    "Ripristinati {} elementi in {}", members.len(), dest
+                ))
             };
             match outcome {
                 Ok(message) => {let _ = tx.send(Event::Success(message));}
@@ -456,7 +465,7 @@ impl NativeApp {
         ui.label("Il motore Rust richiede una directory NUOVA e autentica tutto lo stream age.");
         ui.label("Archivio .tar.gz.age");
         ui.text_edit_singleline(&mut self.fields.selected_archive);
-        ui.label("File di identità privata age (non salvato nelle preferenze)");
+        ui.label("Il vault sbloccato è usato in memoria. Chiave age esterna opzionale:");
         ui.text_edit_singleline(&mut self.fields.identity);
         ui.label("Nuova directory di destinazione (non può esistere)");
         ui.text_edit_singleline(&mut self.fields.destination);
@@ -498,7 +507,10 @@ impl NativeApp {
         ui.heading("Vault protetto");
         ui.label("Vault AES-256-GCM / scrypt, compatibile con le identità Python v1.");
         ui.label("Percorso vault .agevault");
-        ui.text_edit_singleline(&mut self.fields.vault_path);
+        if ui.text_edit_singleline(&mut self.fields.vault_path).changed() {
+            self.session_identity = None;
+            self.vault_verified = false;
+        }
         ui.label("Password");
         ui.add(egui::TextEdit::singleline(&mut self.fields.password).password(true));
         ui.horizontal(|ui| {
@@ -519,7 +531,8 @@ impl NativeApp {
             if ui.button("Cambia password").clicked() { self.vault_action("change"); }
         });
         ui.label(RichText::new(if self.vault_verified {
-            "Vault autenticato" } else { "Vault non sbloccato" }).color(MUTED));
+            "Vault sbloccato in RAM fino alla chiusura dell'app" }
+            else { "Vault non sbloccato" }).color(MUTED));
         ui.label(RichText::new(&self.status).color(INK));
     }
     fn vault_action(&mut self, action: &str) {
@@ -537,12 +550,26 @@ impl NativeApp {
         };
         match outcome {
             Ok(public) => {
-                self.vault_verified = true;
+                if action == "verify" || action == "create" {
+                    match vault::unlock_identity(original, first) {
+                        Ok(secret) => {
+                            self.session_identity = Some(Arc::new(secret));
+                            self.vault_verified = true;
+                        },
+                        Err(error) => {
+                            self.session_identity = None;
+                            self.vault_verified = false;
+                            self.status = format!("Sblocco chiave non riuscito: {error}");
+                            self.fields.password.zeroize();
+                            self.fields.password_confirm.zeroize();
+                            return;
+                        }
+                    }
+                }
                 self.status = format!("Operazione {action} riuscita per {public}");
                 self.fields.recipient = public;
             }
             Err(error) => {
-                self.vault_verified = false;
                 self.status = format!("Operazione rifiutata: {error}");
             }
         }

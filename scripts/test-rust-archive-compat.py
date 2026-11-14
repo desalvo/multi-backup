@@ -115,6 +115,19 @@ def main():
         assert "multi-backup/example/nested/data.json" in names, names
         assert "multi-backup/backup_manifest.json" in names, names
         invoke(binary, "archive", "verify", "--archive", legacy, "--identity", identity)
+        invoke(binary, "archive", "verify", "--archive", legacy,
+               "--vault", vault_path, "--password-stdin",
+               input_text="test-password-not-a-real-secret\n")
+        protected_restore = root / "restored_from_protected_vault"
+        invoke(binary, "archive", "extract", "--archive", legacy,
+               "--vault", vault_path, "--password-stdin",
+               "--destination", protected_restore,
+               input_text="test-password-not-a-real-secret\n")
+        assert (protected_restore / "multi-backup/example/nested/data.json").read_bytes() == (
+            source / "nested/data.json").read_bytes()
+        invoke(binary, "archive", "verify", "--archive", legacy,
+               "--vault", vault_path, "--password-stdin",
+               input_text="incorrect-password\n", expect_success=False)
         checkpoint = Journal(root / ".state", {"recipient": recipient}, restart=True)
         checkpoint.record("encrypted", legacy)
         audit = json.loads(invoke(
