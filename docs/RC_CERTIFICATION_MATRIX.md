@@ -1,7 +1,7 @@
 # Multi Backup r021 — certification and release acceptance matrix
 
-**Audit date:** 2026-11-14. **Source:** draft PR #9, branch
-`feature/r019-rust-native-encrypted-archive`.
+**Audit date:** 2026-11-14. **Source:** PR #9 merged to main in commit
+`b7e757d9378d2503b57fa43267577a3a55f60fd2` after full green feature-head CI 43640869549.
 **Disposition: NOT CERTIFIED. No stable release permitted.**
 
 This file is a machine-auditable checklist of required evidence; a green
@@ -262,3 +262,10 @@ deletion/truncation/shortened retention despite stolen ingestion credentials.
   age-based cleanup. Output plugin-level capacity is partially supported
   for pre-mounted filesystems; cloud API quotas/namespace index
   persistence still require integration and live verification.
+
+
+## r038 — merge qualification evidence (2026-11-14)
+
+PR #9 was merged to `main` as `b7e757d9378d2503b57fa43267577a3a55f60fd2`. The premerge feature head `860d390a` passed all **19 required verification jobs** in [CI #43640869549](https://github.com/desalvo/multi-backup/actions/runs/43640869549); **0 failed**, **2 publication jobs skipped** by PR safety policy. Artifact groups include Rust-native macOS ARM64 and Intel DMG, Windows x64 installer/ZIP, Ubuntu desktop, Debian 12/13 AMD64/ARM64, Rocky/Alma EL8/9/10, GUI/PDF previews and compatibility macOS images. Tests cover compiled CLI encrypted archive byte-for-byte recovery, sidecar tampering, wrong key, protected-backup deletion and namespace roundtrip. No update, physical installation, external credential or live provider restore acceptance was inferred from this result.
+
+**Disposition remains NOT CERTIFIED for stable production.** No stable signing/notarization, real GitHub/Dropbox/LFS/CI restore drill, large-scale performance, WORM recovery, or independent security audit is evidenced; the runtime scheduler and safe mark-and-sweep garbage collector have not been implemented/certified. Never treat this document's older historical FAIL status lines as the latest run; the most recent premerge CI above supersedes those historical CI states, while outstanding functional blockers still apply. The merge commit has no `[full-ci]` publication trigger, preserving published r018 assets. Follow-up main CI and all required external acceptance must still be recorded before any RC promotion.
