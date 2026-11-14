@@ -14,12 +14,12 @@ implemented and tested before the reverse operation is enabled.
 | posix | Preview | Preview | Files, ACL/xattr, optional FS snapshot |
 | s3 | Planned | Planned | Versioned objects, multipart, optional Object Lock |
 | webdav | Planned | Planned | ETag/collection and atomic publish workaround |
-| nfs | Planned | Planned | NFSv3+, mounted server-side snapshot if available |
-| smb | Planned | — | SMB/CIFS ACL, streams and snapshot semantics |
+| nfs | Preview (read-only input) | Planned | NFSv3+, mounted server-side snapshot if available |
+| smb | Preview (read-only input) | — | SMB/CIFS ACL, streams and snapshot semantics |
 | cephfs | Planned | Planned | CephFS snapshot, file metadata and safe writer |
 | glusterfs | Planned | Planned | Gluster distributed volume, consistency barrier/snapshot, GFID, ACL/xattr; restore via mounted volume only |
 | lustre | Planned | Planned | Lustre MDT/OST, stripe metadata and coordinated snapshot; external client |
-| gpfs | Planned | Planned | IBM Storage Scale CES NFSv3/v4 or SMB3 using open-source OS clients; consistent fileset required |
+| gpfs | Preview (CES read-only input) | Planned | IBM Storage Scale CES NFSv3/v4 or SMB3 using open-source OS clients; consistent fileset required |
 | hdfs | Planned | Planned | SWebHDFS/WebHDFS, snapshots, ACL/xattr and Kerberos |
 | afs | Planned | Planned | OpenAFS cells and VLDB volume IDs, full/incremental vos dumps, ACL and new-volume restore |
 | alfresco | Planned | Planned | Alfresco REST/CMIS document versions, types/aspects, ACL, repository metadata |
@@ -37,7 +37,7 @@ implemented and tested before the reverse operation is enabled.
 | postgresql | Planned | — | pg_basebackup/WAL or logical export and PITR |
 | oracle | Planned | — | Oracle RMAN online with ARCHIVELOG, redo/SCN and SPFILE/controlfile recovery |
 | ssh | Planned | Planned | SSH/SCP/SFTP host verification, remote metadata |
-| sshfs | Planned | Planned | Pre-mounted SSHFS/FUSE SFTP filesystem, pinned host key, encrypted-only output |
+| sshfs | Preview (read-only input) | Planned | Pre-mounted SSHFS/FUSE SFTP filesystem, pinned host key, encrypted-only output |
 | anti-ransomware-vault | — | Planned | WORM/Object Lock, independent append-only ingest and recovery plane, offline credentials |
 
 **Counts (expanded scope r036):** 32 plugin IDs. **31 backup input**
@@ -173,3 +173,8 @@ multi-backup-native plugins plan --mode backup --input gpfs --input-gpfs-access 
 The probe verifies the exact kernel mount type, not storage ownership,
 server software, key pinning, write permissions or snapshot consistency.
 It never mounts, reads customer files or writes any data.
+
+
+## r038 — native plugin runtime preview (not certified)
+
+Five executable **development-preview backup pairs** now have a Rust code path: POSIX→POSIX, NFS→POSIX, SMB→POSIX, SSHFS→POSIX, and GPFS CES→POSIX. The output is a verified age-encrypted POSIX chunk store. POSIX→POSIX fresh-directory restore is the one generic reverse restore path implemented. Mounted remote sources run only on Linux when the selected path is an exact matching **read-only OS mount** and the operator explicitly acknowledges a consistent snapshot. No snapshot can be proven from a user flag or mount type; ACL/xattr and live provider consistency still require end-to-end acceptance. The registered catalog remains **32 plugins, 53 declared backup roles**, with **0/682 certified generic pairs**. The remaining directions are not executors.
