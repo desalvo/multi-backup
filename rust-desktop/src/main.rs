@@ -494,7 +494,7 @@ impl NativeApp {
                     egui::pos2(dx, rect.top() + 6.0), Vec2::new(step * 0.74, height - 12.0));
                 pen.rect_filled(rack, 5.0, Color32::from_rgb(12, 26, 60));
                 pen.rect_stroke(rack, 5.0, egui::Stroke::new(1.0, Color32::from_rgb(57, 96, 168)));
-                for j in 0.0.9 {
+                for j in 0..9 {
                     let led = egui::pos2(rack.left() + 8.0,
                         rack.top() + 10.0 + j as f32 * (height - 30.0) / 10.0);
                     pen.circle_filled(led, 1.7, if j%3==0 {VIOLET}
