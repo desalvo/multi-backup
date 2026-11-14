@@ -127,7 +127,7 @@ impl DropboxWriter {
         };
         if let Some(expected)=expected_account {
             if expected.len()>254 || expected.is_empty() ||
-               expected.contains(['\n','\r']) {
+               expected.chars().any(|c|c=='\n'||c=='\r') {
                 return Err(err("Invalid Dropbox destination account"));
             }
             // This is the WRITE token, not the origin user's read token.
