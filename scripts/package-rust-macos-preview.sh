@@ -91,6 +91,7 @@ for attempt in 1 2 3 4; do
   sleep "$((attempt*3))"
 done
 test -f "$DMG"
+echo "[DMG] Created $(ls -lh "$DMG" | awk '{print $5}') image for $ARCH"
 for attempt in 1 2 3 4; do
   if hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG" \
        >"$STAGE/hdiutil-attach.log" 2>&1; then break; fi
@@ -99,13 +100,18 @@ for attempt in 1 2 3 4; do
      [[ "$attempt" == 4 ]]; then exit 1; fi
   sleep "$((attempt*3))"
 done
-test -d "$MOUNT/Multi Backup Rust Preview.app"
-test -L "$MOUNT/Applications"
-test "$(readlink "$MOUNT/Applications")" = "/Applications"
-test "$(find "$MOUNT" -mindepth 1 -maxdepth 1 \
-  ! -name '.DS_Store' ! -name '.Trashes' ! -name '.fseventsd' |
-  wc -l | tr -d ' ')" = 2
+echo '[DMG] Mounted root entries (including system metadata):'
+find "$MOUNT" -mindepth 1 -maxdepth 1 -print | sort
+[[ -d "$MOUNT/Multi Backup Rust Preview.app" ]] || { echo '::error::DMG missing the Rust Preview.app bundle' >&2; exit 1; }
+[[ -L "$MOUNT/Applications" ]] || { echo '::error::DMG missing Applications shortcut' >&2; exit 1; }
+[[ "$(readlink "$MOUNT/Applications")" == "/Applications" ]] || { echo '::error::Applications shortcut points somewhere unexpected' >&2; exit 1; }
+# The HFS+ image may grow extra hidden macOS filesystem metadata entries.
+# Validate the exact two user-facing install items, not incidental dotfiles.
+visible_items="$(find "$MOUNT" -mindepth 1 -maxdepth 1 ! -name '.*' -print | wc -l | tr -d '[:space:]')"
+[[ "$visible_items" == 2 ]] || { echo "::error::Expected app+Applications, found $visible_items visible DMG items" >&2; exit 1; }
+echo '[DMG] Running installed app self-test'
 "$MOUNT/Multi Backup Rust Preview.app/Contents/MacOS/Multi Backup" --self-test
-codesign --verify --deep --strict "$MOUNT/Multi Backup Rust Preview.app"
+echo '[DMG] Verifying installed app signature'
+codesign --verify --deep --strict --verbose=2 "$MOUNT/Multi Backup Rust Preview.app"
 shasum -a 256 "$DMG" > "$DMG.sha256"
 echo "Rust-only native $ARCH DMG preview verified."
