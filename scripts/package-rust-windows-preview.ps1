@@ -38,6 +38,16 @@ foreach ($name in @('gh.exe','git-lfs.exe')) {
 & (Join-Path $bundle 'bin/multi-backup-native.exe') --version
 & (Join-Path $bundle 'MultiBackupRust.exe') --self-test
 if ($LASTEXITCODE -ne 0) { throw 'Bundled Rust preview self-test failed' }
+# Make the real packaged age.exe/age-keygen.exe available to the native Rust
+# encrypted restore acceptance test. The installed GUI contains no Python.
+$previousPath = $env:PATH
+try {
+    $env:PATH = "$(Join-Path $bundle 'bin');$previousPath"
+    cargo test --manifest-path rust/Cargo.toml --test native_cli_restore_matrix
+    if ($LASTEXITCODE -ne 0) { throw 'Native Windows encrypted restore acceptance failed' }
+} finally {
+    $env:PATH = $previousPath
+}
 $zip = 'multi-backup-rust-preview-windows-x64.zip'
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $zip
