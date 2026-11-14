@@ -212,7 +212,7 @@ impl NativeApp {
         };
         let provider = imported_provider(prefs);
         let fields = Fields {
-            output: default_output_path,
+            output: default_output_path.clone(),
             recipient: age_recipient,
             vault_path: vault_path.display().to_string(),
             max_runs: max_runs.to_string(),
