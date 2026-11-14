@@ -11,6 +11,8 @@ path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+fs2 = "0.4"
 aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.8"

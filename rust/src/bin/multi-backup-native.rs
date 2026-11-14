@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, checkpoint_audit, dropbox_hash, vault};
+use multi_backup_core::{archive, checkpoint_audit, dropbox_hash, journal, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -15,6 +15,10 @@ fn usage() -> &'static str {
        multi-backup-native archive verify --archive FILE.tar.gz.age --identity AGE_KEY\n\
        multi-backup-native archive extract --archive FILE.tar.gz.age --identity AGE_KEY --destination NEW_DIR\n\
        multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
+       multi-backup-native journal start --directory STATE_DIR --config CONFIG.json\n\
+       multi-backup-native journal resume --directory STATE_DIR --config CONFIG.json\n\
+       multi-backup-native journal record --directory STATE_DIR --config CONFIG.json --step STEP --file ARCHIVE\n\
+       multi-backup-native journal finish --directory STATE_DIR --config CONFIG.json\n\
        multi-backup-native dropbox hash --file LOCAL_FILE\n\
        multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native vault create --file NEW.agevault [--password-stdin]\n\
@@ -125,6 +129,38 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if password_stdin {
         return Err("--password-stdin is only accepted by vault operations".into());
+    }
+    if family == "journal" {
+        if password_stdin { return Err("--password-stdin not valid for journals".into()); }
+        if !["start", "resume", "record", "finish", "restart", "show"].contains(&command) {
+            return Err(usage().into());
+        }
+        let known = if command == "record" {
+            vec!["--directory","--config","--step","--file"]
+        } else {
+            vec!["--directory","--config"]
+        };
+        accepted(&flags, &known)?;
+        let dir = Path::new(required(&flags, "--directory")?);
+        let configuration: serde_json::Value = serde_json::from_reader(
+            std::fs::File::open(required(&flags, "--config")?))?;
+        let start_new = command == "start" || command == "restart";
+        let mut state = journal::Journal::start(dir, &configuration,
+                                    start_new, !start_new)?;
+        match command {
+            "record" => state.record(required(&flags, "--step")?,
+                                    Path::new(required(&flags, "--file")?))?,
+            "finish" => state.finish()?,
+            _ => {},
+        }
+        if json {
+            println!("{}", serde_json::to_string_pretty(state.status())?);
+        } else {
+            println!("Journal {}: cycle={} resumed={} steps={}",
+                     command, state.cycle()?, state.resumed,
+                     state.status()["steps"].as_object().map_or(0, |x| x.len()));
+        }
+        return Ok(());
     }
     if family == "checkpoint" && command == "audit" {
         accepted(&flags, &["--file"])?;

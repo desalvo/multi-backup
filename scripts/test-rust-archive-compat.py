@@ -121,6 +121,29 @@ def main():
             binary, "checkpoint", "audit", "--file",
             root / ".state" / "active.json", "--json").stdout)
         assert audit["valid"] == ["encrypted"] and not audit["invalid"]
+        # Native Rust checkpoint mutation is readable by the deployed Python
+        # Journal implementation without changing cycle identity.
+        journal_config = {"recipient": recipient, "max_runs_per_repo": 5}
+        config_file = root / "config.json"
+        config_file.write_text(json.dumps(journal_config), encoding="utf-8")
+        native_state = root / ".state-rust"
+        native_state.mkdir(mode=0o700)
+        invoke(binary, "journal", "start", "--directory", native_state,
+               "--config", config_file)
+        native_cycle = json.loads((native_state / "active.json").read_text())["cycle"]
+        invoke(binary, "journal", "record", "--directory", native_state,
+               "--config", config_file, "--step", "encrypted", "--file", legacy)
+        recovered = Journal(native_state, journal_config, require_active=True)
+        assert recovered.done("encrypted")
+        assert recovered.cycle == native_cycle
+        del recovered
+        rust_state = json.loads((native_state / "active.json").read_text())
+        assert rust_state["cycle"] == native_cycle
+        assert rust_state["steps"]["encrypted"]["sha256"]
+        invoke(binary, "journal", "finish", "--directory", native_state,
+               "--config", config_file)
+        assert not (native_state / "active.json").exists()
+        assert (native_state / ("cycle-" + native_cycle + ".json")).exists()
         rust_dest = root / "restored_by_rust"
         invoke(binary, "archive", "extract", "--archive", legacy,
                "--identity", identity, "--destination", rust_dest)
