@@ -3,6 +3,7 @@
 //! Plans deliberately refuse arbitrary server-supplied shell commands.
 use serde::{Deserialize,Serialize};
 use std::{path::{Path,PathBuf},process::{Command,Stdio},io};
+use std::io::Write;
 
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(rename_all="snake_case",tag="type")]
