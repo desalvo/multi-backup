@@ -19,3 +19,5 @@ rpassword = "7.3"
 zeroize = "1.8"
 
 lettre = { version = "=0.11.23", default-features = false, features = ["builder","smtp-transport","rustls-tls"] }
+
+ldap3 = { version = "=0.11.5", default-features = false, features = ["sync","tls-rustls"] }

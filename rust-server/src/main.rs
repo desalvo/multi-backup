@@ -2,7 +2,9 @@
 //! Fail closed: local Argon2id login is operational; LDAP/OIDC MUST NOT be
 //! advertised or enabled until implemented and externally verified.
 mod smtp;
+mod ldap;
 use smtp::SmtpConfig;
+use ldap::LdapConfig;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
     password_hash::SaltString};
 use axum::{extract::{Form, Json, State}, http::{header, HeaderMap, StatusCode},
@@ -27,10 +29,11 @@ struct AppConfig {
     exports: PathBuf,
     audit: PathBuf,
     smtp: Option<SmtpConfig>,
+    ldap: Option<LdapConfig>,
     sessions: Mutex<HashMap<String, Session>>,
 }
 #[derive(Clone)]
-struct Session { csrf: String, until: Instant }
+struct Session { csrf: String, until: Instant, user: String }
 #[derive(Deserialize)]
 struct Login { username: String, password: String }
 impl Drop for Login { fn drop(&mut self) { self.password.zeroize(); } }
@@ -85,24 +88,37 @@ async fn login_page()->Response {
     secure_headers(Html(include_str!("../public/login.html")))
 }
 async fn do_login(State(state):State<AppState>,headers:HeaderMap,
-                  Form(login):Form<Login>)->Response {
+                  Form(login):Form<Login>)->Response{
     if !same_origin(&headers,&state.0){return secure_headers(StatusCode::FORBIDDEN);}
-    let verified=PasswordHash::new(&state.0.password_hash).ok()
-        .map(|hash| Argon2::default().verify_password(login.password.as_bytes(),&hash).is_ok())
-        .unwrap_or(false);
-    if login.username!=state.0.name || !verified {
+    let local=PasswordHash::new(&state.0.password_hash).ok()
+        .map(|hash|Argon2::default().verify_password(
+            login.password.as_bytes(),&hash).is_ok()).unwrap_or(false)
+        &&login.username==state.0.name;
+    // The local admin name is always reserved; LDAP can never impersonate it.
+    let ldap_valid=if !local && login.username!=state.0.name {
+        if let Some(cfg)=state.0.ldap.clone(){
+            let user=login.username.clone();
+            let password=zeroize::Zeroizing::new(login.password.clone());
+            tokio::task::spawn_blocking(move||cfg.authenticate(&user,&password))
+                .await.ok().and_then(Result::ok).unwrap_or(false)
+        }else{false}
+    }else{false};
+    if !local&&!ldap_valid {
         audit(&state.0,"login_failed");
         return secure_headers((StatusCode::UNAUTHORIZED,Html("Invalid credentials")));
     }
     let token=random_token();
     let csrf=random_token();
-    let mut sessions=match state.0.sessions.lock() {
+    let mut sessions=match state.0.sessions.lock(){
         Ok(value)=>value,Err(_)=>return secure_headers(StatusCode::INTERNAL_SERVER_ERROR)
     };
-    if sessions.len()>=100 {return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
-    sessions.insert(token.clone(),Session {csrf,until:Instant::now()+Duration::from_secs(8*3600)});
+    if sessions.len()>=100{return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
+    sessions.insert(token.clone(),Session{
+        csrf,until:Instant::now()+Duration::from_secs(8*3600),
+        user:login.username.clone()
+    });
     drop(sessions);
-    audit(&state.0,"login_success");
+    audit(&state.0,if local{"login_local_success"}else{"login_ldaps_success"});
     let secure=if state.0.origin.starts_with("https://"){"; Secure"}else{""};
     let cookie=format!("mb_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800{secure}");
     let mut response=Redirect::to("/").into_response();
@@ -232,8 +248,9 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
     let smtp=SmtpConfig::from_env()?;
+    let ldap=LdapConfig::from_env()?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,root,exports,identity,audit,smtp,
+        name,password_hash:hash,origin,root,exports,identity,audit,smtp,ldap,
         sessions:Mutex::new(HashMap::new()),
     }));
     let app=Router::new().route("/healthz",get(health))
