@@ -30,7 +30,24 @@ ditto "$APP" "$TMP/root/Multi Backup.app"
 ln -s /Applications "$TMP/root/Applications"
 [[ -L "$TMP/root/Applications" && "$(readlink "$TMP/root/Applications")" == /Applications ]] || exit 1
 [[ "$(find "$TMP/root" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 2 ]] || exit 1
-hdiutil create -volname 'Multi Backup TEST' -srcfolder "$TMP/root" -ov -format UDZO "$DMG"
+# macOS Intel runners occasionally collide with diskimages-helper services.
+# Retry ONLY transient "Resource busy", never hide permission/signing failures.
+created=0
+for attempt in 1 2 3 4; do
+  if hdiutil create -volname 'Multi Backup TEST' -srcfolder "$TMP/root" \
+      -ov -format UDZO "$DMG" >"$TMP/hdiutil-create.log" 2>&1; then
+    created=1
+    break
+  fi
+  cat "$TMP/hdiutil-create.log" >&2
+  if ! grep -qi 'Resource busy' "$TMP/hdiutil-create.log" || [[ "$attempt" == 4 ]]; then
+    echo 'macOS DMG creation failed (nontransient or retries exhausted)' >&2
+    exit 1
+  fi
+  rm -f "$DMG"
+  sleep "$((attempt * 3))"
+done
+[[ "$created" == 1 ]] || exit 1
 hdiutil verify "$DMG"
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT" -quiet
 COUNT="$(find "$MOUNT" -mindepth 1 -maxdepth 1 ! -name '.DS_Store' ! -name '.Trashes' ! -name '.fseventsd' | wc -l | tr -d ' ')"
