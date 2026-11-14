@@ -24,7 +24,8 @@ from reportlab.platypus import (BaseDocTemplate,PageTemplate,Frame,Paragraph,Pag
 from reportlab.pdfgen import canvas
 
 ROOT=Path(__file__).resolve().parents[1]
-VERSION=re.search(r"VERSION = '([^']+)'",(ROOT/'version.py').read_text('utf-8')).group(1)
+# Current Rust development docs. Real r018 Python/Tk screenshots are labelled historical.
+VERSION='0.1.0-r038-native-preview'
 MEDIA=ROOT/'assets'
 SCREENS=ROOT/'docs/screenshots'
 OUTMAN=ROOT/'docs/manuals';OUTBR=ROOT/'docs/brochures'
@@ -119,7 +120,7 @@ class Book(BaseDocTemplate):
         c.setFont('DejaVu',8);c.setFillColor(colors.HexColor('#b9dbf6'))
         publication_label=(f'R018 DISTRIBUTED + R038 RUST DEV PREVIEW  |  {self.lang}'
                            if self.kind=='manual' else
-                           f'RELEASE CANDIDATE 1  |  {self.lang}  |  NOVEMBER 2026')
+                           f'R038 RUST DEV PREVIEW  |  {self.lang}  |  NOVEMBER 2026')
         c.drawString(20*mm,17*mm,publication_label)
         c.restoreState()
 
@@ -429,6 +430,47 @@ def refresh_r016_instructions():
 
 refresh_r016_instructions()
 
+# RUST_R038_OPERATIONS_APPENDIX summarizes the canonical source manuals
+# docs/OPERATIONS_R038_IT.md and docs/OPERATIONS_R038_EN.md in generated PDFs.
+# Historical Python/Tk screenshot is NOT a Rust-native GUI screenshot.
+RUST_R038_OPERATIONS_APPENDIX={
+ 'EN':[
+  ('Rust r038: full/incremental and backup chain',[
+    'This is a Rust DEVELOPMENT PREVIEW, not a published or certified RC. All earlier Python/Tk screenshots in this PDF are historical r018 images, not of the new Rust GUI.',
+    'Native full and incremental snapshots maintain complete encrypted file inventories. Incrementals share unchanged chunks. Verify the entire chain by default; storage info shows files, uncompressed bytes, compressed zstd bytes, compressed+deduplicated zstd bytes and the full/increment history.',
+    'Use a new restore directory. Source account credentials NEVER grant write permission to another destination account; GitHub and Dropbox cross-account flows need separately authorized destination credentials.'
+  ],['Python-created archive conversion is optional.','Restore and compare bytes before deleting anything.',
+      'Detailed procedures: docs/OPERATIONS_R038_EN.md'],None,'',
+      'multi-backup-native storage info --root STORE --identity KEY --id ID'),
+  ('Rust r038: purge, GC and automatic 8+2 parity repack',[
+    'Deleting an intermediate incremental reconnects its direct descendants. Deleting a full promotes the next incremental to full. Protected successors cannot be implicitly rewritten; purge changes manifests only.',
+    'Confirmed garbage collection is the ONLY physical deletion action. A mixed live/dead parity stripe is automatically repacked: write and verify replacement 8+2 parity first, commit the encrypted successor index last. Old parity stays available until a later GC after the default 48-hour grace period.',
+    'GC preview is read-only; unattended cloud GC, crash-injection certification, native GUI schedule management, independent WORM and signed stable releases remain open.'
+  ],['Review GC preview first.','Execute only with explicit ERASE-ORPHANS confirmation.',
+      'Use schedule run/daemon for manual or interval-based full/incremental/verification jobs.'],None,'',
+      'multi-backup-native storage gc-preview --root STORE --identity KEY')
+ ],
+ 'IT':[
+  ('Rust r038: totali, incrementali e catena',[
+    'Questa è una ANTEPRIMA RUST DI SVILUPPO, non una RC pubblicata o certificata. Gli screenshot Python/Tk delle pagine precedenti sono immagini storiche r018, NON della GUI Rust.',
+    'I backup totali e incrementali hanno manifest cifrati con inventario completo. Gli incrementali condividono chunk invariati. La verifica riguarda tutta la catena per default; storage info mostra file, byte non compressi, compressi zstd, compressi+deduplicati zstd e storia dei punti.',
+    'Il restore richiede una directory nuova. Le credenziali dell’utente di origine NON autorizzano la scrittura verso un altro account; GitHub e Dropbox richiedono credenziali proprie della destinazione.'
+  ],['La conversione degli archivi Python è opzionale.','Confrontare i file recuperati prima delle cancellazioni.',
+      'Procedure complete: docs/OPERATIONS_R038_IT.md'],None,'',
+      'multi-backup-native storage info --root STORE --identity KEY --id ID'),
+  ('Rust r038: purge, GC e repack automatico 8+2',[
+    'Eliminando un incrementale intermedio si ricollegano i suoi successori. Eliminando un totale, il primo incremento diventa totale. La protezione dei successori blocca ogni riscrittura implicita; il purge modifica solo manifest.',
+    'Solo la garbage collection confermata libera spazio fisico. Una stripe mista viene ricostruita automaticamente: prima scrittura e verifica della nuova parità 8+2, poi commit dell’indice cifrato. La vecchia resta per il grace period predefinito di 48 ore e sarà rimossa da una GC successiva.',
+    'Anteprima GC di sola lettura; GC cloud automatica, prove di crash, GUI schedule, WORM indipendente e release stable firmata ancora non certificati.'
+  ],['Controllare prima gc-preview.','Eseguire GC solo con conferma ERASE-ORPHANS.',
+      'schedule run/daemon supporta job completi/incrementali e verifiche periodiche.'],None,'',
+      'multi-backup-native storage gc-preview --root STORE --identity KEY')
+ ]
+}
+EN.extend(RUST_R038_OPERATIONS_APPENDIX['EN'])
+IT.extend(RUST_R038_OPERATIONS_APPENDIX['IT'])
+
+
 
 
 
@@ -523,10 +565,13 @@ def manual(lang):
     data=EN if lang=='EN' else IT
     for i,chapter_spec in enumerate(data,1):
         story.append(p(f'{i:02d}   {esc(chapter_spec[0])}','P'))
-    story.extend([p('Note: screens are real captures of the RC Linux GUI, not fictitious live backups.' if lang=='EN'
-                    else 'Nota: gli screenshot sono catture reali della GUI RC Linux, non simulazioni di backup effettuati.','Small'),PageBreak()])
+    story.extend([p('Historical Python/Tk screenshot: the earlier r018 GUI images are NOT the new Rust r038 interface.' if lang=='EN'
+                    else 'Screenshot storico Python/Tk: le immagini GUI r018 NON rappresentano la GUI Rust r038.','Small'),PageBreak()])
     for i,item in enumerate(data,1):
         title,paras,items,screen,cap,*rest=item
+        if screen:
+            cap=('Historical Python/Tk screenshot (r018), not Rust r038. ' if lang=='EN'
+                 else 'Screenshot storico Python/Tk (r018), non Rust r038. ')+cap
         # odd shape optional example / extra
         example=rest[0] if rest else None
         story+=chapter(f'{i:02d}  {title}',paras,items,screen,cap,example)
@@ -575,6 +620,9 @@ def brochure(lang):
     story.extend([p('RELEASE CHANNELS' if lang=='EN' else 'CANALI DI RILASCIO','H2')])
     story.append(p(('Early release: commit on main containing [full-ci]. Stable: push a stable version tag. macOS (ARM/Intel), Windows 11 x64 and Rocky/AlmaLinux 8-10 are part of the native build matrix.'
                      if lang=='EN' else 'Early release: commit su main contenente [full-ci]. Stable: push di un tag di versione stabile. La matrice nativa comprende macOS (ARM/Intel), Windows 11 x64 e Rocky/AlmaLinux 8-10.')))
+    story.append(panel('Rust r038 preview' if lang=='EN' else 'Anteprima Rust r038',
+        'Automatic 8+2 parity repack, full/incremental, chain checks and local scheduling are in development and not yet certified.'
+        if lang=='EN' else 'Repack automatico 8+2, totali/incrementali, verifica catene e scheduler Rust in sviluppo e non ancora certificati.'))
     story.append(p('Release candidate: platform signing, notarization, installer end-to-end tests and fully unattended updates are pending.'
                    if lang=='EN' else 'Release candidate: firma dei pacchetti, notarizzazione, test completi degli installer e aggiornamenti non assistiti ancora da validare.','Small'))
     story.append(p('github.com/desalvo/multi-backup','H2'))
