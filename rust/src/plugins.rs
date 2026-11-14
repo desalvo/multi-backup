@@ -577,9 +577,9 @@ mod tests {
     }
     #[test]
     fn license_and_oauth_gates_do_not_grant_execution() {
-        assert_eq!(find("gpfs").unwrap().access_gate, AccessGate::LicensedExternalClient);
+        assert_eq!(find("gpfs").unwrap().access_gate, AccessGate::ExternalProtocolOrMountedClient);
         let p = plan(Mode::Backup, "gpfs", "posix").unwrap();
-        assert!(p.required_preflight.iter().any(|text| text.contains("vendor license")));
+        assert!(p.required_preflight.iter().any(|text| text.contains("GPFS Client license")));
         assert!(!p.executable);
         for id in ["google-drive","onedrive"] {
             assert_eq!(find(id).unwrap().access_gate, AccessGate::OAuthScopeReview);

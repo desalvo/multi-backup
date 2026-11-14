@@ -11,7 +11,7 @@ fn usage() -> &'static str {
      Usage:\n\
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
-       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\\n\\
+       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
