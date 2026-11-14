@@ -1,7 +1,7 @@
 //! Rust-native GitHub mirror and read-only metadata backup, invoking the
 //! official gh/git clients without shells or tokens in process arguments.
 //! Remote deletion and organization write APIs are intentionally absent.
-use crate::{archive, journal};
+use crate::{archive, archive_management, journal};
 use chrono::Utc;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -151,6 +151,47 @@ fn fingerprint(mirror: &Path) -> GithubResult<String> {
     digest.update(&head);
     Ok(format!("{:x}", digest.finalize()))
 }
+/// Keep only the most recent N *distinct* immutable Git snapshots.
+/// It runs exclusively after successful journal finalization so no active
+/// checkpoint can point to an archive being removed. Each deletion is
+/// catalog-scoped and recorded by the audited local-only Rust delete path.
+fn enforce_snapshot_retention(root: &Path, slug: &str, keep: usize)
+    -> GithubResult<usize>
+{
+    safe_slug(slug)?;
+    if keep == 0 { return Err(err("At least one distinct snapshot must be retained")); }
+    let parent = root.join("repositories").join(slug).join("native-snapshots");
+    if !parent.exists() { return Ok(0); }
+    let mut entries = Vec::new();
+    for item in fs::read_dir(&parent)? {
+        let item = item?;
+        let path = item.path();
+        if !path.to_string_lossy().ends_with(".tar.gz.age") { continue; }
+        let meta = fs::symlink_metadata(&path)?;
+        if !meta.file_type().is_file() {
+            return Err(err("Unsafe repository snapshot in retention catalog"));
+        }
+        entries.push((meta.modified()?, path));
+    }
+    // SystemTime ordering descending; retain the latest complete files.
+    entries.sort_by(|a,b| b.0.cmp(&a.0));
+    if entries.len() <= keep { return Ok(0); }
+    // Preflight ALL older candidates before ANY local deletion. A corrupt
+    // old archive must be preserved for manual recovery, not silently removed.
+    for (_, path) in entries.iter().skip(keep) {
+        verify_existing_archive(path)?;
+        archive_management::plan(root, path)?;
+    }
+    let mut deleted = 0;
+    for (_, path) in entries.iter().skip(keep) {
+        let name = path.file_name().and_then(|n|n.to_str())
+            .ok_or_else(|| err("Invalid snapshot file name"))?;
+        archive_management::delete(root, path, name, false)?;
+        deleted += 1;
+    }
+    Ok(deleted)
+}
+
 fn metadata_for(slug: &str, root: &Path, max_runs: usize) -> GithubResult<Value> {
     safe_slug(slug)?;
     let base = root.join("repositories").join(slug);
@@ -322,6 +363,20 @@ pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
     json_file(&summary_dir.join("native-github-summary.json"), &result)?;
     session.record("native-summary",&summary_dir.join("native-github-summary.json"))?;
     session.finish()?;
+    // The user's legacy default is five DISTINCT Git snapshots per repo.
+    // Identical fingerprints are reused, never duplicated. Only successful,
+    // verified snapshots are eligible for this post-finalization cleanup.
+    let mut pruned = 0usize;
+    for repo in &result["repositories"].as_array()
+        .ok_or_else(|| err("Missing final repository list"))? {
+        let slug = repo["repository"].as_str()
+            .ok_or_else(|| err("Missing snapshot repository slug"))?;
+        pruned += enforce_snapshot_retention(output, slug, 5)?;
+    }
+    if pruned > 0 {
+        on_progress(total, total,
+            "Cancellazione controllata delle copie distinte eccedenti (audit locale)");
+    }
     Ok(result)
 }
 pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
@@ -349,6 +404,27 @@ mod tests {
         assert!(verify_existing_archive(&item).is_ok());
         fs::write(&item, b"modified!").unwrap();
         assert!(verify_existing_archive(&item).is_err());
+    }
+    #[test] fn retain_five_latest_distinct_snapshots_with_audit() {
+        let tmp=tempfile::tempdir().unwrap();
+        let root=tmp.path();
+        let snapshots=root.join("repositories/team/sample/native-snapshots");
+        fs::create_dir_all(&snapshots).unwrap();
+        for index in 0..7 {
+            let path=snapshots.join(format!("{index:064x}.tar.gz.age"));
+            let body=format!("encrypted-{index}");
+            fs::write(&path, body.as_bytes()).unwrap();
+            fs::write(format!("{}.sha256", path.display()),
+                format!("{:x}  snapshot.tar.gz.age\n",
+                    Sha256::digest(body.as_bytes()))).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        assert_eq!(enforce_snapshot_retention(root, "team/sample", 5).unwrap(), 2);
+        let kept=fs::read_dir(&snapshots).unwrap().filter_map(Result::ok)
+            .filter(|entry|entry.path().to_string_lossy().ends_with(".tar.gz.age"))
+            .count();
+        assert_eq!(kept,5);
+        assert!(root.join(".state/archive-deletions.jsonl").is_file());
     }
     #[test] fn disallows_shell_program_execution() {
         assert!(run_capture("sh", &["-c","echo unsafe"], None).is_err());
