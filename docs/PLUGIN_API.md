@@ -24,9 +24,10 @@ multi-backup-native plugins plan --input posix --output github --mode restore --
 ```
 
 `plugins plan` is **read-only**. It rejects unknown IDs, unsupported
-directional roles and invalid modes; `executable=false` until both generic
-adapters are certified. `preview` means a *separate dedicated native
-operation* exists, not that the unified connector is wired. `planned` means
+directional roles and invalid modes; `executable=false` until fully qualified
+production adapters are certified. `preview_executable=true` now identifies
+an independently gated **real Rust development executor**, not a production
+Ready capability. `preview` means native code exists but is not certified. `planned` means
 only the interface specification/catalogue exists. `unsupported` is an
 explicitly forbidden role. `ready` is reserved for live-tested, qualified
 native adapters (none currently declared).
@@ -251,3 +252,37 @@ The local chunk-store and legacy archive path now have protection
 enforcement; remote providers still need their own tested enforcement.
 WORM/Object Lock on an independent vault is a separate and stronger
 safety property. See `docs/BACKUP_PROTECTION.md`.
+
+## r038 — operational filesystem adapters (development preview)
+
+The compiled `rust/src/plugin_executor.rs` has the first complete generic
+execution path: **POSIX → POSIX** encrypted native backup and full/selective
+restore into an explicit fresh directory. The destination uses verified
+age-encrypted content-addressed chunks and an encrypted logical manifest.
+No path overlap with the source, storage or private age identity is permitted.
+
+On Linux, `nfs`, `smb`, `sshfs`, and `gpfs` (CES NFS/SMB) can read from
+an already mounted **read-only** source only when (1) the exact mountpoint
+has the expected kernel filesystem type, and (2) the caller explicitly
+supplies `--source-snapshot-attested`. GPFS additionally requires
+`--input-gpfs-access ces-nfs|ces-smb`. Mount evidence plus user attestation
+cannot independently prove a storage-side snapshot, consistent application
+state, ACL/xattr retention or actual IBM backend identity. These adapters
+are not production Ready, and no remote mount or write is ever attempted.
+
+```bash
+multi-backup-native plugins plan --input nfs --output posix --mode backup --json
+multi-backup-native plugins backup --input posix --output posix --source /src \
+  --root /encrypted-store --identity /key/identity.txt --label first --json
+multi-backup-native plugins restore --input posix --output posix \
+  --root /encrypted-store --identity /key/identity.txt \
+  --id BACKUP_ID --destination /fresh-restore
+```
+
+`rust/tests/plugin_dispatch_roundtrip.rs` is a blocking native functional
+test in the Production Gate and macOS/Windows/Debian packaging jobs. Catalog:
+32 plugin IDs, 53 backup roles, **5 preview executable backup pairs**, and
+0 fully certified generic pairs (out of 682 possible); all other combinations
+fail closed. GitHub/Dropbox still have dedicated preview engines outside this
+generic dispatch and require live-service E2E. Legacy Python archive migration
+is explicitly optional and no longer a promotion gate.
