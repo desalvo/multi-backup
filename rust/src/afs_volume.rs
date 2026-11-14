@@ -163,7 +163,7 @@ pub fn spawn_local(job:&VolumeJob)->Result<std::process::Child,String>{
         return Err("Privileged -localauth needs server-side managed command approval".into());
     }
     Command::new(&plan.executable).args(&plan.arguments)
-        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+        .stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
         .map_err(|e|e.to_string())
 }
 pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
@@ -185,17 +185,48 @@ pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
         .map_err(|e|e.to_string())
 }
-pub fn stream_dump_to<W:io::Write>(job:&VolumeJob,mut target:W)
+pub fn stream_dump_to<W:io::Write>(job:&VolumeJob,target:W)
     ->Result<u64,String>{
+    stream_dump_limited(job,target,&crate::execution_policy::ExecutionLimits::default())
+}
+/// Limits apply to the host actually executing vos or SSH, with independent
+/// server/agent policy intersection. A single volume remains one stream;
+/// separate volumes can use separate concurrent jobs.
+pub fn stream_dump_limited<W:io::Write>(job:&VolumeJob,mut target:W,
+        limits:&crate::execution_policy::ExecutionLimits)->Result<u64,String>{
+    limits.validate()?;
+    limits.check_host()?;
     let mut child=match &job.execution{
         Execution::Local=>spawn_local(job)?,
         Execution::SshAgentless{..}=>spawn_ssh(job)?,
         Execution::ManagedAgent{..}=>return Err("Managed agent execution must originate at the approved host".into()),
     };
-    let Some(mut source)=child.stdout.take() else {return Err("Missing vos dump stdout".into())};
-    let bytes=io::copy(&mut source,&mut target).map_err(|e|e.to_string())?;
-    let result=child.wait().map_err(|e|e.to_string())?;
-    if !result.success(){return Err("vos dump command failed; partial dump must be discarded".into());}
+    let Some(mut source)=child.stdout.take() else {
+        let _=child.kill();let _=child.wait();
+        return Err("Missing vos dump stdout".into())
+    };
+    let mut buffer=[0u8;65536];let mut bytes=0u64;
+    let mut last_check=std::time::Instant::now()-std::time::Duration::from_secs(2);
+    let mut throttled=crate::execution_policy::ThrottledWriter::new(&mut target,limits)?;
+    let result=(||->Result<(),String>{
+        loop{
+            if last_check.elapsed()>std::time::Duration::from_secs(2){
+                limits.check_host()?;last_check=std::time::Instant::now();
+            }
+            let n=io::Read::read(&mut source,&mut buffer).map_err(|e|e.to_string())?;
+            if n==0{break}
+            throttled.write_all(&buffer[..n]).map_err(|e|e.to_string())?;
+            bytes=bytes.checked_add(n as u64).ok_or("Dump byte counter overflow")?;
+        }
+        throttled.flush().map_err(|e|e.to_string())?;
+        Ok(())
+    })();
+    if let Err(reason)=result{
+        let _=child.kill();let _=child.wait();
+        return Err(reason);
+    }
+    let status=child.wait().map_err(|e|e.to_string())?;
+    if !status.success(){return Err("vos dump command failed; partial dump must be discarded".into());}
     if bytes==0{return Err("AFS dump produced empty stream".into());}
     Ok(bytes)
 }
