@@ -306,3 +306,25 @@ The user requires **all** inputs and outputs to be plugins, with source/destinat
 `multi-backup-native plugins list --json` and `plugins plan --input github --output posix --mode backup --json` are **read-only metadata operations**. No generic pair is currently executable; standalone existing GitHub/Dropbox/POSIX commands are preserved. No arbitrary source loading or unverified plugin runtime. Unsupported directions deny by default. Test in `cargo test --manifest-path rust/Cargo.toml --all-targets` and newest CI before claiming green.
 
 Expanded scope makes the previous 57.5% product-wide readiness estimate outdated: **25/25 role contracts inventoried**, **0/25 generalized backup-role integrations certified**, and no new overall percentage until scope rebaseline. Never conflate documentation/catalog registration with an operational plugin. Public code/docs/manuals/releases remain in GitHub; private handoff and encrypted architecture PDF remain solely in the approved Dropbox `/ADSNET/Projects/Multi Backup/Private`.
+
+## r030 handoff — SAN transports and immutable-vault plugin scope (2026-11-14)
+
+- Expanded static Rust plugin registry with `iscsi`, `fc`, and `nvmeof`
+  in **both** backup input/output roles and `anti-ransomware-vault` as
+  backup output **only**. Restore roles are automatically reversed.
+- Introduced typed safety profiles for BlockTransport, BlockDevice and
+  ProtectedVault to distinguish raw block snapshots and immutable vault
+  operations from filesystem adapters. No direct block-device writes,
+  targets, or dangerous command-line mounts are exposed.
+- Added unit tests for SAN snapshot safety profiles, all role counts,
+  inverse restore mapping, and immutable vault direction rejection.
+- New scope: 21 backup inputs, 11 backup outputs, 11 restore inputs,
+  21 restore outputs, 22 distinct plugin IDs. Catalog 32/32 (100%) by
+  definition; 0/32 unified adapters certified; 0/231 generic backup pairs
+  certified. Previous overall RC percentage is obsolete after expansion.
+- iSCSI/FC/NVMe-oF block transport adapters and WORM vault are Planned,
+  **not implemented**. Safety gates must include storage-consistent snapshots,
+  WWID/NGUID/NSID identification, multipath fencing, restore to new isolated
+  LUNs/namespaces only, independent immutable retention and recovery approval.
+- All source code and public docs remain on GitHub; private architecture
+  and handoff remain solely in approved Dropbox folder.

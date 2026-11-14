@@ -38,11 +38,23 @@ pub enum DataKind {
     Files,
     ObjectStore,
     BlockDevice,
+    BlockTransport,
+    ProtectedVault,
     Virtualization,
     Cluster,
     Database,
     RemoteShell,
     SourceControl,
+}
+/// Preflight profiles are descriptive and cannot grant disk or vault writes.
+/// A future executor must independently verify snapshot origin and device
+/// identity before any network-block target is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SafetyProfile {
+    General,
+    SnapshotBlockDevice,
+    ImmutableRecoveryVault,
 }
 /// The same stable plugin ID is used in both directions. Each capability is
 /// declared separately: backup input -> restore output and backup output ->
@@ -58,6 +70,7 @@ pub struct PluginDescriptor {
     pub restore_output: Stage,
     pub consistency: &'static str,
     pub notes: &'static str,
+    pub safety: SafetyProfile,
 }
 impl PluginDescriptor {
     const fn new(id: &'static str, title: &'static str, kind: DataKind,
@@ -70,6 +83,12 @@ impl PluginDescriptor {
             restore_input: backup_target,
             restore_output: backup_source,
             consistency, notes,
+            safety: match kind {
+                DataKind::BlockDevice | DataKind::BlockTransport =>
+                    SafetyProfile::SnapshotBlockDevice,
+                DataKind::ProtectedVault => SafetyProfile::ImmutableRecoveryVault,
+                _ => SafetyProfile::General,
+            },
         }
     }
     pub fn input_stage(self, mode: Mode) -> Stage {
@@ -108,6 +127,15 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "CephFS snapshots or quiesced mount", "No cross-filesystem atomicity claim; separate CephFS and RBD plugins"),
     PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, NONE,
         "RBD image snapshots+diff export", "Block image is not a directory; restore requires explicit image creation, never silent overwrite"),
+    PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
+        "Initiator/target IQN and LUN WWID with storage snapshot",
+        "Read only a stable quiesced block snapshot; output/restore must provision a distinct empty LUN and never overwrite an active device"),
+    PluginDescriptor::new("fc", "Fibre Channel LUN", DataKind::BlockTransport, PLAN, PLAN,
+        "FC WWPN, SCSI WWID, multipath and snapshot epoch",
+        "Respect multipath aliases and ownership; output/restore require independently verified new-target LUN and exclusive fencing"),
+    PluginDescriptor::new("nvmeof", "NVMe over Fabrics (NVMe-oF)", DataKind::BlockTransport, PLAN, PLAN,
+        "NVMe NQN, NSID, EUI/NGUID and snapshot epoch",
+        "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
     PluginDescriptor::new("proxmox", "Proxmox VE / PBS", DataKind::Virtualization, PLAN, NONE,
         "VM/CT config plus vzdump/PBS consistency points", "Inventory VM/CT/storage, PBS integration, opt-in quiesce and stop/rollback planning"),
     PluginDescriptor::new("kubernetes", "Kubernetes / OpenShift / OKD", DataKind::Cluster, PLAN, NONE,
@@ -122,6 +150,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "pg_basebackup/WAL or consistent logical snapshot", "PITR, role/grant restore and version compatibility require explicit acceptance"),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
         "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
+    PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware immutable vault",
+        DataKind::ProtectedVault, NONE, PLAN,
+        "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
+        "Output ciphertext only via isolated append-only ingest; restore input is read-only. WORM and independent approval are NOT yet implemented or certified"),
 ];
 
 pub fn find(id: &str) -> Option<&'static PluginDescriptor> {
@@ -177,14 +209,16 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_18_user_requested_input_plugins_and_7_outputs_are_listed() {
+    fn all_21_user_requested_input_plugins_and_11_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox",
-            "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh"];
-        let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 18);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 7);
-        assert_eq!(CATALOG.len(), 18);
+            "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
+            "iscsi", "fc", "nvmeof"];
+        let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh",
+            "iscsi", "fc", "nvmeof", "anti-ransomware-vault"];
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 21);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 11);
+        assert_eq!(CATALOG.len(), 22);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
@@ -192,8 +226,8 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 7);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 18);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 11);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 21);
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
@@ -228,6 +262,35 @@ mod tests {
         assert!(!p.executable);
         assert_eq!(find("postgresql").unwrap().kind, DataKind::Database);
         assert_eq!(find("rbd").unwrap().kind, DataKind::BlockDevice);
+    }
+    #[test]
+    fn san_block_sources_and_targets_require_consistent_snapshot_preflight() {
+        for id in ["iscsi", "fc", "nvmeof"] {
+            let descriptor=find(id).unwrap();
+            assert_eq!(descriptor.kind, DataKind::BlockTransport);
+            assert_eq!(descriptor.safety, SafetyProfile::SnapshotBlockDevice);
+            assert_eq!(descriptor.backup_input, Stage::Planned);
+            assert_eq!(descriptor.backup_output, Stage::Planned);
+            assert_eq!(descriptor.restore_input, Stage::Planned);
+            assert_eq!(descriptor.restore_output, Stage::Planned);
+            assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
+            assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
+        }
+        assert_eq!(find("rbd").unwrap().safety, SafetyProfile::SnapshotBlockDevice);
+    }
+    #[test]
+    fn anti_ransomware_vault_is_ciphertext_destination_and_restore_source_only() {
+        let vault=find("anti-ransomware-vault").unwrap();
+        assert_eq!(vault.safety, SafetyProfile::ImmutableRecoveryVault);
+        assert_eq!(vault.backup_input, Stage::Unsupported);
+        assert_eq!(vault.backup_output, Stage::Planned);
+        assert_eq!(vault.restore_input, Stage::Planned);
+        assert_eq!(vault.restore_output, Stage::Unsupported);
+        assert!(plan(Mode::Backup, "posix", vault.id).is_ok());
+        assert!(plan(Mode::Restore, vault.id, "posix").is_ok());
+        assert!(plan(Mode::Backup, vault.id, "posix").is_err());
+        assert!(plan(Mode::Restore, "posix", vault.id).is_err());
+        assert!(!plan(Mode::Backup, "posix", vault.id).unwrap().executable);
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {

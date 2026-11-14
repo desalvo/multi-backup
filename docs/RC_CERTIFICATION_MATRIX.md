@@ -115,3 +115,17 @@ an international security certification or resistance guarantee.
 ## r029 — universal plugin acceptance extension
 
 New scope adds 18 backup input roles and 7 output roles, reversed for restore; see `docs/PLUGIN_MATRIX.md`. **None** is yet certified as a unified bidirectional generic plugin pair. Existing GitHub/Dropbox/POSIX direct Rust preview operations remain outside the generic dispatch. Every plugin must prove source consistency, inventory and metadata fidelity, verified encrypted transport, retry/resume, manifest-last atomicity, create-new restore with explicit conflict handling, least-privilege tokens and real test-service recovery. VM/CT, RBD, database/PITR and Kubernetes/CSI drivers require application-aware snapshot consistency and restore acceptance; not interchangeable with POSIX copy. Static catalog is a contract, not authorization to operate remote services or release a stable build.
+
+## r030 — SAN and anti-ransomware plugin acceptance
+
+**Registry ≠ implementation.** The expanded 21-source/11-destination matrix
+covers iSCSI, Fibre Channel and NVMe-oF as both backup input and output,
+with an anti-ransomware ciphertext vault as backup output / restore input.
+No generic SAN adapter or actual WORM writer/reader has passed live tests.
+Required evidence: frozen/quiesced snapshot read, correct initiator/target
+and namespace identity, multipath consistency, no mounted writable
+production target, crash injection, end-to-end byte/metadata restore to a
+new isolated target, append-only ingest and vault retention protected
+against compromised operator credentials, read-only recovery account,
+independent approval and audit. The anti-ransomware vault must refuse
+deletion/truncation/shortened retention despite stolen ingestion credentials.

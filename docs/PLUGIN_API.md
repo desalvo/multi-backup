@@ -2,33 +2,33 @@
 
 The **source** and **destination** of each backup are plugins. A restore reverses
 the direction of the same two plugins. Four separate capabilities are
-advertised for each plugin: \`backup_input\`, \`backup_output\`,
-\`restore_input\`, \`restore_output\`. A plugin's *registration* is not a
+advertised for each plugin: `backup_input`, `backup_output`,
+`restore_input`, `restore_output`. A plugin's *registration* is not a
 claim of implementation, live-account interoperability or release readiness.
 
 ## Rust contract and discovery
 
-The authoritative, static, auditable registry is \`rust/src/plugins.rs\`.
-The existing legacy Python registry (\`backends.available()\`) and native
-\`github backup\` / \`dropbox backup\` commands remain functional and unchanged;
+The authoritative, static, auditable registry is `rust/src/plugins.rs`.
+The existing legacy Python registry (`backends.available()`) and native
+`github backup` / `dropbox backup` commands remain functional and unchanged;
 they are **not** dynamically executed by the new planner. Plugin IDs are stable
 and independent of OS. No arbitrary local DLL, script, shell command or
 downloaded plugin package is ever discovered/executed.
 
-\`\`\`bash
+```bash
 multi-backup-native plugins list --json
 multi-backup-native plugins list --role input --mode backup --json
 multi-backup-native plugins list --role output --mode restore
 multi-backup-native plugins plan --input github --output posix --mode backup --json
 multi-backup-native plugins plan --input posix --output github --mode restore --json
-\`\`\`
+```
 
-\`plugins plan\` is **read-only**. It rejects unknown IDs, unsupported
-directional roles and invalid modes; \`executable=false\` until both generic
-adapters are certified. \`preview\` means a *separate dedicated native
-operation* exists, not that the unified connector is wired. \`planned\` means
-only the interface specification/catalogue exists. \`unsupported\` is an
-explicitly forbidden role. \`ready\` is reserved for live-tested, qualified
+`plugins plan` is **read-only**. It rejects unknown IDs, unsupported
+directional roles and invalid modes; `executable=false` until both generic
+adapters are certified. `preview` means a *separate dedicated native
+operation* exists, not that the unified connector is wired. `planned` means
+only the interface specification/catalogue exists. `unsupported` is an
+explicitly forbidden role. `ready` is reserved for live-tested, qualified
 native adapters (none currently declared).
 
 ## Responsibilities of the two plugin families
@@ -96,3 +96,28 @@ test account; negative tests for overwrite/delete and cross-tenant isolation.
 S3/CEPH WORM requires independent, external verification that an ingest
 principal cannot rewrite a committed object or shorten retention. No vendor
 adapter should reach Ready based on a compile-only green CI.
+
+## SAN block transports and anti-ransomware vault (r030)
+
+The canonical native catalog additionally declares `iscsi`, `fc`, and
+`nvmeof` as **both** backup input and output, with symmetric restore
+roles. These are storage *transports* to a LUN/namespace and not substitutes
+for the `rbd` Ceph volume driver or POSIX filesystem copy. Their
+`safety=snapshot_block_device` metadata identifies non-negotiable
+preflight requirements: stable WWID/NGUID and LUN/NSID identity, multipath
+reconciliation, a verifiable snapshot boundary or application quiesce,
+bounded block-stream validation and safe detach/cleanup. Restore and backup
+output write operations are always blocked until the operator has a new,
+empty, isolated target with independent approval. Current stage: **Planned**.
+
+`anti-ransomware-vault` is **backup output only** and **restore input
+only**, exposing `safety=immutable_recovery_vault`. It accepts ciphertext
+plus authenticated manifest, with independent append-only ingest and a
+separate read-only recovery principal. WORM/Object Lock, enforced retention,
+external audit and multi-party approval are mandatory before Ready. The
+current Rust content-addressed store does not by itself meet those conditions:
+**this is an interface and acceptance contract, not a working WORM service**.
+
+Counts: **21 input + 11 output = 32 backup-role definitions** across 22
+plugin IDs, reversed for restore. See `docs/PLUGIN_MATRIX.md` for status
+and the 0% generic-adapter certification baseline.
