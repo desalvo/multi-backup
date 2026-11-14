@@ -7,8 +7,15 @@ Real widgets render inside Xvfb; no design mock or inferred backup activity.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
+
+# Direct execution uses scripts/ as sys.path[0]; make the repository modules
+# importable from any working directory without relying on PYTHONPATH.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def main():
@@ -59,6 +66,20 @@ def main():
                     raise RuntimeError('Application screenshot unexpectedly small')
                 grab.convert('RGB').save(target / filename, optimize=True)
                 print(filename, grab.size, flush=True)
+            # The native About popup is part of the release documentation too.
+            app._show_about()
+            app.update_idletasks()
+            app.update()
+            about = app._about_dialog
+            about.update()
+            left, top = about.winfo_rootx(), about.winfo_rooty()
+            width, height = about.winfo_width(), about.winfo_height()
+            if width < 580 or height < 490:
+                raise RuntimeError('About dialog screenshot unexpectedly small')
+            ImageGrab.grab(bbox=(left, top, left + width, top + height)).convert(
+                'RGB').save(target / 'about.png', optimize=True)
+            print('about.png', (width, height), flush=True)
+            about.destroy()
         finally:
             app.destroy()
 
