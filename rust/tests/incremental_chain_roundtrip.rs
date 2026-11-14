@@ -64,7 +64,12 @@ fn full_incremental_verify_details_and_delete_rebase_without_data_loss(){
     assert_eq!(backup_chain::details(&store,&key,&second.id).unwrap().chain.len(),3);
     assert!(store.delete_backup(&key,&full.id,&full.id).is_err());
 
-    // User approval is required for each unprotect/delete operation.
+    // User-visible deletion holds are explicit and independent of 8+2 parity.
+    assert!(store.protect_backup(&key,&second.id).unwrap());
+    assert!(store.is_backup_protected(&key,&second.id).unwrap());
+    assert!(store.delete_backup_rebase(&key,&first.id,&first.id).is_err(),
+        "A protected successor must block manifest rebase");
+    store.unprotect_backup(&key,&second.id,&second.id).unwrap();
     store.unprotect_backup(&key,&first.id,&first.id).unwrap();
     assert!(store.delete_backup(&key,&first.id,&first.id).is_err());
     let moved=store.delete_backup_rebase(&key,&first.id,&first.id).unwrap();
@@ -74,6 +79,7 @@ fn full_incremental_verify_details_and_delete_rebase_without_data_loss(){
     assert!(backup_chain::verify_chain(&store,&key,&second.id,true).unwrap().healthy);
 
     store.unprotect_backup(&key,&full.id,&full.id).unwrap();
+    assert!(store.protect_backup(&key,&second.id).unwrap());
     assert!(store.delete_backup_rebase(&key,&full.id,&full.id).is_err(),
         "Protected child must not be silently rewritten");
     store.unprotect_backup(&key,&second.id,&second.id).unwrap();
