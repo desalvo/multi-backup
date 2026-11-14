@@ -207,3 +207,30 @@ interoperability remain explicit acceptance requirements.
 ### Security hardening (r024 development)
 
 The OIDC state is now bound to the initiating browser using a short-lived Secure, HttpOnly, SameSite=Lax cookie; callbacks with missing/different state are rejected. Local/LDAPS passwords have a bounded 5-failure/15-minute per-account lockout. The SMTP test action is restricted to the local administrator and limited to one invocation per 60 seconds. Audit events now record the authenticated actor rather than attributing every action to the local admin. These controls still require penetration tests, proxy-aware rate limiting, durable shared session storage and operational OIDC/LDAPS/SMTP verification for production.
+
+
+## Experimental live read-only WebDAV mount
+
+The Rust server has an optional **read-only WebDAV** endpoint at
+https://backup.example.org/dav/<64-character-backup-ID>/.
+
+It presents every namespace (Git, CI, metadata, Dropbox) of **one logical
+backup** as a single virtual directory tree. The files are streamed in
+4 MiB age-authenticated chunks with SHA-256 and HMAC verification; the
+server does not create plaintext staging files.
+
+Enable only behind HTTPS with a dedicated 32+ character random token
+in the existing multi-backup-auth Kubernetes Secret as key dav-password.
+Set Helm auth.dav.enabled=true and auth.dav.user=mount. The server reads
+the key from MULTI_BACKUP_DAV_PASSWORD_FILE and authenticates each
+PROPFIND/GET/HEAD using HTTP Basic over HTTPS, never the admin password.
+PUT/POST/DELETE/MOVE/COPY are denied; PROPFIND limits Depth to 0 or 1.
+
+- macOS: Finder, Go, Connect to Server, paste HTTPS URL
+- Windows: Add network location with HTTPS WebDAV/WebClient enabled
+- Linux: davfs2 or GUI network volume with TLS validation
+
+This is an **OS-mountable WebDAV volume**, not a native FUSE/WinFsp
+filesystem image. Range requests, OS interoperability, long-lived mount
+sessions, performance, and credentials must be tested on the relevant
+platforms before enabling in production.

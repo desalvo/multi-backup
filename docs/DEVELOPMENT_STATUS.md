@@ -347,3 +347,11 @@ a verified inventory with explicit scope and acceptance gates exists.
   direct GitHub/Dropbox chunk ingest; complete reverse format conversion;
   production signing; audited user/role model and external IdP acceptance.
 - CI needs requalification on latest head, not older 43615775732 green run.
+
+
+## r024 — on-demand read-only live mount prototype
+
+- Added opt-in WebDAV over HTTPS with separate token, authenticated PROPFIND/GET/HEAD and deny-all mutating requests.
+- Streaming reads authenticated age/HMAC chunk objects without staging plaintext to disk.
+- One backup ID maps to one virtual tree spanning all source namespaces.
+- Helm auth.dav flag defaults OFF. Real macOS/Windows/Linux WebDAV client acceptance and kernel FUSE/WinFsp mounts remain open.

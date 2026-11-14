@@ -251,3 +251,8 @@ Server optional authentication: local Argon2id, LDAPS, and OIDC
 authorization-code/PKCE. SMTP(S) can send a session/CSRF-protected test email.
 No external providers are enabled by default; see SERVER_DEPLOYMENT.md
 and RC_CERTIFICATION_MATRIX.md for required secrets and acceptance tests.
+
+
+### Experimental read-only live mount
+
+The Rust web server can optionally expose one logical backup as a read-only WebDAV volume over HTTPS, mapping all provider namespaces into the same virtual tree. Enable using auth.dav.enabled in Helm and a separate dav-password Secret (32+ characters). Default disabled. This is an experimental OS WebDAV mount, not a FUSE/WinFsp filesystem driver. See docs/SERVER_DEPLOYMENT.md.

@@ -250,3 +250,8 @@ On PR #9 the Rust backend has health verification, portable ZIP64 bundles, multi
   direct chunk backup, comprehensive reverse storage conversion, independent
   security review, notarization/Authenticode, OIDC/LDAP/SMTP live testing.
 - Do not promote stable or Docker images based on a prior green commit.
+
+
+## r024 live mount continuation
+
+Rust server has opt-in read-only WebDAV mount under /dav/:id, credential from dav-password Secret, HTTPS-only. XML listing is generated from one unified logical manifest; GET decrypts verified chunks lazily. CI compilation and actual clients must be validated. This does not implement direct native FUSE/WinFsp or OS mount commands from desktop GUI.

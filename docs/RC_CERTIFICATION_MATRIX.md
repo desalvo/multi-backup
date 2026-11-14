@@ -78,3 +78,8 @@ before enabling remote production access.
 
 Live filesystem mounts, in-memory age session interoperability and
 direct provider-to-chunk ingestion remain absent; stable promotion is blocked.
+
+
+### r024 experimental mount
+
+WebDAV read-only mount endpoint implemented as development code, with streaming verified encrypted-chunk access and separate Basic-auth token. **Unverified against OS clients; security and restore acceptance remains open.** Native FUSE/WinFsp mount is still absent. Do not enable auth.dav or treat it as a production mount until verified.
