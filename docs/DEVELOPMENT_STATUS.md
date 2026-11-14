@@ -572,3 +572,36 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - Four additional **Linux-only read-only mounted source previews**: NFSv3/v4, SMB/CIFS, SSHFS/FUSE and GPFS CES NFS/SMB. Exact read-only mount evidence and an operator snapshot-attestation flag are required; neither is proof of vendor snapshot/ACL consistency, and no remote target writes are enabled.
 - Rust generic plugin preview backup pairs: **5**; certified generic backup pairs: **0/682**. Static catalog: 32 plugins/53 backup roles unchanged. Dedicated Rust GitHub and Dropbox provider paths still need common-plugin integration and real account E2E.
 - **Still open:** PR #10 full green CI, native GUI settings parity, GitHub/Dropbox live recovery and resume, real mounted filesystem recovery, protected garbage collection/scheduler, full OS installed-app qualification, signing and update/rollback. Do not claim final migration or stable release yet.
+
+
+## r038 — chain-aware incremental deletion and garbage collection (2026-11-14)
+
+- Created native full/incremental snapshot mode with full encrypted reference
+  manifests and immutable deduplicated chunks, preserving a linked
+  `parent_id` history. Rust CLI/GUI allow selecting total or incremental.
+- Added `backup_chain::details` with complete/increment history and exact
+  uncompressed/zstd compressed/zstd deduplicated byte metrics, file counts,
+  modifications and deletions. Chain verification defaults to all ancestors.
+- Added durable Rust scheduler `schedule run/daemon` with per-job backup
+  type or verification, independent cadence and optional no-chain verify.
+  Still needs configuration UI/persistence and crash resilience certification.
+- Direct child reparenting now occurs as the default confirmed deletion:
+  deleting an intermediate increment reconnects children to its predecessor;
+  deleting a full promotes direct incremental descendants to full. Deletion
+  verifies descendants, refuses protected or corrupt ones, changes only
+  encrypted manifests and preserves ALL ciphertext objects until GC.
+- Added separate locked POSIX ciphertext GC: explicit dry-run and confirmed
+  execution, minimum 24-hour orphan grace (default 48), complete live
+  manifest/chain/parity validation, deletion of wholly dead parity groups and
+  unreferenced chunks only. Shared live/dead parity stripes are left intact;
+  **crash-safe parity repacking remains mandatory for maximum reclamation**.
+- Added `garbage_collection_roundtrip.rs` with physical deletion/grace,
+  shared stripe safety and real-age recovery tests; included in macOS,
+  Windows and Debian packaging acceptance. All new CI still to be verified.
+- Account-scoped restore planning now records independent source and target
+  identities. GitHub target owner must match the explicit target account;
+  Dropbox checks the write-token account through its account endpoint before
+  cross-account upload. Provider-wide selection, authentication and
+  live multi-account E2E remain incomplete.
+- PR #10 stays draft until passing new full CI and external restore tests.
+  Historical Python archive migration is optional, not a release gate.
