@@ -309,7 +309,7 @@ class DashboardView(tk.Canvas):
              if recent else 'Nessuno', 'Rilevato localmente', '#86EFC5'),
             ('▤', 'ARCHIVI DISPONIBILI', str(self.metrics['count']),
              'Nella destinazione', LAVENDER),
-            ('◇', 'CIFRATURA', 'Vault sbloccato' if unlocked else 'Vault non creato',
+            ('◇', 'CIFRATURA', 'Sbloccato' if unlocked else 'Non creato',
              'age · AES-256-GCM', '#92F1DA'),
             ('☁', 'PLUGIN ATTIVI', str(len(enabled)),
              ', '.join(item.title() for item in enabled) or 'Nessuno', CYAN),
@@ -323,7 +323,7 @@ class DashboardView(tk.Canvas):
             self._text(xx + 14, yy + 15, symbol, 24, colour=tint)
             self._text(xx + 53, yy + 15, title, 9, colour='#DFE7FF', weight='bold',
                        width=max(70, card_width - 59))
-            self._text(xx + 53, yy + 41, value, 13, weight='bold',
+            self._text(xx + 53, yy + 44, value, 12, weight='bold',
                        width=max(65, card_width - 60))
             self._text(xx + 53, yy + 75, subtitle, 9, colour=MUTED,
                        width=max(66, card_width - 60))
@@ -358,12 +358,12 @@ class DashboardView(tk.Canvas):
                   'Sbloccato' if unlocked else 'Non inizializzato',
                   enabled=unlocked, width=109 if unlocked else 137)
         self._text(x + 22, y + 111,
-                   'La chiave privata rimane protetta fuori dall’app.',
+                   'Chiave privata protetta fuori dall’applicazione.',
                    11, width=width - 42, colour='#E2E9FF')
         self._button(image, x + 16, y + 161, (width - 45) / 2, 43,
                      'Touch ID', lambda: self.owner._show('Encryption'))
         self._button(image, x + 25 + (width - 45) / 2, y + 161,
-                     (width - 45) / 2, 43, 'Gestisci chiavi',
+                     (width - 45) / 2, 43, 'Gestisci vault',
                      lambda: self.owner._show('Encryption'))
 
     def _plugins_panel(self, image, x, y, width):
