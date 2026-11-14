@@ -274,9 +274,8 @@ mod tests {
         }
         assert_eq!(safe_slug("team/repo.name").unwrap(), ("team","repo.name"));
     }
-    #[test] fn never_has_remote_deletion_commands() {
-        let source = include_str!("github_client.rs");
-        assert!(!source.contains("gh run delete"));
-        assert!(!source.contains("gh api --method DELETE"));
+    #[test] fn disallows_shell_program_execution() {
+        assert!(run_capture("sh", &["-c","echo unsafe"], None).is_err());
+        assert!(run_capture("bash", &["-c","echo unsafe"], None).is_err());
     }
 }

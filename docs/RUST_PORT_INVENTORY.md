@@ -9,7 +9,7 @@ Goal: a fully compiled, independently usable Rust app that preserves all 0.1.0 e
 | Protected vault v1 (scrypt/AES-256-GCM) | Native create, authenticate, export/import recovery, password change | Full Keychain/Touch ID/damaged-vault recovery and rollout certification |
 | Dropbox 4-MiB content hash | Native streaming kernel actively used in packaged plugin | Provider transport still Python |
 | Backup cycle checkpoints | Native read-only schema-1 audit | Implement mutation, restart/resume, atomic journal, locking |
-| GitHub backup plugin | Only scheduler kernel migrated | Git mirror, GH API metadata, CI runs/assets, retention and cleanup policy |
+| GitHub backup plugin | Native Rust repo discovery, Git mirror, metadata exports, CI candidate backfill and encrypted repository archives added as an independent CLI | Full Python metadata coverage, dedup/retention/cleanup, external real-account E2E and faithful restore still require certification |
 | Dropbox backup plugin | Native read-only TLS listing/download, revision validation, encrypted object and manifest writer, explicit Start/Resume implemented in Rust CLI | Real-provider E2E and upgrade/migration qualification before default switch |
 | GitHub/Dropbox remote restoration | Not migrated | New repo/file creation, reviewable E2E with real accounts |
 | Native GUI and graphical About | Still Python/Tk, with Rust helper integration | Fully Rust compiled GUI retaining approved photographic mock/accessibility |
