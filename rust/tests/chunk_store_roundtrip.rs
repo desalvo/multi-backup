@@ -162,3 +162,33 @@ fn streaming_legacy_age_tar_migration_unifies_independent_archives(){
     assert_eq!(fs::read(fresh.join("ci/legacy/run.txt")).unwrap(),b"CI archive payload");
     assert!(git_archive.exists()&&ci_archive.exists());
 }
+
+#[test]
+fn encrypted_store_relocation_is_atomic_and_nondestructive(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(tmp.path()) else {return};
+    let source=tmp.path().join("source-storage");
+    let input=tmp.path().join("source-files");
+    fs::create_dir(&input).unwrap();
+    fs::write(input.join("recover.txt"),b"content-addressed relocation data").unwrap();
+    Store::init(&source,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&source,&key).unwrap();
+    let snap=store.backup(&key,"copy cycle",&[Source {
+        namespace:"github".into(), directory:input
+    }]).unwrap();
+    let dest=tmp.path().join("moved-storage");
+    let report=store.relocate(&key,&dest,true).unwrap();
+    assert!(report.dry_run&&!report.verified&&report.ciphertext_bytes>0);
+    assert!(!dest.exists());
+    let moved=store.relocate(&key,&dest,false).unwrap();
+    assert!(moved.verified&&!moved.dry_run);
+    assert_eq!(moved.logical_backups,1);
+    assert!(source.exists());
+    let copied=Store::open(&dest,&key).unwrap();
+    assert!(copied.verify(&key,&snap.id).unwrap().healthy);
+    let output=tmp.path().join("moved-restore");
+    copied.restore(&key,&snap.id,None,&output).unwrap();
+    assert_eq!(fs::read(output.join("github/recover.txt")).unwrap(),
+        b"content-addressed relocation data");
+    assert!(store.relocate(&key,&dest,false).is_err());
+}

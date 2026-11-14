@@ -14,7 +14,7 @@ struct Member {path:String,size:u64,sha256:String}
 struct Volume {name:String,size:u64,sha256:String,members:Vec<Member>}
 #[derive(Clone,Serialize,Deserialize)]
 struct Catalog {version:u32,backup_id:String,volumes:Vec<Volume>}
-fn hash_file(path:&Path)->Res<(u64,String)> {
+pub(crate) fn hash_file(path:&Path)->Res<(u64,String)> {
     let mut reader=File::open(path)?;
     let mut digest=Sha256::new();
     let mut count=0u64;
@@ -33,7 +33,7 @@ fn regular(path:&Path)->Res<()> {
     }
     Ok(())
 }
-fn safe_object(path:&str)->bool {
+pub(crate) fn safe_object(path:&str)->bool {
     if path.is_empty()||path.len()>240||path.starts_with('/')||path.contains('\\')||
        path.split('/').any(|c|c.is_empty()||c=="."||c==".."){return false;}
     let s:Vec<_>=path.split('/').collect();

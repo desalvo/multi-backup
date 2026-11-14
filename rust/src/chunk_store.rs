@@ -625,3 +625,84 @@ impl Store {
         Ok(snapshot)
     }
 }
+
+/// Atomic and non-destructive storage location conversion for v1.
+/// The source remains unchanged; only independently authenticated encrypted
+/// objects are copied. Each referenced logical backup must be healthy.
+#[derive(Debug,Serialize)]
+pub struct RelocationReport {
+    pub logical_backups: usize,
+    pub encrypted_objects: usize,
+    pub ciphertext_bytes: u64,
+    pub verified: bool,
+    pub dry_run: bool,
+}
+impl Store {
+    pub fn relocate(&self,identity:&Path,destination:&Path,dry_run:bool)
+        ->Res<RelocationReport> {
+        if destination.exists(){return Err("Refusing overwrite of destination".into());}
+        let parent=destination.parent().ok_or("Missing destination parent")?;
+        if !fs::symlink_metadata(parent)?.file_type().is_dir(){
+            return Err("Destination parent must be an existing real directory".into());
+        }
+        let backups=self.list(identity)?;
+        let mut objects=std::collections::BTreeMap::new();
+        objects.insert("config.json.age".to_string(),
+            self.root.join("config.json.age"));
+        for backup in &backups {
+            let checked=self.verify(identity,&backup.id)?;
+            if !checked.healthy {
+                return Err(format!("Backup {} is not healthy; relocation blocked",
+                    backup.id).into());
+            }
+            for (rel,path) in self.portable_objects(identity,&backup.id)? {
+                if !crate::portable::safe_object(&rel) {
+                    return Err("Malformed object address".into());
+                }
+                objects.insert(rel,path);
+            }
+        }
+        let mut total=0u64;
+        let mut stamps=Vec::with_capacity(objects.len());
+        for (rel,path) in &objects {
+            if !crate::portable::safe_object(rel) ||
+               !fs::symlink_metadata(path)?.file_type().is_file() {
+                return Err("Unsafe storage object".into());
+            }
+            let (size,hash)=crate::portable::hash_file(path)?;
+            total=total.checked_add(size).ok_or("Storage size overflow")?;
+            stamps.push((rel.clone(),size,hash));
+        }
+        let mut report=RelocationReport{logical_backups:backups.len(),
+            encrypted_objects:objects.len(),ciphertext_bytes:total,
+            verified:false,dry_run};
+        if dry_run {return Ok(report);}
+        let stage=tempfile::Builder::new().prefix(".multi-backup-copy-")
+            .tempdir_in(parent)?;
+        let base=stage.path().join(SUBDIR);
+        dir(&base)?;
+        for (rel,size,expected) in stamps {
+            let source=objects.get(&rel).ok_or("Lost source object")?;
+            let target=base.join(&rel);
+            dir(target.parent().ok_or("Invalid object parent")?)?;
+            let actual=fs::copy(source,&target)?;
+            if actual!=size {return Err("Storage changed during relocation".into());}
+            let (copied,digest)=crate::portable::hash_file(&target)?;
+            if copied!=size||digest!=expected {
+                return Err("Object SHA-256 mismatch during relocation".into());
+            }
+        }
+        let verified=Store::open(stage.path(),identity)?;
+        let copied=verified.list(identity)?;
+        if copied.len()!=backups.len() {
+            return Err("Relocation changed logical backup count".into());
+        }
+        for backup in &backups {
+            let check=verified.verify(identity,&backup.id)?;
+            if !check.healthy {return Err("Relocation parity or chunk verification failed".into());}
+        }
+        fs::rename(stage.path(),destination)?;
+        report.verified=true;
+        Ok(report)
+    }
+}
