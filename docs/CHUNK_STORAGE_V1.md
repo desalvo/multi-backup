@@ -1,6 +1,6 @@
 # Multi Backup — storage a chunk e backup logico unificato
 
-**Stato corrente: Rust r038 nella PR #10 (anteprima di sviluppo, NON release stable).** Il formato v1 non cancella vecchi archivi. La migrazione di archivi creati con Python è ora facoltativa, non un gate della RC. Restano necessari test reali di restore, crash, sicurezza, metadati, firma e rollback. [Guida IT](R038_OPERATIONS_IT.md) · [EN](R038_OPERATIONS_EN.md).
+**Stato corrente: Rust r038 nella PR #10 (anteprima di sviluppo, NON release stable).** Il formato v1 non cancella vecchi archivi. La migrazione di archivi creati con Python è ora facoltativa, non un gate della RC. Restano necessari test reali di restore, crash, sicurezza, metadati, firma e rollback. [Guida IT](OPERATIONS_R038_IT.md) · [EN](OPERATIONS_R038_EN.md).
 
 ![Architettura logica e oggetti cifrati](images/chunk-architecture.svg)
 
@@ -204,4 +204,12 @@ Ogni full/incrementale conserva un **inventario completo di riferimenti ai chunk
 
 Cancellare un incremento ricollega i suoi successori al predecessore; cancellare un full promuove il suo successore incrementale a full. Un backup o figlio protetto non viene modificato automaticamente. **Purge = solo manifest, nessun chunk cancellato.**
 
-La GC è una seconda operazione con anteprima e conferma distinta, controllo di tutti i backup/parità vivi, lock comune e grace default 48 ore (minimo 24). I gruppi 8+2 misti (chunk vivi e orfani) restano intatti finché il repack crash-safe non è certificato. Nessuna GC remota o WORM indipendente è ancora qualificata. Per comandi, cautele ed esempi vedere [IT](R038_OPERATIONS_IT.md) e [EN](R038_OPERATIONS_EN.md).
+La GC è una seconda operazione con anteprima e conferma distinta, controllo di tutti i backup/parità vivi, lock comune e grace default 48 ore (minimo 24). I gruppi 8+2 misti (chunk vivi e orfani) restano intatti finché il repack crash-safe non è certificato. Nessuna GC remota o WORM indipendente è ancora qualificata. Per comandi, cautele ed esempi vedere [IT](OPERATIONS_R038_IT.md) e [EN](OPERATIONS_R038_EN.md).
+
+## r038 — stato corrente, catene e repack automatico
+
+La documentazione storica r021–r025 sopra è superata dall'implementazione Rust r038 in PR #10. Ogni punto FULL/INCREMENTAL conserva un inventario cifrato completo dei file e riusa chunk deduplicati zstd+age. Un purge modifica i manifest: gli incrementali successori si ricollegano al predecessore oppure diventano nuovi FULL, preservando l'integrità. La GC è distinta, e solo essa può eliminare fisicamente gli oggetti ciphertext.
+
+**Repack automatico 8+2:** durante storage gc-collect, sotto lock, le stripe con chunk attivi e orfani vengono ricostruite con i soli chunk ancora usati. Le nuove due parità age vengono verificate e il nuovo indice cifrato è pubblicato PER ULTIMO. La vecchia stripe resta durante il grace period del sostituto (default 48h), e una GC successiva recupera gli oggetti orfani. Anche gli shard preparati senza un indice committato possono essere ripuliti dopo il periodo di sicurezza. gc-preview non esegue repack o cancellazione. Fault-injection con power loss, multiwriter e filesystem remoto rimangono requisiti RC non certificati.
+
+Dimensioni visualizzate: file, byte non compressi, zstd compressi, zstd compressi+deduplicati e nuovo contenuto incrementale; i numeri zstd NON coincidono con i byte ciphertext/parità effettivamente recuperabili. Guide aggiornate: [IT](OPERATIONS_R038_IT.md), [EN](OPERATIONS_R038_EN.md), [inventario](FEATURE_INVENTORY_R038.md).
