@@ -1,6 +1,6 @@
-# Multi Backup — Rust migration acceptance inventory (r019)
+# Multi Backup — Rust-native functional acceptance inventory (r038)
 
-Goal: a fully compiled, independently usable Rust app that preserves all 0.1.0 encrypted archives, checkpoint identities, protected vaults and provider operations. A green incremental CI is not complete migration.
+Goal: a compiled, independently usable Rust app with fully functional new backup/restore, native GUI and executable provider plugins. Python-created archive data migration is optional and is no longer a release blocker by explicit user decision. A green CI alone is not complete functional qualification.
 
 | Functional area | Rust state | Still required for full release |
 |---|---|---|
@@ -44,3 +44,10 @@ Rust archive operations reject symlinks, unsafe names, malformed archives, dupli
 ## Release guard
 
 The current r018 early-release on main remains the functioning production-compatible baseline. The r019 development branch is a qualified partial migration, not a Rust-only release. Python must not be removed from delivered builds until the full set of gates passes. See docs/RUST_MIGRATION.md and docs/DEVELOPMENT_STATUS.md for additional detail.
+
+
+## r038 functional plugin progress
+
+The Rust generic adapter now actually runs POSIX→POSIX encrypted backups and verified selective/full POSIX restores. Linux sources from *existing read-only mounted snapshots* (NFS, SMB/CIFS, SSHFS and GPFS CES) can also feed the encrypted POSIX store, subject to exact mount probe, read-only flag and explicit operator assertion of snapshot consistency. The snapshot assertion is not an independent snapshot/ACL check, so the remote paths remain unqualified development previews. All other 32-entry catalog combinations remain planned unless explicitly implemented. 5 preview backup pairs, 0/682 certified generic pairs; full GitHub/Dropbox provider and native GUI feature completion remain open.
+
+Retain legacy format converter optionally, but stop requiring old Python archive wire-format roundtrip for RC promotion. Qualify Rust-created data roundtrip, encrypted integrity, source identity/key protection, crash recovery, new/isolated target restore, security and signed updates instead. Historical r018/r019 notes below are not the current release policy.
