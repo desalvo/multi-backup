@@ -72,7 +72,7 @@ pub fn sign(private:&[u8;32],method:&str,path:&str,id:&str,user:&str,
 pub fn verify(public:&str,proof:&AgentProof,method:&str,path:&str,
               metadata:&[u8],last_sequence:u64,time:i64)
     ->Result<(),String>{
-    if proof.sequence<=last_sequence || proof.unix_seconds.saturating_sub(time).abs()>CLOCK_SKEW_SECONDS{
+    if proof.sequence<=last_sequence || proof.unix_seconds.saturating_sub(time).unsigned_abs()>CLOCK_SKEW_SECONDS as u64{
         return Err("Expired or replayed agent request".into());
     }
     if metadata.len()>MAX_METADATA_BYTES||proof.metadata_sha256!=hex_sha(metadata){
