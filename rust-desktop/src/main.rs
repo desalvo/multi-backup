@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, vault};
+use multi_backup_core::{archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -45,6 +45,7 @@ enum Event {
     Progress(f32, String),
     Success(String),
     Failure(String),
+    UpdateInfo(updater::ReleaseInfo),
 }
 #[derive(Default)]
 struct Fields {
@@ -110,6 +111,8 @@ struct NativeApp {
     session_identity: Option<Arc<Zeroizing<Vec<u8>>>>,
     smoke_frames: Option<usize>,
     remote_confirm: Option<String>,
+    update_channel: String,
+    update_info: Option<updater::ReleaseInfo>,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -144,6 +147,8 @@ impl NativeApp {
             session_identity: None,
             smoke_frames: if smoke { Some(0) } else { None },
             remote_confirm: None,
+            update_channel: "early-release".into(),
+            update_info: None,
         }
     }
     fn rescan(&mut self) {
@@ -285,6 +290,44 @@ impl NativeApp {
             }
         });
     }
+    fn check_native_updates(&mut self) {
+        if self.active { return; }
+        let channel = self.update_channel.clone();
+        let (tx, rx) = mpsc::channel();
+        self.receiver = Some(rx);
+        self.active = true;
+        self.progress = None;
+        self.last_activity = Instant::now();
+        thread::spawn(move || {
+            let _ = tx.send(Event::Status("Controllo release Rust autenticata…".into()));
+            match updater::get_release(&channel) {
+                Ok(info) => { let _ = tx.send(Event::UpdateInfo(info)); },
+                Err(error) => { let _ = tx.send(Event::Failure(
+                    format!("Aggiornamento non disponibile: {error}"))); }
+            }
+        });
+    }
+    fn stage_native_update(&mut self) {
+        if self.active { return; }
+        let Some(info) = self.update_info.clone() else { return; };
+        let folder = Path::new(&self.fields.output).join(".updates");
+        let (tx,rx) = mpsc::channel();
+        self.receiver = Some(rx);
+        self.active = true;
+        self.progress = None;
+        self.last_activity = Instant::now();
+        thread::spawn(move || {
+            let _ = tx.send(Event::Status("Download HTTPS e verifica SHA-256…".into()));
+            match updater::stage(&info, &folder) {
+                Ok(path) => { let _ = tx.send(Event::Success(format!(
+                    "Pacchetto verificato e salvato (non installato): {}",
+                    path.display()))); },
+                Err(error) => { let _ = tx.send(Event::Failure(
+                    format!("Verifica aggiornamento fallita: {error}"))); }
+            }
+        });
+    }
+
     fn poll(&mut self) {
         let mut completed = false;
         if let Some(receiver) = &self.receiver {
@@ -301,6 +344,15 @@ impl NativeApp {
                     }
                     Event::Failure(s) => {
                         self.status = format!("Errore: {}", s.chars().take(320).collect::<String>());
+                        self.active = false; completed = true;
+                    }
+                    Event::UpdateInfo(info) => {
+                        self.status = if let Some(asset) = &info.asset {
+                            format!("Disponibile asset nativo verificabile: {}", asset.name)
+                        } else {
+                            "Nessun installer Rust disponibile per questa piattaforma/canale".into()
+                        };
+                        self.update_info = Some(info);
                         self.active = false; completed = true;
                     }
                 }
@@ -695,15 +747,39 @@ impl NativeApp {
         self.fields.password.zeroize();
         self.fields.password_confirm.zeroize();
     }
-    fn updates(&self, ui: &mut egui::Ui) {
-        ui.heading("Aggiornamenti");
-        ui.label("Canali disponibili: early-release e stable.");
-        ui.label(format!("Build nativa: {VERSION}"));
-        ui.hyperlink_to("Apri le release ufficiali verificate", 
-            format!("{REPO}/releases"));
+    fn updates(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Aggiornamenti nativi Rust");
+        ui.label(format!("Build installata: {VERSION}"));
+        ui.label("Origine GitHub ufficiale con SHA-256 verificato.");
+        ui.horizontal(|ui| {
+            if ui.selectable_value(&mut self.update_channel,
+                "early-release".to_string(), "Early release").changed() {
+                self.update_info = None;
+            }
+            if ui.selectable_value(&mut self.update_channel,
+                "stable".to_string(), "Stable").changed() {
+                self.update_info = None;
+            }
+        });
+        if ui.add_enabled(!self.active, egui::Button::new("Controlla aggiornamenti"))
+            .clicked() { self.check_native_updates(); }
+        if let Some(info) = &self.update_info {
+            ui.label(format!("Release: {} — {}", info.channel, info.tag));
+            if let Some(asset) = &info.asset {
+                ui.label(format!("Asset Rust: {} ({} bytes)", asset.name, asset.bytes));
+                if ui.add_enabled(!self.active,
+                    egui::Button::new("Scarica e verifica SHA-256 (NON installa)"))
+                    .clicked() { self.stage_native_update(); }
+            } else {
+                ui.label("Nessun pacchetto Rust con SHA-256 disponibile");
+            }
+        }
+        ui.hyperlink_to("Release ufficiali", format!("{REPO}/releases"));
         ui.label(RichText::new(
-            "Gli aggiornamenti non vengono applicati automaticamente senza verifica della firma."
+            "Nessuna installazione automatica: verificare sempre la firma del sistema operativo."
         ).color(MUTED));
+        ui.label(RichText::new(&self.status).color(INK));
+        self.draw_progress(ui);
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.heading("Impostazioni");
