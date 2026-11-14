@@ -147,7 +147,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         accepted(&flags, &known)?;
         let dir = Path::new(required(&flags, "--directory")?);
         let configuration: serde_json::Value = serde_json::from_reader(
-            std::fs::File::open(required(&flags, "--config")?))?;
+            std::fs::File::open(required(&flags, "--config")?)?)?;
         let start_new = command == "start" || command == "restart";
         let mut state = journal::Journal::start(dir, &configuration,
                                     start_new, !start_new)?;
