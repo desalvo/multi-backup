@@ -56,6 +56,36 @@ pub enum SafetyProfile {
     SnapshotBlockDevice,
     ImmutableRecoveryVault,
 }
+/// LVM over iSCSI/FC is a policy *profile*, not a separate transport or
+/// a claim that a shared VG can be activated on multiple uncoordinated hosts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LvmMode {
+    Local,
+    ClusterLocal,
+    SharedExclusive,
+    HaExclusive,
+    ClusterShared,
+}
+impl LvmMode {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "local" => Ok(Self::Local),
+            "cluster-local" => Ok(Self::ClusterLocal),
+            "shared-exclusive" => Ok(Self::SharedExclusive),
+            "ha-exclusive" => Ok(Self::HaExclusive),
+            "cluster-shared" => Ok(Self::ClusterShared),
+            _ => Err("LVM mode must be local, cluster-local, shared-exclusive, ha-exclusive or cluster-shared".into()),
+        }
+    }
+    fn clustered(self) -> bool {
+        matches!(self, Self::ClusterLocal | Self::HaExclusive | Self::ClusterShared)
+    }
+}
+const SAN_LVM_MODES: &[LvmMode] = &[
+    LvmMode::Local, LvmMode::ClusterLocal, LvmMode::SharedExclusive,
+    LvmMode::HaExclusive, LvmMode::ClusterShared,
+];
 /// The same stable plugin ID is used in both directions. Each capability is
 /// declared separately: backup input -> restore output and backup output ->
 /// restore input; this does not imply that either direction is implemented.
@@ -71,6 +101,9 @@ pub struct PluginDescriptor {
     pub consistency: &'static str,
     pub notes: &'static str,
     pub safety: SafetyProfile,
+    /// A nonempty list is supported only by iSCSI/FC SAN LVM profiles;
+    /// raw LUNs omit the LVM mode and remain separately snapshot-gated.
+    pub lvm_modes: &'static [LvmMode],
 }
 impl PluginDescriptor {
     const fn new(id: &'static str, title: &'static str, kind: DataKind,
@@ -83,6 +116,7 @@ impl PluginDescriptor {
             restore_input: backup_target,
             restore_output: backup_source,
             consistency, notes,
+            lvm_modes: &[],
             safety: match kind {
                 DataKind::BlockDevice | DataKind::BlockTransport =>
                     SafetyProfile::SnapshotBlockDevice,
@@ -90,6 +124,10 @@ impl PluginDescriptor {
                 _ => SafetyProfile::General,
             },
         }
+    }
+    const fn with_san_lvm(mut self) -> Self {
+        self.lvm_modes = SAN_LVM_MODES;
+        self
     }
     pub fn input_stage(self, mode: Mode) -> Stage {
         match mode { Mode::Backup => self.backup_input, Mode::Restore => self.restore_input }
@@ -125,14 +163,17 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "SMB durable handles or snapshots if available", "Input first; ACL/ADS/Windows path semantics need explicit mapping"),
     PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PLAN, PLAN,
         "CephFS snapshots or quiesced mount", "No cross-filesystem atomicity claim; separate CephFS and RBD plugins"),
+    PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PLAN, PLAN,
+        "Mounted Gluster volume inventory with consistency epoch and preserved GFID/ACL/xattr metadata",
+        "Quiesce or coordinate snapshots by volume topology (replica/disperse); no direct brick writes, restores to new isolated directory/volume"),
     PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, NONE,
         "RBD image snapshots+diff export", "Block image is not a directory; restore requires explicit image creation, never silent overwrite"),
     PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
         "Initiator/target IQN and LUN WWID with storage snapshot",
-        "Read only a stable quiesced block snapshot; output/restore must provision a distinct empty LUN and never overwrite an active device"),
+        "Read only a stable quiesced block snapshot; supports raw LUN or LVM (local, clustered-local, shared-exclusive, HA-exclusive, clustered-shared); restore to fresh isolated VG/LUN only").with_san_lvm(),
     PluginDescriptor::new("fc", "Fibre Channel LUN", DataKind::BlockTransport, PLAN, PLAN,
         "FC WWPN, SCSI WWID, multipath and snapshot epoch",
-        "Respect multipath aliases and ownership; output/restore require independently verified new-target LUN and exclusive fencing"),
+        "Respect multipath aliases, WWID and ownership; raw FC LUN or LVM local/clustered/shared, with fencing/locking and snapshot consistency").with_san_lvm(),
     PluginDescriptor::new("nvmeof", "NVMe over Fabrics (NVMe-oF)", DataKind::BlockTransport, PLAN, PLAN,
         "NVMe NQN, NSID, EUI/NGUID and snapshot epoch",
         "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
@@ -174,10 +215,23 @@ pub struct Plan {
     pub executable: bool,
     pub reason: &'static str,
     pub confirmation_required_before_writes: bool,
+    /// Declarative planning only: neither actual locks nor a storage array
+    /// snapshot are acquired by the plugin planner.
+    pub input_lvm_mode: Option<LvmMode>,
+    pub output_lvm_mode: Option<LvmMode>,
+    pub required_preflight: Vec<&'static str>,
 }
 /// Planning never executes a plugin; it is a safe capability check. In
 /// particular, Preview != Ready and no arbitrary command or plug-in is run.
 pub fn plan(mode: Mode, source_id: &str, destination_id: &str) -> Result<Plan, String> {
+    plan_lvm(mode, source_id, destination_id, None, None)
+}
+
+/// Validate the declarative SAN LVM mode of each endpoint independently.
+/// This intentionally performs NO mount, VG activation, fencing or write.
+pub fn plan_lvm(mode: Mode, source_id: &str, destination_id: &str,
+                input_lvm_mode: Option<LvmMode>,
+                output_lvm_mode: Option<LvmMode>) -> Result<Plan, String> {
     let source = find(source_id).ok_or_else(|| format!("Unknown plugin: {source_id}"))?;
     let destination = find(destination_id).ok_or_else(|| format!("Unknown plugin: {destination_id}"))?;
     let source_stage = source.input_stage(mode);
@@ -192,6 +246,37 @@ pub fn plan(mode: Mode, source_id: &str, destination_id: &str) -> Result<Plan, S
             Mode::Backup => "backup", Mode::Restore => "restore"
         }));
     }
+    let mut required_preflight = Vec::new();
+    for (plugin, layout, writing) in [
+        (source, input_lvm_mode, false),
+        (destination, output_lvm_mode, true),
+    ] {
+        if let Some(selected) = layout {
+            if !plugin.lvm_modes.contains(&selected) {
+                return Err(format!("Plugin {} does not support this LVM profile", plugin.id));
+            }
+            required_preflight.push("verify LUN WWID, PV UUID, VG/LV UUID, multipath aliases and ownership");
+            required_preflight.push("prove quiesced/snapshotted application-consistent LV data and valid LVM metadata");
+            if matches!(selected, LvmMode::SharedExclusive | LvmMode::HaExclusive) {
+                required_preflight.push("verify exclusive VG/LV activation on one writer and cluster fencing/lease where applicable");
+            }
+            if selected.clustered() {
+                required_preflight.push("verify cluster membership, quorum, node identity and VG activation policy");
+            }
+            if selected == LvmMode::ClusterShared {
+                required_preflight.push("verify working distributed LVM lock manager (lvmlockd with supported DLM/sanlock), fencing and cluster-aware filesystem/application");
+            }
+        }
+        if plugin.safety == SafetyProfile::SnapshotBlockDevice {
+            required_preflight.push("verify stable, read-only snapshot source and no concurrent block writes");
+            if writing {
+                required_preflight.push("provision a distinct empty isolated target LUN/namespace/VG, confirm no active production path and require explicit approval");
+            }
+        }
+        if plugin.safety == SafetyProfile::ImmutableRecoveryVault {
+            required_preflight.push("independently attest WORM retention, append-only ingest and separate recovery authorizations");
+        }
+    }
     // A generic multi-plugin job requires streaming, verified commit and
     // restore preflight adapters, none of which are ready yet.
     let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready;
@@ -202,6 +287,7 @@ pub fn plan(mode: Mode, source_id: &str, destination_id: &str) -> Result<Plan, S
             "catalog/planning only: one or both generic adapters are not wired or qualified"
         },
         confirmation_required_before_writes: true,
+        input_lvm_mode, output_lvm_mode, required_preflight,
     })
 }
 #[cfg(test)]
@@ -209,16 +295,16 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_21_user_requested_input_plugins_and_11_outputs_are_listed() {
+    fn all_22_user_requested_input_plugins_and_12_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
-            "iscsi", "fc", "nvmeof"];
+            "iscsi", "fc", "nvmeof", "glusterfs"];
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh",
-            "iscsi", "fc", "nvmeof", "anti-ransomware-vault"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 21);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 11);
-        assert_eq!(CATALOG.len(), 22);
+            "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs"];
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 22);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 12);
+        assert_eq!(CATALOG.len(), 23);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
@@ -226,8 +312,8 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 11);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 21);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 12);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 22);
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
@@ -291,6 +377,54 @@ mod tests {
         assert!(plan(Mode::Backup, vault.id, "posix").is_err());
         assert!(plan(Mode::Restore, "posix", vault.id).is_err());
         assert!(!plan(Mode::Backup, "posix", vault.id).unwrap().executable);
+    }
+    #[test]
+    fn glusterfs_remains_planned_in_both_directions() {
+        let d=find("glusterfs").unwrap();
+        assert_eq!(d.kind, DataKind::Files);
+        assert_eq!(d.backup_input, Stage::Planned);
+        assert_eq!(d.backup_output, Stage::Planned);
+        assert_eq!(d.restore_input, Stage::Planned);
+        assert_eq!(d.restore_output, Stage::Planned);
+        assert!(d.lvm_modes.is_empty());
+        assert!(!plan(Mode::Backup, "glusterfs", "anti-ransomware-vault").unwrap().executable);
+        assert!(!plan(Mode::Restore, "anti-ransomware-vault", "glusterfs").unwrap().executable);
+    }
+    #[test]
+    fn iscsi_and_fc_support_distinct_local_cluster_and_shared_lvm_profiles() {
+        for transport in ["iscsi", "fc"] {
+            let d=find(transport).unwrap();
+            assert_eq!(d.lvm_modes.len(), 5);
+            for mode in SAN_LVM_MODES {
+                let plan=plan_lvm(Mode::Backup, transport, "glusterfs",
+                                  Some(*mode), None).unwrap();
+                assert_eq!(plan.input_lvm_mode, Some(*mode));
+                assert!(!plan.executable);
+                assert!(plan.required_preflight.len() >= 3);
+                let reverse=plan_lvm(Mode::Restore, "glusterfs", transport,
+                                     None, Some(*mode)).unwrap();
+                assert_eq!(reverse.output_lvm_mode, Some(*mode));
+                assert!(reverse.required_preflight.iter().any(|x|x.contains("empty isolated")));
+                assert!(!reverse.executable);
+            }
+        }
+    }
+    #[test]
+    fn lvm_layout_cannot_be_misapplied_to_other_plugins_or_nvmeof() {
+        assert!(plan_lvm(Mode::Backup,"glusterfs","posix",Some(LvmMode::Local),None).is_err());
+        assert!(plan_lvm(Mode::Backup,"nvmeof","posix",Some(LvmMode::ClusterShared),None).is_err());
+        assert!(plan_lvm(Mode::Backup,"iscsi","glusterfs",None,Some(LvmMode::Local)).is_err());
+        assert!(LvmMode::parse("lvm-shared").is_err());
+        assert_eq!(LvmMode::parse("cluster-local").unwrap(),LvmMode::ClusterLocal);
+    }
+    #[test]
+    fn clustered_shared_lvm_requires_fencing_and_distributed_locking_preflight() {
+        let plan=plan_lvm(Mode::Backup,"fc","anti-ransomware-vault",
+                          Some(LvmMode::ClusterShared),None).unwrap();
+        assert!(plan.required_preflight.iter().any(|x|x.contains("distributed LVM lock")));
+        assert!(plan.required_preflight.iter().any(|x|x.contains("quorum")));
+        assert!(!plan.executable);
+        assert!(plan.confirmation_required_before_writes);
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {

@@ -11,7 +11,7 @@ fn usage() -> &'static str {
      Usage:\n\
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
-       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--json]\n\
+       multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
@@ -134,10 +134,16 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             },
             "plan" => {
-                accepted(&flags, &["--input", "--output", "--mode"])?;
+                accepted(&flags, &["--input", "--output", "--mode",
+                                    "--input-lvm", "--output-lvm"])?;
                 let mode = plugins::Mode::parse(required(&flags, "--mode")?)?;
-                let item = plugins::plan(mode, required(&flags, "--input")?,
-                                         required(&flags, "--output")?)?;
+                let input_lvm = flags.get("--input-lvm").map(|v|plugins::LvmMode::parse(v))
+                    .transpose()?;
+                let output_lvm = flags.get("--output-lvm").map(|v|plugins::LvmMode::parse(v))
+                    .transpose()?;
+                let item = plugins::plan_lvm(mode, required(&flags, "--input")?,
+                                              required(&flags, "--output")?,
+                                              input_lvm, output_lvm)?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&item)?);
                 } else {
@@ -145,6 +151,9 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                              item.mode, item.source_plugin, item.destination_plugin,
                              item.source_stage, item.destination_stage, item.executable);
                     println!("{}", item.reason);
+                    for check in &item.required_preflight {
+                        println!("preflight: {check}");
+                    }
                 }
             },
             _ => return Err(usage().into()),

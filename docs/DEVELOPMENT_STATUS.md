@@ -419,3 +419,25 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
   LUNs/namespaces only, independent immutable retention and recovery approval.
 - All source code and public docs remain on GitHub; private architecture
   and handoff remain solely in approved Dropbox folder.
+
+## r031 — GlusterFS and SAN LVM profiles (2026-11-14)
+
+- Added `glusterfs` as both input and output of backups, with inverse
+  restore roles. Distinct plugin ID; requires mounted Gluster client,
+  topology and consistency verification and preserves GFID/ACL/xattr.
+- iSCSI and FC each support independently configurable optional LVM layouts:
+  `local`, `cluster-local`, `shared-exclusive`, `ha-exclusive`,
+  `cluster-shared`. The raw-LUN mode remains available by omission.
+- New read-only Rust `plugins plan --input-lvm/--output-lvm` validates
+  the profile independently per endpoint and emits snapshot, multipath
+  WWID/PV/VG/LV, cluster quorum, fencing/locking and isolated-new-target
+  acceptance requirements. Misapplied profiles fail closed.
+- Added Rust unit tests for all 5 LVM profiles on both transports,
+  inverse restore mapping, rejection on non-SAN plugins, clustered
+  locking/fencing guardrails and GlusterFS both directions.
+- Updated scope: **23 plugin IDs, 22 backup sources and 12 destinations**,
+  34 backup-role contracts plus 34 inverse restore contracts.
+  Catalogue coverage: 34/34 (100%); unified certified role adapters:
+  0/34 (0%); certified generic provider-pair combinations: 0/264 (0%).
+- Do NOT claim that catalogued SAN LVM, GlusterFS or WORM operations are
+  implemented, or that unsafe live-device writes are supported.

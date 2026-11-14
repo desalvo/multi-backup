@@ -121,3 +121,28 @@ current Rust content-addressed store does not by itself meet those conditions:
 Counts: **21 input + 11 output = 32 backup-role definitions** across 22
 plugin IDs, reversed for restore. See `docs/PLUGIN_MATRIX.md` for status
 and the 0% generic-adapter certification baseline.
+
+## r031 — GlusterFS and LVM over iSCSI / FC
+
+New provider `glusterfs` is registered for backup input/output and the
+inverse restore roles. Use a mounted Gluster client, never brick-path
+manipulation. Snapshot consistency and preservation of volume metadata,
+GFID, extended attributes and ACL require explicit validation against
+replica/disperse configurations; heal/split-brain and durable commit must
+be tested before enabling writes.
+
+The `iscsi` and `fc` plugins now advertise five *optional* typed
+`lvm_modes` in JSON: `local`, `cluster-local`,
+`shared-exclusive`, `ha-exclusive`, `cluster-shared`.
+Raw LUN is represented by an omitted profile. CLI `plugins plan` accepts
+`--input-lvm` and `--output-lvm` independently, and refuses to apply
+LVM modes to non-iSCSI/FC plugins. A shared or clustered LVM profile adds
+read-only preflight requirements for WWID, PV/VG/LV identity, device
+ownership, snapshot consistency, single-writer fencing or distributed
+locking, and quorum. An output/restore target must be a *new empty isolated*
+LUN/VG. The planner does NOT acquire locks or perform any block operation.
+
+Compatibility note: Proxmox supports LVM over iSCSI and FC, including
+shared storage under the correct cluster lock model, but LVM snapshots,
+VM volume chains and cluster-aware filesystems differ. A successful
+capability plan does not establish crash/application consistency.
