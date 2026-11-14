@@ -283,6 +283,9 @@ pub struct Plan {
     pub source_stage: Stage,
     pub destination_stage: Stage,
     pub executable: bool,
+    /// Explicit compiled experimental path exists for this pair, but its
+    /// complete provider metadata/consistency semantics are not certified.
+    pub preview_executable: bool,
     pub reason: &'static str,
     pub confirmation_required_before_writes: bool,
     /// Declarative planning only: neither actual locks nor a storage array
@@ -411,10 +414,13 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
     // A generic multi-plugin job requires streaming, verified commit and
     // restore preflight adapters, none of which are ready yet.
     let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready;
+    let preview_executable = source.id == "posix" && destination.id == "posix";
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
-        source_stage, destination_stage, executable,
-        reason: if executable { "both adapters are ready" } else {
+        source_stage, destination_stage, executable, preview_executable,
+        reason: if executable { "both adapters are ready" } else if preview_executable {
+            "compiled POSIX native preview available; metadata and production qualification pending"
+        } else {
             "catalog/planning only: one or both generic adapters are not wired or qualified"
         },
         confirmation_required_before_writes: true,
