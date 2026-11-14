@@ -186,3 +186,18 @@ l'interoperabilità con il vault protetto non saranno conclusi.
 ## Comandi aggiunti nella revisione r022
 
 La CLI Rust include `storage verify`, `storage export-zip`, `storage import-zip` e `storage migrate-legacy`. Il nome del backup resta unico anche se il file JSON delle fonti legacy contiene repository Git, CI e metadati separati. Si può selezionare un insieme di file/cartelle per effettuare un unico restore verificato nella stessa directory di destinazione. L'importazione dei volumi ZIP richiede una directory nuova, un `bundle.index.age` autenticabile e tutti i part con checksum esatto. L'esportazione è non distruttiva. Il formato inverso chunk → archivio tar legacy e il mount FUSE/WinFsp sono ancora da sviluppare.
+
+
+## Reverse format conversion r025
+
+The core can now export one v1 logical manifest back into a single encrypted
+tar.gz.age archive, streaming individually verified chunks into TAR/GZIP and
+age without an intermediate plaintext TAR. It never overwrites an existing
+destination and verifies the finished encrypted archive before publication.
+
+CLI: multi-backup-native storage export-legacy --root STORAGE --identity KEY
+--id BACKUP_ID --destination NEW.tar.gz.age
+
+This is a compatibility/export bridge, not the preferred content-addressed
+storage mode. Verify the restored repository and LFS metadata with production
+data before deleting any older backup.

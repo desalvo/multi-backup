@@ -255,3 +255,8 @@ On PR #9 the Rust backend has health verification, portable ZIP64 bundles, multi
 ## r024 live mount continuation
 
 Rust server has opt-in read-only WebDAV mount under /dav/:id, credential from dav-password Secret, HTTPS-only. XML listing is generated from one unified logical manifest; GET decrypts verified chunks lazily. CI compilation and actual clients must be validated. This does not implement direct native FUSE/WinFsp or OS mount commands from desktop GUI.
+
+
+## r025 update
+
+Store::export_legacy now provides non-destructive streaming v1 -> legacy tar.gz.age; CLI storage export-legacy and Rust desktop Storage chunk action. Old -> v1 import and v1 relocation already exist. Still missing: actual account-level integration and certified native mount/IdP tests.

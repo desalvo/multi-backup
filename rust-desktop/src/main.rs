@@ -1029,6 +1029,11 @@ impl NativeApp {
                             .map_err(|e|e.to_string())?;
                         format!("{} file ricostruiti nella nuova directory {}",n,destination)
                     },
+                    "export-legacy"=>{
+                        let n=store.export_legacy(key,&id,Path::new(&destination))
+                            .map_err(|e|e.to_string())?;
+                        format!("{} file esportati in archivio legacy age autenticato",n)
+                    },
                     "export-zip"=>{
                         let mib=volume.parse::<u64>()
                             .map_err(|_|"Dimensione volumi ZIP non valida")?;
@@ -1129,6 +1134,8 @@ impl NativeApp {
                 .clicked(){self.run_chunk_action("export-zip");}
             if ui.add_enabled(!self.active,egui::Button::new("Importa ZIP64"))
                 .clicked(){self.run_chunk_action("import-zip");}
+            if ui.add_enabled(!self.active,egui::Button::new("Esporta archivio legacy age"))
+                .clicked(){self.run_chunk_action("export-legacy");}
             if ui.add_enabled(!self.active,egui::Button::new("Copia storage verificato"))
                 .clicked(){self.run_chunk_action("relocate");}
         });

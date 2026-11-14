@@ -355,3 +355,8 @@ a verified inventory with explicit scope and acceptance gates exists.
 - Streaming reads authenticated age/HMAC chunk objects without staging plaintext to disk.
 - One backup ID maps to one virtual tree spanning all source namespaces.
 - Helm auth.dav flag defaults OFF. Real macOS/Windows/Linux WebDAV client acceptance and kernel FUSE/WinFsp mounts remain open.
+
+
+## r025 streaming reverse archive conversion
+
+The v1 Store exports a complete unified logical backup to a new encrypted tar.gz.age using age/tar/gzip streaming, authenticated contents and a roundtrip test; no plaintext tar file is staged. Native GUI exposes the action. Tests on real large archives remain part of the release gate.
