@@ -52,20 +52,23 @@ impl OidcConfig {
             .timeout(Duration::from_secs(14))
             .build()?)
     }
-    async fn client(&self,http:&reqwest::Client)->Res<CoreClient>{
-        let metadata=CoreProviderMetadata::discover_async(
-            IssuerUrl::new(self.issuer.clone())?,http).await?;
+    async fn metadata(&self,http:&reqwest::Client)->Res<CoreProviderMetadata>{
+        Ok(CoreProviderMetadata::discover_async(
+            IssuerUrl::new(self.issuer.clone())?,http).await?)
+    }
+    fn secret(&self)->Res<ClientSecret> {
         let password=fs::read_to_string(&self.secret_file)?;
         let secret=password.trim_end_matches(['\r','\n']);
         if secret.is_empty(){return Err("Empty OIDC client secret".into());}
-        Ok(CoreClient::from_provider_metadata(metadata,
-            ClientId::new(self.client_id.clone()),
-            Some(ClientSecret::new(secret.to_owned())))
-            .set_redirect_uri(RedirectUrl::new(self.redirect_uri.clone())?))
+        Ok(ClientSecret::new(secret.to_owned()))
     }
     pub async fn start(&self)->Res<(String,String,Pending)>{
         let http=Self::http()?;
-        let client=self.client(&http).await?;
+        let client=CoreClient::from_provider_metadata(
+            self.metadata(&http).await?,
+            ClientId::new(self.client_id.clone()),
+            Some(self.secret()?))
+            .set_redirect_uri(RedirectUrl::new(self.redirect_uri.clone())?);
         let (challenge,verifier)=PkceCodeChallenge::new_random_sha256();
         let (url,csrf,nonce)=client.authorize_url(
             CoreAuthenticationFlow::AuthorizationCode,
@@ -84,7 +87,11 @@ impl OidcConfig {
             return Err("Expired or malformed OIDC login".into());
         }
         let http=Self::http()?;
-        let client=self.client(&http).await?;
+        let client=CoreClient::from_provider_metadata(
+            self.metadata(&http).await?,
+            ClientId::new(self.client_id.clone()),
+            Some(self.secret()?))
+            .set_redirect_uri(RedirectUrl::new(self.redirect_uri.clone())?);
         let response=client.exchange_code(AuthorizationCode::new(code))?
             .set_pkce_verifier(PkceCodeVerifier::new(pending.verifier))
             .request_async(&http).await?;

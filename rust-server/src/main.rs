@@ -302,7 +302,7 @@ fn read_hash(path:&str)->Result<String,Box<dyn std::error::Error>> {
     Ok(hash)
 }
 #[tokio::main]
-async fn main()->Result<(),Box<dyn std::error::Error>> {
+async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     if std::env::args().any(|x|x=="hash-password") {
         let password=rpassword::prompt_password("Admin password (>=12 chars): ")?;
         if password.len()<12{return Err("Password too short".into());}
