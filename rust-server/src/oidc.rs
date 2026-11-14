@@ -4,7 +4,7 @@
 use openidconnect::{
     core::{CoreAuthenticationFlow,CoreClient,CoreProviderMetadata},
     reqwest,AccessTokenHash,AuthorizationCode,ClientId,ClientSecret,CsrfToken,IssuerUrl,
-    Nonce,PkceCodeChallenge,PkceCodeVerifier,RedirectUrl,Scope,TokenResponse
+    Nonce,PkceCodeChallenge,PkceCodeVerifier,RedirectUrl,Scope,TokenResponse,OAuth2TokenResponse
 };
 use std::{collections::HashSet,env,fs,path::PathBuf,time::{Duration,Instant}};
 type Res<T>=Result<T,Box<dyn std::error::Error+Send+Sync>>;

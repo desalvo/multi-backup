@@ -186,7 +186,7 @@ async fn oidc_start(State(state):State<AppState>)->Response{
         };
         entries.retain(|_,p|p.created.elapsed()<Duration::from_secs(600));
         if entries.len()>=100{return secure_headers(StatusCode::TOO_MANY_REQUESTS);}
-        entries.insert(csrf,pending);
+        entries.insert(csrf.clone(),pending);
     }
     // Bind this OIDC state to the initiating browser, preventing login CSRF.
     let cookie=format!("mb_oidc_state={csrf}; Path=/oidc; Secure; HttpOnly; SameSite=Lax; Max-Age=600");
@@ -352,7 +352,7 @@ async fn logout(State(state):State<AppState>,headers:HeaderMap)->Response {
     }
     secure_headers(StatusCode::FORBIDDEN)
 }
-fn read_hash(path:&str)->Result<String,Box<dyn std::error::Error>> {
+fn read_hash(path:&str)->Result<String,Box<dyn std::error::Error+Send+Sync>> {
     let meta=fs::symlink_metadata(path)?;
     if !meta.file_type().is_file() || meta.len()>512 {
         return Err("Unsafe password hash file".into());
