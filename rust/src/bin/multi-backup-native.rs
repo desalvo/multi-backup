@@ -12,7 +12,8 @@ fn usage() -> &'static str {
        multi-backup-native --version\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
-       multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
+       multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\\
+       multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
        multi-backup-native storage restore --root DIR --identity IDENTITY --id HASH --destination NEW_DIR [--selection PATH]\n\
        multi-backup-native archive create --source DIR --output FILE.tar.gz.age --recipient age1... [--prefix multi-backup]\n\
        multi-backup-native archive list --archive FILE.tar.gz.age --identity AGE_KEY [--json]\n\
@@ -133,6 +134,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         println!("{} {} ({} logical files)",backup.id,backup.label,backup.entries.len());
                     }
                 }
+            }
+            "verify" => {
+                accepted(&flags, &["--root","--identity","--id"])?;
+                let identity = Path::new(required(&flags,"--identity")?);
+                let store = chunk_store::Store::open(root, identity)?;
+                let report = store.verify(identity, required(&flags,"--id")?)?;
+                println!("{}",serde_json::to_string_pretty(&report)?);
+                if !report.healthy {return Err("Backup integrity or parity verification failed".into());}
             }
             "protect" | "repair" => {
                 accepted(&flags, &["--root","--identity","--id"])?;

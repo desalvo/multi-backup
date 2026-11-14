@@ -448,3 +448,80 @@ impl Store {
         Ok(count)
     }
 }
+
+/// Read-only integrity and redundancy health results, suitable for audit and CI.
+#[derive(Debug, serde::Serialize)]
+pub struct HealthReport {
+    pub backup_id: String,
+    pub logical_files: usize,
+    pub logical_bytes: u64,
+    pub unique_chunks: usize,
+    pub unique_plaintext_bytes: u64,
+    pub protected_chunks: usize,
+    pub healthy: bool,
+    pub issues: Vec<String>,
+}
+impl Store {
+    /// Verify every referenced encrypted chunk, age authentication, keyed ID,
+    /// plaintext checksum and all associated parity shards. Never repair here.
+    pub fn verify(&self, identity: &Path, id: &str) -> Res<HealthReport> {
+        let manifest = self.load(identity, id)?;
+        let mut issues = Vec::new();
+        let mut hashes = HashSet::new();
+        let mut unique_plaintext_bytes = 0u64;
+        let mut logical_bytes = 0u64;
+        for entry in &manifest.entries {
+            logical_bytes = logical_bytes.checked_add(entry.bytes)
+                .ok_or("Logical byte count overflow")?;
+            for chunk in &entry.chunks {
+                if !hashes.insert(chunk.id.clone()) { continue; }
+                unique_plaintext_bytes = unique_plaintext_bytes
+                    .checked_add(chunk.bytes as u64)
+                    .ok_or("Unique byte count overflow")?;
+                if let Err(e) = self.read_chunk(identity, chunk) {
+                    issues.push(format!("Chunk {} verification failed: {}", chunk.id, e));
+                }
+            }
+        }
+        let protections = self.read_protection(identity)?;
+        let mut covered = HashSet::new();
+        for group in &protections {
+            if !group.members.iter().any(|m| hashes.contains(&m.id)) { continue; }
+            for member in &group.members {
+                if !covered.insert(member.id.clone()) {
+                    issues.push(format!("Chunk {} has duplicate parity protection",member.id));
+                }
+            }
+            let folder = self.root.join("parity")
+                .join(&group.id[..2]).join(&group.id);
+            for i in 0..crate::parity::PARITY {
+                let path = folder.join(format!("{i}.age"));
+                let validation = fs::symlink_metadata(&path)
+                    .map_err(|e| e.into())
+                    .and_then(|m: std::fs::Metadata| -> Res<Vec<u8>> {
+                        if !m.file_type().is_file() { return Err("Unsafe parity file".into()); }
+                        age(&fs::read(&path)?,None,Some(identity))
+                    });
+                let slot=crate::parity::DATA + i;
+                match validation {
+                    Ok(bytes) if bytes.len()==group.stripe.shard_size &&
+                        sha(&bytes)==group.stripe.info[slot].sha256 => {}
+                    _ => issues.push(format!("Parity {}:{} failed integrity",group.id,i)),
+                }
+            }
+        }
+        for id in &hashes {
+            if !covered.contains(id) {
+                issues.push(format!("Chunk {id} lacks redundancy"));
+            }
+        }
+        Ok(HealthReport {
+            backup_id: id.into(),
+            logical_files: manifest.entries.len(),
+            logical_bytes, unique_chunks: hashes.len(),
+            unique_plaintext_bytes, protected_chunks: covered.len(),
+            healthy: issues.is_empty(),
+            issues
+        })
+    }
+}

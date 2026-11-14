@@ -35,6 +35,7 @@ fn logical_backup_dedup_and_corruption_recovery() {
     let second=store.backup(&identity,"second logical cycle",&sources).unwrap();
     assert_eq!(store.list(&identity).unwrap().len(),2);
     assert_eq!(first.entries[0].chunks[0].id,second.entries[0].chunks[0].id);
+    assert!(store.verify(&identity,&first.id).unwrap().healthy);
     let chunk=&first.entries[0].chunks[0].id;
     let chunk_file=root.join(".multi-backup-v1/chunks")
         .join(&chunk[..2]).join(&chunk[2..4]).join(format!("{chunk}.age"));
@@ -42,11 +43,15 @@ fn logical_backup_dedup_and_corruption_recovery() {
     let midpoint=ciphertext.len()/2;
     ciphertext[midpoint]^=0x80;
     fs::write(&chunk_file,ciphertext).unwrap();
+    let damaged=store.verify(&identity,&first.id).unwrap();
+    assert!(!damaged.healthy);
+    assert!(!damaged.issues.is_empty());
     let target=workspace.path().join("restored");
     assert_eq!(store.restore(&identity,&first.id,None,&target).unwrap(),2);
     assert_eq!(fs::read(target.join("github/README.txt")).unwrap(),b"Backup repository contents");
     assert_eq!(fs::read(target.join("ci/run.json")).unwrap(),b"GitHub Actions metadata");
     assert!(root.join(".multi-backup-v1/quarantine").exists());
+    assert!(store.verify(&identity,&first.id).unwrap().healthy);
     assert!(store.restore(&identity,&first.id,None,&target).is_err());
 }
 #[test]
