@@ -325,7 +325,7 @@ impl Store {
                 if !safe_hash(id) || !fs::symlink_metadata(&path)?.file_type().is_file() {
                     return Err("Unsafe stripe metadata".into());
                 }
-                let plain = age(&fs::read(path)?,None,Some(identity))?;
+                let plain = age(&fs::read(&path)?,None,Some(identity))?;
                 let stripe: Protection = serde_json::from_slice(&plain)?;
                 if stripe.id != id || stripe.members.is_empty() ||
                     stripe.members.len() > crate::parity::DATA {
@@ -357,8 +357,8 @@ impl Store {
         let mut count = 0;
         for group in pending.chunks(crate::parity::DATA) {
             let ciphertext: Vec<Vec<u8>> = group.iter()
-                .map(|item| fs::read(self.chunk_path(&item.id)?))
-                .collect::<Result<_,_>>()?;
+                .map(|item| -> Res<Vec<u8>> { Ok(fs::read(self.chunk_path(&item.id)?)?) })
+                .collect::<Res<Vec<_>>>()?;
             let (meta, shards) = crate::parity::encode(&ciphertext)?;
             let mut nonce = [0u8;32];
             rand::rngs::OsRng.fill_bytes(&mut nonce);
