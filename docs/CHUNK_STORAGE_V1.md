@@ -2,7 +2,7 @@
 
 **Stato: prototipo sperimentale r021, PR #9 (NON una release stabile).**
 Il formato v1 è opt-in e **non sostituisce né modifica automaticamente** i
-vecchi archivi \`tar.gz.age\`. Prima del rilascio servono test di compatibilità,
+vecchi archivi `tar.gz.age`. Prima del rilascio servono test di compatibilità,
 restore multi-TB, fault injection e review di sicurezza indipendente.
 
 ![Architettura logica e oggetti cifrati](images/chunk-architecture.svg)
@@ -10,7 +10,7 @@ restore multi-TB, fault injection e review di sicurezza indipendente.
 ## Un backup logico, molti contenuti, un solo manifest
 
 Un ciclo contiene una sola identità logica (ID univoco + etichetta) con più
-namespace: \`github/\`, \`ci/\`, \`metadata/\`, \`dropbox/\`, e altri provider.
+namespace: `github/`, `ci/`, `metadata/`, `dropbox/`, e altri provider.
 L'utente **non** vede tre backup distinti quando visita un ciclo.
 
 | Entità | Visibile all'utente? | Recuperabilità |
@@ -21,7 +21,7 @@ L'utente **non** vede tre backup distinti quando visita un ciclo.
 | Stripe di parità | Solo nella verifica integrità | Reed–Solomon 8+2 |
 | Oggetti di quarantena | Solo nel monitoraggio tecnico | mai eliminati silenziosamente |
 
-\`\`\`text
+```text
 storage/
 └── .multi-backup-v1/
     ├── config.json.age              # segreto di deduplica, recipient e dimensione
@@ -31,11 +31,11 @@ storage/
     ├── parity/aa/<stripe-id>/{0,1}.age
     ├── quarantine/<id>-<nonce>.age
     └── .lock
-\`\`\`
+```
 
 ## Pipeline dei dati
 
-\`\`\`mermaid
+```mermaid
 flowchart TD
  A[Git / LFS / CI / metadata / Dropbox] --> B[Un namespace virtuale per fonte]
  B --> C[Chunking fisso: 4 MiB]
@@ -49,7 +49,7 @@ flowchart TD
  F --> K[Manifest logico unico cifrato]
  J --> K
  K --> L[Browse / verify / selective restore]
-\`\`\`
+```
 
 | Parametro | Default / politica | Stato |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ La verifica ricontrolla checksum di ciascuno shard, identità logica del chunk
 (HMAC), SHA-256 del plaintext e autenticazione age prima di accettare la
 ricostruzione. Il codice rifiuta un numero di shard indisponibili superiore
 alla capacità del gruppo. Le parità sono cifrate separatamente. File danneggiati
-vanno in \`quarantine/\`, senza cancellazione automatica.
+vanno in `quarantine/`, senza cancellazione automatica.
 
 **Limite operativo:** una parità non è un secondo backup geograficamente
 indipendente; non protegge da perdita dell'intero volume, ransomware con
@@ -87,16 +87,16 @@ I percorsi virtuali rifiutano traversal, nomi speciali/symlink, percorsi
 Windows riservati e overwrite durante il restore. Gli HMAC del contenuto non
 rivelano facilmente l'esistenza di file noti senza il segreto di deduplica,
 a differenza dell'uso diretto di SHA-256 come filename. Il segreto dello store
-è cifrato in \`config.json.age\`; la chiave privata age deve restare **altrove**.
+è cifrato in `config.json.age`; la chiave privata age deve restare **altrove**.
 
-Le identità protette \`.agevault\` del client esistente non sono ancora collegate
+Le identità protette `.agevault` del client esistente non sono ancora collegate
 a tutte le operazioni v1: la CLI sperimentale legge una identity age dal
 percorso indicato dall'operatore. Non mettere mai il file private-key dentro
 la stessa directory dello storage.
 
 ## Esempio CLI Rust
 
-\`\`\`bash
+```bash
 multi-backup-native storage init \
   --root "$HOME/Multi-Backups" --recipient age1... --chunk-mib 4
 
@@ -126,7 +126,7 @@ multi-backup-native storage restore \
   --root "$HOME/Multi-Backups" --identity /secure/identity.txt \
   --id HASH --selection github/owner/repo \
   --destination /new-empty/restore
-\`\`\`
+```
 
 Il restore richiede una directory **inesistente** sotto un padre esistente;
 mai sovrascrivere automaticamente dati originali. Una selezione può essere un

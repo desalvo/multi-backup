@@ -199,12 +199,12 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
 
 ## r021 handoff — experimental content-addressed storage & server (2026-11-14)
 
-- Continue on PR #9 \`feature/r019-rust-native-encrypted-archive\`; main r018
+- Continue on PR #9 `feature/r019-rust-native-encrypted-archive`; main r018
   remains the release baseline. Do not squash/merge/publish until review.
 - Rust chunk store v1: HMAC-addressed 4-MiB chunks, zstd/age,
   one encrypted logical manifest (across provider namespaces), selective
   restore to fresh destination; 8+2 ciphertext parity with reconstruction
-  and quarantine. CLI \`storage\` subcommands added.
+  and quarantine. CLI `storage` subcommands added.
 - Rust server: Argon2id local login, 8-hour cookie sessions, origin/CSRF
   checks, JSONL audit, responsive browse and server-side selective export;
   no LDAP/OIDC/SMTP implementation yet.
