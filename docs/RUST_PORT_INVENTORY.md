@@ -12,7 +12,7 @@ Goal: a fully compiled, independently usable Rust app that preserves all 0.1.0 e
 | GitHub backup plugin | Native Rust repo discovery, Git mirror, metadata exports, CI candidate backfill and encrypted repository archives added as an independent CLI | Full Python metadata coverage, dedup/retention/cleanup, external real-account E2E and faithful restore still require certification |
 | Dropbox backup plugin | Native read-only TLS listing/download, revision validation, encrypted object and manifest writer, explicit Start/Resume implemented in Rust CLI | Real-provider E2E and upgrade/migration qualification before default switch |
 | GitHub/Dropbox remote restoration | Not migrated | New repo/file creation, reviewable E2E with real accounts |
-| Native GUI and graphical About | Still Python/Tk, with Rust helper integration | Fully Rust compiled GUI retaining approved photographic mock/accessibility |
+| Native GUI and graphical About | Standalone egui/Rust desktop prototype with photographic dashboard, hamburger, About, archive/restore/vault and direct native provider actions; CI graphical smoke in Xvfb | Complete pixel parity, accessibility, full feature coverage and signed macOS/Windows/Linux installation |
 | Installer delivery | Rust helper embedded in Mac/Windows PyInstaller bundles | Rust-only Mac/Windows/Rocky/Alma distributions, release signing/notarization |
 | Complete app compatibility | Partial | Independent cross-version backups/restores and secure upgrade/rollback |
 

@@ -28,6 +28,10 @@ def validate():
     assert 'native-release' in jobs
     assert jobs['macos-smoke']['needs']==['production-gate'], 'macOS smoke must follow the production gate'
     assert jobs['publications-smoke']['needs']==['production-gate'], 'GUI capture must follow the security gate'
+    assert jobs['rust-desktop-smoke']['needs']==['production-gate'], 'Rust-only desktop must follow the security gate'
+    assert 'rust-desktop/Cargo.toml' in str(jobs['rust-desktop-smoke']['steps'])
+    assert '--smoke' in str(jobs['rust-desktop-smoke']['steps'])
+
     doc_steps='\\n'.join(str(step.get('run','')) for step in
                         jobs['publications-smoke']['steps'])
     assert 'scripts/capture-ui.py' in doc_steps and 'scripts/build-publications.py' in doc_steps
