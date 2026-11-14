@@ -1,5 +1,10 @@
 # Multi Backup
 
+## r039 Rust agent and HA cluster work — PREVIEW
+
+[Parallelism and Kubernetes (IT)](docs/CLUSTER_ORCHESTRATION_R039_IT.md), [cluster operations EN](docs/CLUSTER_ORCHESTRATION_R039_EN.md), [AFS agents IT](docs/AGENTS_AFS_R039_IT.md), [AFS agents EN](docs/AGENTS_AFS_R039_EN.md). r039 PR #11 remains draft. Native agent PKG/EXE/DEB/RPM and multi-replica shared PostgreSQL scheduling are under CI; local storage is pinned to one replica. Full platform/AFS recovery and lease write-fencing are NOT certified.
+
+
 ## Manuali operativi e stato r038
 
 La documentazione valida per la corrente anteprima Rust r038 è l'[indice documentale](docs/DOCUMENTATION_INDEX_R038.md), il [manuale IT](docs/OPERATIONS_R038_IT.md), l'[operational manual EN](docs/OPERATIONS_R038_EN.md) e l'[inventario delle funzionalità](docs/FEATURE_INVENTORY_R038.md). I manuali e gli screenshot Python/Tk delle versioni precedenti sono storici; il repack automatico 8+2 è ancora in qualificazione, non certificato come funzione stabile.

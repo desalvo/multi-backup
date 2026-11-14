@@ -74,3 +74,9 @@ AFS richiede vos esterno, e nelle varianti che usano keytab anche kinit/aklog: g
 ## Gate obbligatori
 
 Non considerare certificata la r039 finché non sono superati: CI per tutti gli installer, test AFS full/incremental/restore su celle reali, SSH key rotation/host spoofing, gestione keytab e localauth con privilegi, server enrolment→approval→revoke, anti-replay anche dopo restart, TLS e certificato server, push/pull reali, interruzione agent e recupero, autenticazione dei profili e scripts, ripristino byte-identico di dati ricevuti, installazione/uninstall/upgrade/rollback, firma/notarizzazione e analisi di sicurezza. La documentazione va aggiornata a ogni modifica.
+
+## r039 — parallelismo e limiti degli agenti
+
+Il server imposta una policy per agente tramite POST /api/agents/admin/limits; il file JSON dell'agente contiene limits propri. Per pull la risposta del poll contiene i limiti del server; per push l'agente ottiene prima la policy server tramite GET /api/agents/policy, pur scegliendo autonomamente quando iniziare. La policy effettiva è sempre la più restrittiva.
+
+Campi: max_concurrent_jobs (1–256), threads_per_job (1–64), max_transfer_bytes_per_sec (byte/s), max_host_cpu_percent, max_host_memory_percent, min_free_memory_bytes. Default 4 job, 4 thread e nessuna soglia opzionale; es. 10485760 B/s = 10 MiB/s. Si possono eseguire in parallelo dump di VOLUMI AFS differenti, ma NON dividere il dump di un singolo volume. Server e agente limitano il traffico ciphertext; soglie CPU/RAM sono cooperative, non cgroups hard. Per SSH agentless non sono garantite soglie load/memoria sul remoto senza un probe approvato. [Manuale di cluster IT](CLUSTER_ORCHESTRATION_R039_IT.md) e [EN](CLUSTER_ORCHESTRATION_R039_EN.md).

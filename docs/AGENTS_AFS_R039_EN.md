@@ -72,3 +72,9 @@ No Python, Tk, PyInstaller or arbitrary remote execution. Installers are preview
 ## Required functional and security qualification
 
 Full local/SSH/agent AFS dump and new-volume restore; incremental AFS chain time gap detection; keytab/localauth privileged tests; TLS certificates and MITM detection; correct server-side user-token registration, approval and revocation; Ed25519 spoofing, replay and clock skew; profile tampering; agent shutdown/resume, offline server and protected encrypted spool; live push/pull with auditable ID and authenticated status; native OS installs and upgrades; service accounts; scripts/command allowlist; full byte-for-byte restore and independent security review. Do not promote the RC until these are complete.
+
+## r039 — parallel backup execution and host budgets
+
+Agent local config has limits; server policy is set by authenticated admin POST /api/agents/admin/limits. Pull obtains limits from the approved agent poll; autonomous push first requests GET /api/agents/policy. The stricter of server and agent budgets applies. max_concurrent_jobs=1..256, threads_per_job=1..64, optional bytes/sec per stream, CPU/RAM percent and free RAM minimum; default 4 concurrent jobs and 4 per-job threads with optional caps unset.
+
+Parallelism is across distinct AFS volumes; one vos dump stream is indivisible. Bandwidth throttling and host admission are implemented cooperatively. Remote SSH host resource guarantees require additional approved remote instrumentation/cgroups. See [Kubernetes/cluster EN](CLUSTER_ORCHESTRATION_R039_EN.md) and [IT](CLUSTER_ORCHESTRATION_R039_IT.md).
