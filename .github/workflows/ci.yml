@@ -168,6 +168,61 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  rust-linux-rpm-native-preview:
+    name: Python-free Rust ${{ matrix.distro }} EL${{ matrix.el }} RPM
+    needs: [production-gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rocky, el: 8, image: 'rockylinux/rockylinux:8'}
+          - {distro: rocky, el: 9, image: 'rockylinux/rockylinux:9'}
+          - {distro: rocky, el: 10, image: 'rockylinux/rockylinux:10'}
+          - {distro: alma, el: 8, image: 'almalinux:8'}
+          - {distro: alma, el: 9, image: 'almalinux:9'}
+          - {distro: alma, el: 10, image: 'almalinux:10'}
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Rust desktop and RPM on its actual EL runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y dnf-plugins-core
+          dnf config-manager --set-enabled crb || dnf config-manager --set-enabled powertools || true
+          dnf install -y rpm-build gcc gcc-c++ make findutils tar gzip git curl pkgconf-pkg-config             libX11-devel libXi-devel libXcursor-devel libXrandr-devel libXinerama-devel             libxkbcommon-devel wayland-devel mesa-libGL-devel
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          cargo test --manifest-path rust/Cargo.toml --lib
+          cargo build --manifest-path rust/Cargo.toml --release
+          cargo build --manifest-path rust-desktop/Cargo.toml --release
+          rust-desktop/target/release/multi-backup-desktop --self-test
+          rust/target/release/multi-backup-native --version
+          mkdir -p "$HOME/rpmbuild/"{BUILD,RPMS,SOURCES,SPECS,SRPMS} packages
+          cp rust-desktop/target/release/multi-backup-desktop "$HOME/rpmbuild/SOURCES/MultiBackupRust"
+          cp rust/target/release/multi-backup-native "$HOME/rpmbuild/SOURCES/"
+          cp LICENSE packaging/linux/multi-backup-rust.desktop "$HOME/rpmbuild/SOURCES/"
+          cp assets/icon-256.png "$HOME/rpmbuild/SOURCES/multi-backup.png"
+          rpmbuild -bb packaging/linux/multi-backup-rust.spec --define "_topdir $HOME/rpmbuild"
+          while IFS= read -r rpm; do
+            filename="multi-backup-rust-${{ matrix.distro }}-el${{ matrix.el }}-$(basename "$rpm")"
+            cp "$rpm" "packages/$filename"
+            rpm -qp --queryformat '%{NAME} %{VERSION} %{ARCH}\n' "packages/$filename"
+            test "$(rpm -qp --queryformat '%{NAME}' "packages/$filename")" = multi-backup-rust
+            ! rpm -qp --requires "packages/$filename" | grep -Ei 'python|pyinstaller|tkinter'
+          done < <(find "$HOME/rpmbuild/RPMS" -type f -name '*.rpm' | sort)
+          test -n "$(find packages -name '*.rpm' -print -quit)"
+          sha256sum packages/*.rpm > packages/checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-only-${{ matrix.distro }}-el${{ matrix.el }}-rpm-preview
+          path: packages/*
+          retention-days: 14
+          if-no-files-found: error
+
   publications-smoke:
     name: Native GUI screenshots and EN/IT PDF publication smoke
     needs: [production-gate]
