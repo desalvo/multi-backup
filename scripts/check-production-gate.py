@@ -25,6 +25,39 @@ def validate():
     flow=load('.github/workflows/ci.yml')
     native=load('.github/workflows/build-native.yml')
     jobs=flow['jobs']; assert 'production-gate' in jobs
+    # r039 native agent builds are release-critical across all supported OSes.
+    for agent_job in ('rust-agent-macos','rust-agent-windows',
+                      'rust-agent-debian','rust-agent-rpm'):
+        assert agent_job in jobs, 'Missing native agent build matrix: '+agent_job
+        assert 'production-gate' in jobs[agent_job].get('needs',[]), (
+            'Agent installation must remain gated by security: '+agent_job)
+    agent_macos=str(jobs['rust-agent-macos'])
+    agent_windows=str(jobs['rust-agent-windows'])
+    agent_debian=str(jobs['rust-agent-debian'])
+    agent_rpm=str(jobs['rust-agent-rpm'])
+    assert all(v in agent_macos for v in ('arm64','x86_64','package-rust-agent-unix.sh'))
+    assert all(v in agent_windows for v in ('x64','package-rust-agent-windows.ps1'))
+    assert all(v in agent_debian for v in ('12','13','amd64','arm64'))
+    assert all(v in agent_rpm for v in ('rocky','alma','8','9','10'))
+    gate_steps=str(jobs['production-gate']['steps'])
+    for evidence in ('agent_protocol','afs_volume','execution_policy',
+                     'cluster_placement','check-documentation-consistency.py'):
+        assert evidence in gate_steps, 'Agent/cluster Production Gate missing '+evidence
+    for source in ('rust/src/bin/multi-backup-agent.rs',
+                   'rust/src/afs_volume.rs',
+                   'rust/src/agent_protocol.rs',
+                   'rust/src/execution_policy.rs',
+                   'rust/src/cluster_placement.rs',
+                   'rust-server/src/cluster.rs',
+                   'rust-server/src/cluster_worker.rs',
+                   'rust-server/src/agent_registry.rs',
+                   'rust-server/src/agent_api.rs',
+                   'docs/AGENTS_AFS_R039_IT.md',
+                   'docs/AGENTS_AFS_R039_EN.md',
+                   'docs/CLUSTER_ORCHESTRATION_R039_IT.md',
+                   'docs/CLUSTER_ORCHESTRATION_R039_EN.md'):
+        assert (ROOT/source).is_file(), 'Missing native agent/cluster source or manual: '+source
+
     assert (ROOT/'scripts/check-confidential-artifacts.py').is_file()
     assert (ROOT/'docs/PRIVATE_ARCHITECTURE_WORKFLOW.md').is_file()
     assert 'native-release' in jobs
