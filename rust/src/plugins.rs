@@ -40,6 +40,8 @@ pub enum DataKind {
     BlockDevice,
     BlockTransport,
     ProtectedVault,
+    DistributedFilesystem,
+    DocumentRepository,
     Virtualization,
     Cluster,
     Database,
@@ -55,6 +57,15 @@ pub enum SafetyProfile {
     General,
     SnapshotBlockDevice,
     ImmutableRecoveryVault,
+}
+/// External dependencies are policy gates, never permission to bundle vendor
+/// code or auto-request elevated cloud scopes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessGate {
+    ExternalProtocolOrMountedClient,
+    LicensedExternalClient,
+    OAuthScopeReview,
 }
 /// LVM over iSCSI/FC is a policy *profile*, not a separate transport or
 /// a claim that a shared VG can be activated on multiple uncoordinated hosts.
@@ -101,6 +112,7 @@ pub struct PluginDescriptor {
     pub consistency: &'static str,
     pub notes: &'static str,
     pub safety: SafetyProfile,
+    pub access_gate: AccessGate,
     /// A nonempty list is supported only by iSCSI/FC SAN LVM profiles;
     /// raw LUNs omit the LVM mode and remain separately snapshot-gated.
     pub lvm_modes: &'static [LvmMode],
@@ -116,6 +128,7 @@ impl PluginDescriptor {
             restore_input: backup_target,
             restore_output: backup_source,
             consistency, notes,
+            access_gate: AccessGate::ExternalProtocolOrMountedClient,
             lvm_modes: &[],
             safety: match kind {
                 DataKind::BlockDevice | DataKind::BlockTransport =>
@@ -124,6 +137,10 @@ impl PluginDescriptor {
                 _ => SafetyProfile::General,
             },
         }
+    }
+    const fn with_access_gate(mut self, gate: AccessGate) -> Self {
+        self.access_gate = gate;
+        self
     }
     const fn with_san_lvm(mut self) -> Self {
         self.lvm_modes = SAN_LVM_MODES;
@@ -147,10 +164,12 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Git mirror+LFS and remote metadata checkpoint", "Repository/settings/Actions; remote restore creates new repositories only"),
     PluginDescriptor::new("dropbox", "Dropbox", DataKind::Files, PREVIEW, PLAN,
         "File ID+revision and content hash", "Native incremental read exists; target output plugin needs transactional upload/commit"),
-    PluginDescriptor::new("google-drive", "Google Drive", DataKind::Files, PLAN, NONE,
-        "File ID+revision/export format and shared-drive inventory", "Google-native documents require format-aware export and restore"),
-    PluginDescriptor::new("onedrive", "OneDrive / SharePoint drive", DataKind::Files, PLAN, NONE,
-        "Drive item+eTag/delta token", "Restore requires new-item permissions and a conflict policy"),
+    PluginDescriptor::new("google-drive", "Google Drive", DataKind::Files, PLAN, PLAN,
+        "File ID+revision/export format and shared-drive inventory",
+        "OAuth-scoped Drive app folder and Google-native export; upload encrypted objects to a new destination with no overwrite").with_access_gate(AccessGate::OAuthScopeReview),
+    PluginDescriptor::new("onedrive", "OneDrive / SharePoint drive", DataKind::Files, PLAN, PLAN,
+        "Microsoft Graph driveItem+eTag/delta token",
+        "Graph OAuth/tenant consent, upload-session retry and explicit conflict handling for new encrypted objects").with_access_gate(AccessGate::OAuthScopeReview),
     PluginDescriptor::new("posix", "Local POSIX filesystem", DataKind::Files, PREVIEW, PREVIEW,
         "Filesystem walk+metadata+optional consistent snapshot", "Archive CLI supports local files; generic plugin wiring and complete ACL/xattr capture are pending"),
     PluginDescriptor::new("s3", "S3 / AWS / Ceph RGW", DataKind::ObjectStore, PLAN, PLAN,
@@ -166,6 +185,28 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PLAN, PLAN,
         "Mounted Gluster volume inventory with consistency epoch and preserved GFID/ACL/xattr metadata",
         "Quiesce or coordinate snapshots by volume topology (replica/disperse); no direct brick writes, restores to new isolated directory/volume"),
+    PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PLAN, PLAN,
+        "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
+        "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS", DataKind::DistributedFilesystem, PLAN, PLAN,
+        "Storage Scale authorized client, independent snapshot/fileset inventory and consistent read",
+        "IBM client license/entitlements are environment-specific, including restrictions on data export; never redistribute IBM components")
+        .with_access_gate(AccessGate::LicensedExternalClient),
+    PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
+        "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
+        "Kerberos/delegation token, TLS and redirect allowlist; write only new paths, commit encrypted manifest last"),
+    PluginDescriptor::new("afs", "Andrew File System / OpenAFS", DataKind::DistributedFilesystem, PLAN, PLAN,
+        "AFS cell+volume IDs and VLDB inventory; read-only/backup volume snapshot, vos full/incremental dump chain and ACLs",
+        "Operator-supplied OpenAFS client/tools under IBM Public License; preserve cell, mountpoints and ACLs; restore new volume only"),
+    PluginDescriptor::new("alfresco", "Alfresco Content Services", DataKind::DocumentRepository, PLAN, PLAN,
+        "Alfresco REST node ID, content revisions, type/aspects, ACL, metadata and relationships",
+        "Use public REST/CMIS integrations only; enterprise-specific functions and editions require rights and API checks"),
+    PluginDescriptor::new("owncloud", "ownCloud", DataKind::Files, PLAN, PLAN,
+        "ownCloud WebDAV/OCS file ID, ETag, sharing, versions and metadata",
+        "External WebDAV/OCS protocol integration; validate server edition, upload semantics, permissions and conflict control"),
+    PluginDescriptor::new("nextcloud", "Nextcloud", DataKind::Files, PLAN, PLAN,
+        "Nextcloud WebDAV/OCS file ID, ETag, sharing, versions and chunked upload",
+        "External WebDAV/OCS protocol integration; validate server version and atomic verified commits; never overwrite"),
     PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, NONE,
         "RBD image snapshots+diff export", "Block image is not a directory; restore requires explicit image creation, never silent overwrite"),
     PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
@@ -251,6 +292,35 @@ pub fn plan_lvm(mode: Mode, source_id: &str, destination_id: &str,
         (source, input_lvm_mode, false),
         (destination, output_lvm_mode, true),
     ] {
+        match plugin.access_gate {
+            AccessGate::LicensedExternalClient =>
+                required_preflight.push("verify customer-specific vendor license, data export entitlement and separate supported client installation; never bundle proprietary code"),
+            AccessGate::OAuthScopeReview =>
+                required_preflight.push("verify OAuth app consent, provider API restrictions and least-privilege drive/tenant scopes"),
+            AccessGate::ExternalProtocolOrMountedClient => {}
+        }
+        if plugin.id == "afs" {
+            required_preflight.push("verify AFS cell, VLDB volume ID, volume type, Kerberos tokens, ACLs and mountpoints; preserve full/incremental dump chain");
+            required_preflight.push("select a stable read-only/backup-volume snapshot; do not snapshot or modify an active RW volume in place");
+            if writing {
+                required_preflight.push("restore only to a fresh non-existing AFS volume in an approved cell; verify VLDB mapping and ACL before publish");
+            }
+        }
+        if plugin.id == "hdfs" {
+            required_preflight.push("verify HDFS snapshot, NameNode/DataNode TLS redirection policy, Kerberos and inode/ACL consistency");
+            if writing {
+                required_preflight.push("publish encrypted objects into a new HDFS directory, checksum content and commit manifest last");
+            }
+        }
+        if plugin.id == "lustre" || plugin.id == "gpfs" {
+            required_preflight.push("verify supported authorized mounted client, consistent namespace/fileset snapshot and recoverable filesystem metadata");
+            if writing {
+                required_preflight.push("write encrypted objects only to a fresh isolated mounted destination with independent authorization");
+            }
+        }
+        if plugin.id == "alfresco" || plugin.id == "owncloud" || plugin.id == "nextcloud" {
+            required_preflight.push("verify REST/DAV API rights, revisions, ACL/sharing metadata and safe new-object semantics");
+        }
         if let Some(selected) = layout {
             if !plugin.lvm_modes.contains(&selected) {
                 return Err(format!("Plugin {} does not support this LVM profile", plugin.id));
@@ -295,16 +365,19 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_22_user_requested_input_plugins_and_12_outputs_are_listed() {
+    fn all_29_user_requested_input_plugins_and_21_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
-            "iscsi", "fc", "nvmeof", "glusterfs"];
+            "iscsi", "fc", "nvmeof", "glusterfs", "lustre", "gpfs",
+            "hdfs", "afs", "alfresco", "owncloud", "nextcloud"];
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh",
-            "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 22);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 12);
-        assert_eq!(CATALOG.len(), 23);
+            "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
+            "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
+            "owncloud", "nextcloud"];
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 29);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 21);
+        assert_eq!(CATALOG.len(), 30);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
@@ -312,8 +385,8 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 12);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 22);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 21);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 29);
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
@@ -425,6 +498,58 @@ mod tests {
         assert!(plan.required_preflight.iter().any(|x|x.contains("quorum")));
         assert!(!plan.executable);
         assert!(plan.confirmation_required_before_writes);
+    }
+    #[test]
+    fn distributed_files_and_repositories_have_bidirectional_declared_roles() {
+        for id in ["lustre","gpfs","hdfs","afs","alfresco",
+                   "google-drive","onedrive","owncloud","nextcloud"] {
+            let d = find(id).unwrap();
+            assert_eq!(d.backup_input, Stage::Planned, "{id}");
+            assert_eq!(d.backup_output, Stage::Planned, "{id}");
+            assert_eq!(d.restore_input, Stage::Planned, "{id}");
+            assert_eq!(d.restore_output, Stage::Planned, "{id}");
+            assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
+            assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
+        }
+        for id in ["lustre","gpfs","hdfs","afs"] {
+            assert_eq!(find(id).unwrap().kind, DataKind::DistributedFilesystem);
+        }
+        assert_eq!(find("alfresco").unwrap().kind, DataKind::DocumentRepository);
+    }
+    #[test]
+    fn license_and_oauth_gates_do_not_grant_execution() {
+        assert_eq!(find("gpfs").unwrap().access_gate, AccessGate::LicensedExternalClient);
+        let p = plan(Mode::Backup, "gpfs", "posix").unwrap();
+        assert!(p.required_preflight.iter().any(|text| text.contains("vendor license")));
+        assert!(!p.executable);
+        for id in ["google-drive","onedrive"] {
+            assert_eq!(find(id).unwrap().access_gate, AccessGate::OAuthScopeReview);
+            let p = plan(Mode::Backup, "posix", id).unwrap();
+            assert!(p.required_preflight.iter().any(|text| text.contains("OAuth")));
+            assert!(!p.executable);
+        }
+    }
+    #[test]
+    fn afs_backup_and_restore_validate_cell_volume_chain_and_target() {
+        let p = plan(Mode::Backup,"afs","anti-ransomware-vault").unwrap();
+        assert!(p.required_preflight.iter().any(|text| text.contains("AFS cell")));
+        assert!(p.required_preflight.iter().any(|text| text.contains("dump chain")));
+        assert!(!p.executable);
+        let restore = plan(Mode::Restore,"anti-ransomware-vault","afs").unwrap();
+        assert!(restore.required_preflight.iter().any(|text| text.contains("fresh non-existing AFS volume")));
+        assert!(!restore.executable);
+        assert!(find("afs").unwrap().lvm_modes.is_empty());
+        assert!(plan_lvm(Mode::Backup,"afs","posix",Some(LvmMode::Local),None).is_err());
+    }
+    #[test]
+    fn hdfs_and_other_remote_repositories_never_execute_unverified() {
+        for id in ["hdfs", "alfresco", "owncloud", "nextcloud"] {
+            let p = plan(Mode::Backup,"posix",id).unwrap();
+            assert!(p.confirmation_required_before_writes);
+            assert!(!p.executable);
+        }
+        let p = plan(Mode::Backup,"posix","hdfs").unwrap();
+        assert!(p.required_preflight.iter().any(|text| text.contains("manifest last")));
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {

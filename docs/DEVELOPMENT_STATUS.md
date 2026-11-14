@@ -441,3 +441,29 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
   0/34 (0%); certified generic provider-pair combinations: 0/264 (0%).
 - Do NOT claim that catalogued SAN LVM, GlusterFS or WORM operations are
   implemented, or that unsafe live-device writes are supported.
+
+## r032 — AFS and enterprise storage/content plugins (2026-11-14)
+
+- Added **AFS / OpenAFS** as two-way plugin, with AFS cell/volume/VLDB,
+  Kerberos token, backup/readonly snapshots, full/incremental `vos`
+  chain, ACL/mountpoint preservation and restore to **new** volume preflight.
+- Added Lustre, IBM Storage Scale / GPFS, HDFS, Alfresco, ownCloud and
+  Nextcloud as *planned* input/output plugin roles; extended existing
+  Google Drive and OneDrive inputs to also have output roles.
+- Added access-gate metadata to the Rust contract: licensed external
+  client for GPFS, OAuth scope review for Google Drive/OneDrive, and
+  externally installed mounted/API clients for other integrations.
+  No proprietary runtime, kernel module, OpenAFS code, or credentials
+  have been packaged. Vendor license and API rights require acceptance.
+- Plan preflight adds provider-aware AFS volume/ACL/dump-chain rules,
+  HDFS TLS/Kerberos/snapshot, Lustre/GPFS snapshot and storage
+  entitlement, remote document version/permission checks.
+- Added Rust unit tests for all new bidirectional roles, AFS restore
+  isolation, licensing/OAuth gates and fail-closed pairing.
+- New inventory: **30 plugin IDs, 29 backup inputs, 21 backup outputs**
+  and exact inverse restore roles (21 inputs/29 outputs); **50 declared
+  backup roles and 50 inverse**, zero generic pairs certified of 609
+  possibilities. Catalogue definition 50/50 (100%) is *not* product
+  completion. Existing older overall RC percentage must be rebaselined.
+- No unqualified vendor adapter is enabled; latest CI must verify this
+  commit before declaring the new code/test matrix green.

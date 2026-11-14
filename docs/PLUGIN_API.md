@@ -146,3 +146,36 @@ Compatibility note: Proxmox supports LVM over iSCSI and FC, including
 shared storage under the correct cluster lock model, but LVM snapshots,
 VM volume chains and cluster-aware filesystems differ. A successful
 capability plan does not establish crash/application consistency.
+
+## r032 — Lustre, Storage Scale/GPFS, HDFS, AFS, Alfresco and cloud repositories
+
+The registry now includes 30 plugin IDs and 29 backup source / 21 backup
+destination roles (reversed for restore). `google-drive` and `onedrive`
+are now also *planned* destinations. New two-way plugins: `lustre`,
+`gpfs`, `hdfs`, `afs`, `alfresco`, `owncloud`, `nextcloud`.
+All are static, never dynamically imported from arbitrary plugin folders.
+
+New `DataKind` values `distributed_filesystem` and
+`document_repository` distinguish namespace/volume consistency and
+document metadata. Declarative `access_gate` is either
+`external_protocol_or_mounted_client`, `licensed_external_client` or
+`oauth_scope_review`. A gate lists prerequisites in `plugins plan`;
+it never downloads a third-party driver, requests OAuth consent or
+activates a mount automatically.
+
+- IBM Storage Scale licensing: operator-provided and separately installed
+  authorized client; backup/transfer entitlements must be verified.
+- OpenAFS: external IPL-licensed client, AFS cell/VLDB volume identity,
+  backup/RO snapshots, chained full/incremental dumps, separate ACL
+  preservation and create-new-volume recovery.
+- Lustre: external mounted client, layout/stripe and snapshot consistency.
+- HDFS: SWebHDFS, Kerberos and secure redirect policy.
+- Alfresco: REST/CMIS documents, versions, model, permissions and links.
+- OwnCloud/Nextcloud: independent DAV/OCS compatibility and revision tests.
+- Google Drive/OneDrive: OAuth tenant/scope consent and create-new encrypted
+  object output; no overwrite or silently upgraded OAuth scope.
+
+Licensing compatibility for *redistributed binaries* needs an independent
+review before packaging any vendor code. Multi Backup itself remains
+EUPL-1.2 and is deliberately not shipping vendor runtimes in this commit.
+All providers are `planned`, not implemented or approved for production.
