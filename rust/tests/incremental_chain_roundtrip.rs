@@ -74,6 +74,9 @@ fn full_incremental_verify_details_and_delete_rebase_without_data_loss(){
     assert!(backup_chain::verify_chain(&store,&key,&second.id,true).unwrap().healthy);
 
     store.unprotect_backup(&key,&full.id,&full.id).unwrap();
+    assert!(store.delete_backup_rebase(&key,&full.id,&full.id).is_err(),
+        "Protected child must not be silently rewritten");
+    store.unprotect_backup(&key,&second.id,&second.id).unwrap();
     assert_eq!(store.delete_backup_rebase(&key,&full.id,&full.id).unwrap(),1);
     let rebased=store.load(&key,&second.id).unwrap();
     assert_eq!(rebased.kind,BackupKind::Full);
