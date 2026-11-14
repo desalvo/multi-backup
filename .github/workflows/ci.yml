@@ -94,7 +94,7 @@ jobs:
 
   publish-container:
     name: Push Multi Backup OCI image to Docker Hub
-    needs: [production-gate, rust-server-validation]
+    needs: [production-gate, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, publications-smoke]
     runs-on: ubuntu-24.04
     if: >-
       github.event_name != 'pull_request' &&
@@ -103,7 +103,8 @@ jobs:
          contains(github.event.head_commit.message, '[full-ci]'))) ||
        (startsWith(github.ref, 'refs/tags/v') &&
         !contains(github.ref_name, '-rc') &&
-        vars.ENABLE_STABLE_CONTAINER == 'true'))
+        vars.ENABLE_STABLE_CONTAINER == 'true' &&
+        vars.ENABLE_STABLE_RUST == 'true'))
     permissions:
       contents: read
       id-token: write
@@ -367,14 +368,15 @@ jobs:
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)
-    needs: [production-gate, macos-smoke, publications-smoke]
+    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&
         (github.event_name == 'workflow_dispatch' ||
          contains(github.event.head_commit.message, '[full-ci]'))) ||
        (startsWith(github.ref, 'refs/tags/v') &&
-        !contains(github.ref_name, '-rc')))
+        !contains(github.ref_name, '-rc') &&
+        vars.ENABLE_STABLE_RUST == 'true'))
     permissions:
       contents: write
       actions: read

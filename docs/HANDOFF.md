@@ -222,3 +222,12 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
   robust audit/retention, image publication and security review.
 - Docs: CHUNK_STORAGE_V1.md, SERVER_DEPLOYMENT.md. Keep this handoff and
   cumulative GitHub branch commits; no unverified completion percentage.
+
+
+## r022 — certification controls (2026-11-14)
+
+- Fixed native Rust egui v0.30 rendering calls and original hero unit fixture; platform requalification in progress.
+- Added Rust storage verify / health report, ZIP64 portable volumes and atomic import, and multi-select restore tests.
+- Web browser supports nested folders, list/grid and selecting files/folders across a unified backup.
+- CI publication interlocks now require full native Rust macOS/Windows/EL8-10, desktop Ubuntu, server OCI, publications, and Production Gate. Stable requires ENABLE_STABLE_RUST opt-in.
+- Certification matrix: docs/RC_CERTIFICATION_MATRIX.md. Do not mark stable or merge PR until real-platform signed packages and provider restore drills pass.

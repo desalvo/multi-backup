@@ -56,8 +56,18 @@ def validate():
     assert 'scripts/capture-ui.py' in doc_steps and 'scripts/build-publications.py' in doc_steps
     assert 'docs/screenshots/about.png' in doc_steps, 'About screenshot validation missing'
     assert jobs['native-release']['needs']==[
-        'production-gate','macos-smoke','publications-smoke'
-    ], 'Native release must wait for gate, app startup and documentation screenshots'
+        'production-gate','macos-smoke','publications-smoke',
+        'rust-server-validation','rust-desktop-smoke',
+        'rust-macos-native-preview','rust-windows-native-preview',
+        'rust-linux-rpm-native-preview'
+    ], 'Native release cannot bypass Rust-only cross-platform acceptance'
+    assert jobs['publish-container']['needs']==[
+        'production-gate','rust-server-validation','rust-desktop-smoke',
+        'rust-macos-native-preview','rust-windows-native-preview',
+        'rust-linux-rpm-native-preview','publications-smoke'
+    ], 'Docker Hub publication cannot bypass Rust-only cross-platform acceptance'
+    assert 'ENABLE_STABLE_RUST' in jobs['native-release']['if']
+    assert 'ENABLE_STABLE_RUST' in jobs['publish-container']['if']
     assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
     assert 'workflow_call' in native['on'] and len(native['on'])==1, 'Native workflow must not publish independently'
     release=native['jobs']
