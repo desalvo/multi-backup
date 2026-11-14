@@ -14,7 +14,9 @@ Goal: a fully compiled, independently usable Rust app that preserves all 0.1.0 e
 | GitHub/Dropbox remote restoration | Rust CLI explicit CREATE-NEW, fresh GitHub repo with LFS and Dropbox add-only upload sessions, GUI modal, protected vault identity passed in memory | Real-provider restore E2E, interruption/rollback and independent parity audits |
 | Native GUI and graphical About | Standalone egui/Rust desktop prototype with photographic dashboard, hamburger, About, archive/restore/vault and direct native provider actions; CI graphical smoke in Xvfb | Complete pixel parity, accessibility, full feature coverage and signed macOS/Windows/Linux installation |
 | Installer delivery | True Rust-only DMGs (ARM64/Intel), Windows Inno Setup/ZIP, Ubuntu 24 tar and target-built Rocky/AlmaLinux EL8/9/10 RPM previews in Production-Gate-dependent CI jobs | Confirm all six RPMs, final Mac/Windows installed app parity, Developer ID notarization and stable signing |
-| Complete app compatibility | Partial | Independent cross-version backups/restores and secure upgrade/rollback |
+| Native update management | Rust-only official release discovery and HTTPS+SHA-256 verified nonexecuting staging in GUI/CLI | Signed stable promotion, rollback and actual native update assets |
+| Startup vault enforcement | Native Rust GUI locates legacy per-user protected identity and requires password/Touch ID before other controls; backup requires an unlocked vault | Physical biometrics and recovery of damaged or obsolete identity migrations |
+| Complete app compatibility | Partial | Independent live-account GitHub/Dropbox backup/restore, pixel parity, native install/upgrade/rollback and signing certification |
 
 There is deliberately no percentage: functional areas differ enormously in scope, and a numeric estimate would be misleading.
 
