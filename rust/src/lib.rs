@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod checkpoint_audit;
 pub mod dropbox_hash;
+pub mod vault;
 
 use std::collections::HashSet;
 

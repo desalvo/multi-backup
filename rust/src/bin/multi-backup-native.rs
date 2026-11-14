@@ -1,7 +1,9 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, checkpoint_audit, dropbox_hash};
+use multi_backup_core::{archive, checkpoint_audit, dropbox_hash, vault};
+use zeroize::Zeroizing;
+use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
 
 fn usage() -> &'static str {
@@ -14,14 +16,22 @@ fn usage() -> &'static str {
        multi-backup-native archive extract --archive FILE.tar.gz.age --identity AGE_KEY --destination NEW_DIR\n\
        multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
        multi-backup-native dropbox hash --file LOCAL_FILE\n\
+       multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
      Safety: explicit identity required, encrypted output only, no overwriting.\n"
 }
 
-fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool), String> {
+fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String> {
     let mut parsed = BTreeMap::new();
     let mut json = false;
+    let mut password_stdin = false;
     let mut pos = 0;
     while pos < args.len() {
+        if args[pos] == "--password-stdin" {
+            if password_stdin { return Err("Duplicate password input flag".into()); }
+            password_stdin = true;
+            pos += 1;
+            continue;
+        }
         if args[pos] == "--json" {
             if json { return Err("Duplicate --json flag".into()); }
             json = true;
@@ -38,7 +48,7 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool), String> {
         }
         pos += 2;
     }
-    Ok((parsed, json))
+    Ok((parsed, json, password_stdin))
 }
 fn required<'a>(args: &'a BTreeMap<&str, &str>, flag: &str) -> Result<&'a str, String> {
     args.get(flag).copied().ok_or_else(|| format!("Missing {flag}"))
@@ -61,7 +71,27 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if args.len() < 2 { return Err(usage().into()); }
     let family = args[0].as_str();
     let command = args[1].as_str();
-    let (flags, json) = options(&args[2..])?;
+    let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "vault" && command == "verify" {
+        accepted(&flags, &["--file"])?;
+        if json { return Err("--json not valid for vault verification".into()); }
+        let file = Path::new(required(&flags, "--file")?);
+        let password = if password_stdin {
+            let mut raw = Zeroizing::new(Vec::new());
+            io::stdin().take(1026).read_to_end(&mut *raw)?;
+            let bytes = raw.strip_suffix(b"\n").unwrap_or(raw.as_slice());
+            let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+            Zeroizing::new(String::from_utf8(bytes.to_vec())?)
+        } else {
+            Zeroizing::new(rpassword::prompt_password("Vault password: ")?)
+        };
+        let recipient = vault::verify(file, &password)?;
+        println!("Encrypted vault authenticated for recipient {recipient}; private key not exported");
+        return Ok(());
+    }
+    if password_stdin {
+        return Err("--password-stdin is only accepted by vault verify".into());
+    }
     if family == "checkpoint" && command == "audit" {
         accepted(&flags, &["--file"])?;
         let state = Path::new(required(&flags, "--file")?);

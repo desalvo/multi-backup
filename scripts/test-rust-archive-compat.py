@@ -22,11 +22,13 @@ sys.path.insert(0, str(ROOT))
 from archive_ops import extract_archive, list_members  # noqa: E402
 from github_engine import StreamingArchive  # noqa: E402
 from checkpoint import Journal  # noqa: E402
+from secure_vault import seal_identity  # noqa: E402
 
 
-def invoke(*argv, expect_success=True):
+def invoke(*argv, expect_success=True, input_text=None):
     result = subprocess.run(list(map(str, argv)), capture_output=True,
-                            text=True, timeout=90, check=False)
+                            text=True, input=input_text,
+                            timeout=90, check=False)
     if expect_success and result.returncode:
         raise AssertionError(
             f"Rust interoperability command failed ({result.returncode}): "
@@ -52,6 +54,17 @@ def main():
         if not pub_match:
             raise AssertionError("age-keygen produced no public recipient")
         recipient = pub_match.group(0)
+        vault_path = root / "protected.agevault"
+        private = identity.read_bytes()
+        encrypted = seal_identity(private, "test-password-not-a-real-secret", recipient)
+        vault_path.write_text(json.dumps(encrypted), encoding="utf-8")
+        if os.name != "nt":
+            vault_path.chmod(0o600)
+        invoke(binary, "vault", "verify", "--file", vault_path,
+               "--password-stdin", input_text="test-password-not-a-real-secret\n")
+        invoke(binary, "vault", "verify", "--file", vault_path,
+               "--password-stdin", input_text="incorrect-password\n",
+               expect_success=False)
         source = root / "source"
         source.mkdir()
         (source / "fichier-été.txt").write_text("Confidential example, not an actual secret\n",
