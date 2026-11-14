@@ -1,0 +1,22 @@
+[Unit]
+Description=Multi Backup native agent (outbound HTTPS pull, administrator opt-in)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=multi-backup-agent
+WorkingDirectory=/var/lib/multi-backup-agent
+ExecStart=/usr/bin/multi-backup-agent poll --config /var/lib/multi-backup-agent/agent.json --poll-seconds 60
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictSUIDSGID=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
