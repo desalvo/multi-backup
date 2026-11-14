@@ -92,6 +92,14 @@ fn session(headers:&HeaderMap,state:&AppConfig)->Option<(String,Session)> {
     if token.len()!=64 || !token.bytes().all(|v|v.is_ascii_hexdigit()) {
         return None;
     }
+    // In multi-replica mode PostgreSQL is authoritative for ALL sessions,
+    // including logout/revocation. An in-memory token on another pod never
+    // substitutes for a missing shared session.
+    if let Some(db)=&state.cluster{
+        return db.get_session(token).ok().flatten().map(|(user,csrf)|
+            (token.to_owned(),Session{user,csrf,
+                until:Instant::now()+Duration::from_secs(60)}));
+    }
     let mut sessions=state.sessions.lock().ok()?;
     sessions.retain(|_,session|session.until>Instant::now());
     sessions.get(token).cloned().map(|s|(token.to_string(),s))
@@ -167,6 +175,12 @@ async fn do_login(State(state):State<AppState>,headers:HeaderMap,
     }
     let token=random_token();
     let csrf=random_token();
+    if let Some(db)=&state.0.cluster {
+        // Shared session write must succeed before publishing the cookie.
+        if db.put_session(&token,&login.username,&csrf).is_err() {
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
     let mut sessions=match state.0.sessions.lock(){
         Ok(value)=>value,Err(_)=>return secure_headers(StatusCode::INTERNAL_SERVER_ERROR)
     };
@@ -242,6 +256,11 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     };
     let cookie_id=random_token();
     let csrf=random_token();
+    if let Some(db)=&state.0.cluster{
+        if db.put_session(&cookie_id,&format!("oidc:{subject}"),&csrf).is_err(){
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
     {
         let Ok(mut sessions)=state.0.sessions.lock() else {
             return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
@@ -436,6 +455,11 @@ async fn logout(State(state):State<AppState>,headers:HeaderMap)->Response {
     if let Some((token,s))=session(&headers,&state.0) {
         if same_origin(&headers,&state.0) &&
             headers.get("x-csrf-token").and_then(|x|x.to_str().ok())==Some(s.csrf.as_str()) {
+            if let Some(db)=&state.0.cluster{
+                if db.delete_session(&token).is_err() {
+                    return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+                }
+            }
             if let Ok(mut sessions)=state.0.sessions.lock(){sessions.remove(&token);}
             audit_actor(&state.0,"logout",&s.user);
             let mut result=Redirect::to("/login").into_response();
