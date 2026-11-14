@@ -253,6 +253,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Transactional snapshot plus binlog position", "Logical/physical backup requires engine-specific consistent backup and PITR policy"),
     PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PLAN, NONE,
         "pg_basebackup/WAL or consistent logical snapshot", "PITR, role/grant restore and version compatibility require explicit acceptance"),
+    PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PLAN, NONE,
+        "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
+        "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
         "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
     PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PLAN, PLAN,
@@ -424,19 +427,20 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_30_user_requested_input_plugins_and_22_outputs_are_listed() {
+    fn all_31_user_requested_input_plugins_and_22_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
             "iscsi", "fc", "nvmeof", "glusterfs", "lustre", "gpfs",
-            "hdfs", "afs", "alfresco", "owncloud", "nextcloud", "sshfs"];
+            "hdfs", "afs", "alfresco", "owncloud", "nextcloud", "sshfs",
+            "oracle"];
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
             "owncloud", "nextcloud", "sshfs"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 30);
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 31);
         assert_eq!(catalog_for(Mode::Backup, false).len(), 22);
-        assert_eq!(CATALOG.len(), 31);
+        assert_eq!(CATALOG.len(), 32);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
@@ -445,7 +449,7 @@ mod tests {
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 22);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 30);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 31);
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
@@ -641,6 +645,18 @@ mod tests {
         let r=plan(Mode::Restore,"anti-ransomware-vault","sshfs").unwrap();
         assert!(r.required_preflight.iter().any(|x|x.contains("manifest-last")));
         assert!(!r.executable);
+    }
+    #[test]
+    fn oracle_rman_is_database_input_not_generic_output() {
+        let d=find("oracle").unwrap();
+        assert_eq!(d.kind,DataKind::Database);
+        assert_eq!(d.backup_input,Stage::Planned);
+        assert_eq!(d.backup_output,Stage::Unsupported);
+        assert_eq!(d.restore_output,Stage::Planned);
+        assert_eq!(d.restore_input,Stage::Unsupported);
+        assert!(!plan(Mode::Backup,"oracle","anti-ransomware-vault").unwrap().executable);
+        assert!(plan(Mode::Restore,"anti-ransomware-vault","oracle").is_ok());
+        assert!(plan(Mode::Backup,"posix","oracle").is_err());
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {
