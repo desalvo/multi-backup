@@ -1,6 +1,6 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r018-rc1`** è un'applicazione multipiattaforma per backup cifrati, incrementali e riprendibili, basata su motori indipendenti (*plugin*) e distribuita con licenza **EUPL-1.2**.
+**Multi Backup `0.1.0-r018-rc1`** è l'ultima versione Python/Tk distribuita; **Rust nativo `0.1.0-r038`** è una anteprima di sviluppo nella PR #10, non ancora una RC certificata. Licenza **EUPL-1.2**. Le guide operative r038 descrivono le funzionalità del codice in sviluppo, non quelle già distribuite.
 
 ![Dashboard Multi Backup](docs/screenshots/dashboard.png)
 
@@ -52,6 +52,10 @@ La CI include job macOS 13+ (Apple Silicon e Intel), Windows 11 x64 e RPM per Ro
 **Stato:** prima release candidate, test locali disponibili; le build native devono essere verificate sulle piattaforme di destinazione, e prima di abilitare aggiornamenti non assistiti devono essere configurate firma, notarizzazione e fiducia nei pacchetti.
 
 ## Documentazione
+
+- **[Guida operativa Rust r038 — Italiano](docs/R038_OPERATIONS_IT.md)**: totale/incrementale, dimensioni, catene, verifica e schedule, restore verso utenti diversi, purge e GC confermata.
+- **[Rust r038 Operations — English](docs/R038_OPERATIONS_EN.md)**: procedure equivalenti e prerequisiti dei plugin.
+- I PDF vengono generati dalla CI con appendice r038 sperimentale; gli screenshot originali si riferiscono alla GUI r018. La migrazione dei vecchi archivi Python è facoltativa, ma il restore dei nuovi backup Rust rimane un gate obbligatorio.
 
 - [Manuale utente IT (PDF)](docs/manuals/Multi-Backup-Manuale-Utente-IT.pdf)
 - [User manual EN (PDF)](docs/manuals/Multi-Backup-User-Manual-EN.pdf)
