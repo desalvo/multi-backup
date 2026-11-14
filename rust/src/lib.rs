@@ -20,6 +20,7 @@ pub mod plugins;
 pub mod plugin_executor;
 pub mod backup_policy;
 pub mod backup_chain;
+pub mod account_restore;
 pub mod mount_probe;
 
 use std::collections::HashSet;
