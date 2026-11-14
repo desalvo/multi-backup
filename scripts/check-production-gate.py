@@ -88,7 +88,7 @@ def validate():
     assert {(int(x['version']),x['arch']) for x in release_deb_matrix}=={
         (12,'amd64'),(12,'arm64'),(13,'amd64'),(13,'arm64')
     }, 'Release must package every supported Debian target'
-    assert "'*.deb'" in str(release['publish']['steps'])
+    assert '.deb' in str(release['publish']['steps']), 'DEB release upload collection missing'
     assert 'if' in release['rpm-repositories'] and 'early-release' in release['rpm-repositories']['if']
     gate_steps='\n'.join(str(x.get('run','')) for x in jobs['production-gate']['steps'])
     for token in ('ruff check','bandit','pip_audit -r requirements.txt','pip_audit -r requirements-docs.txt',
@@ -166,5 +166,7 @@ def validate():
 if __name__=='__main__':
     try:validate()
     except (KeyError, ValueError, AssertionError, OSError) as ex:
+        import traceback
+        traceback.print_exc()
         print(f'Production Gate policy: FAIL ({ex})',file=sys.stderr)
         sys.exit(1)
