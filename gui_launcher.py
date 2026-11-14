@@ -66,6 +66,7 @@ def gui_smoke():
         application.progress.set_percent(50)
         application.progress.set_running(False)
         assert not application.progress.pulse.running
+        assert application.progress._timer is None
         application.update_idletasks()
     finally:
         application.destroy()

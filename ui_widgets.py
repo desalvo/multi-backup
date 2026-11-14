@@ -196,6 +196,8 @@ class HamburgerButton(PremiumButton):
     """Compact, accessible hamburger with 4x-antialiased rounded vector bars."""
 
     def __init__(self, parent, *, command=None, expanded=True):
+        # PremiumButton calls the overridden _draw() during super().__init__.
+        self.expanded = bool(expanded)
         # Reuse native keyboard, hover, click and focus handling, but draw only
         # the familiar icon (not an English 'Hide navigation' label).
         super().__init__(parent, text='', command=command,
@@ -317,7 +319,7 @@ class GradientProgress(tk.Canvas):
 
     def _indicator_x(self):
         w = max(80, self.winfo_width())
-        extent = max(5, w - 32)
+        extent = max(5, w - 96)
         # A triangle wave visibly bounces without altering reported percentage.
         bounce = 1.0 - abs(2.0 * self.pulse.phase - 1.0)
         return 16 + bounce * extent

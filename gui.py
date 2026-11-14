@@ -1314,6 +1314,7 @@ class BackupGUI(tk.Tk):
                     self._refresh()
                     self.dashboard.refresh(force=True)
                 elif kind=='err':
+                    self.progress.note_activity()
                     try:
                         obj=json.loads(payload)
                         if obj.get('type')=='progress':
