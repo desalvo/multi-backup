@@ -60,6 +60,13 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
+        if args[pos] == "--dry-run" {
+            if parsed.insert("--dry-run", "true").is_some() {
+                return Err("Duplicate --dry-run flag".into());
+            }
+            pos += 1;
+            continue;
+        }
         if args[pos] == "--json" {
             if json { return Err("Duplicate --json flag".into()); }
             json = true;
@@ -515,5 +522,19 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("Multi Backup native archive error: {error}");
         process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod flag_tests{
+    use super::*;
+    #[test]
+    fn dry_run_is_value_free_and_rejects_duplicate(){
+        let words=vec!["--root".into(),"/tmp/data".into(),"--dry-run".into()];
+        let (flags,json,password)=options(&words).unwrap();
+        assert_eq!(flags.get("--dry-run"),Some(&"true"));
+        assert!(!json&&!password);
+        let repeated=vec!["--dry-run".into(),"--dry-run".into()];
+        assert!(options(&repeated).is_err());
     }
 }
