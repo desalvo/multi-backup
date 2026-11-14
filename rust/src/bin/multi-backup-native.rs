@@ -111,7 +111,7 @@ fn accepted(args: &BTreeMap<&str, &str>, known: &[&str]) -> Result<(), String> {
 fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
-        println!("multi-backup-native 0.1.0-r019-dev");
+        println!("multi-backup-native 0.1.0-r038-preview");
         return Ok(());
     }
     if args.len() < 2 { return Err(usage().into()); }
