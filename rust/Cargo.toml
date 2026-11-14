@@ -29,6 +29,7 @@ walkdir = "2.5"
 zstd = "0.13"
 hmac = "0.12"
 hex = "0.4"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 reed-solomon-erasure = "6.0"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 url = "2.5"
