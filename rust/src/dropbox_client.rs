@@ -291,9 +291,10 @@ fn validate_download(file: &Path, listing: &Value, download: &Value) -> DropboxR
     Ok(())
 }
 
-pub fn backup(output: &Path, remote: &str, recipient: &str, resume: bool)
-    -> DropboxResult<Value>
-{
+pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
+    output: &Path, remote: &str, recipient: &str, resume: bool,
+    mut on_progress: F,
+) -> DropboxResult<Value> {
     if !(remote.is_empty() || remote.starts_with('/')) ||
         remote.len() > 1024 || remote.contains('\n') || remote.contains('\r') {
         return Err(err("Invalid Dropbox remote folder path"));
@@ -316,10 +317,14 @@ pub fn backup(output: &Path, remote: &str, recipient: &str, resume: bool)
     let mut counts = json!({"files_seen":0u64,"saved":0u64,"reused":0u64,
                             "folders":0u64,"errors":0u64});
     let mut entries = Vec::new();
-    for item in client.list(remote)? {
+    let listing = client.list(remote)?;
+    let total = listing.len();
+    on_progress(0, total, "Elenco Dropbox ricevuto");
+    for (index, item) in listing.into_iter().enumerate() {
         if item[".tag"] == "folder" {
             counts["folders"] = json!(counts["folders"].as_u64().unwrap_or(0)+1);
             entries.push(json!({"kind":"folder","path":item["path_display"]}));
+            on_progress(index + 1, total, "Cartella indicizzata");
             continue;
         }
         let id = field(&item,"id")?;
@@ -349,6 +354,8 @@ pub fn backup(output: &Path, remote: &str, recipient: &str, resume: bool)
             "bytes":item["size"],"content_hash":item["content_hash"],
             "encrypted_object":format!("objects/{}/{}.tar.gz.age", &key[..2], key)
         }));
+        on_progress(index + 1, total, if reused {"Oggetto verificato e riutilizzato"}
+            else {"Oggetto scaricato e cifrato"});
     }
     let manifest = json!({
         "schema":1,"backend":"dropbox",
@@ -361,6 +368,10 @@ pub fn backup(output: &Path, remote: &str, recipient: &str, resume: bool)
     archive::create(tmp.path(), &manifest_path, recipient, "multi-backup/dropbox")?;
     session.finish(&manifest_path)?;
     Ok(json!({"backend":"dropbox", "manifest":manifest_path, "counts":counts}))
+}
+pub fn backup(output: &Path, remote: &str, recipient: &str, resume: bool)
+    -> DropboxResult<Value> {
+    backup_with_progress(output, remote, recipient, resume, |_,_,_| {})
 }
 
 #[cfg(test)]

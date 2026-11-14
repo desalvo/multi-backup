@@ -200,9 +200,10 @@ fn metadata_for(slug: &str, root: &Path, max_runs: usize) -> GithubResult<Value>
     Ok(summary)
 }
 
-pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
-    -> GithubResult<Value>
-{
+pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
+    output: &Path, recipient: &str, resume: bool, max_runs: usize,
+    mut on_progress: F,
+) -> GithubResult<Value> {
     if !recipient.starts_with("age1") || recipient.len() < 24 {
         return Err(err("A valid public age recipient is required"));
     }
@@ -223,12 +224,15 @@ pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
     if repositories.is_empty() { return Err(err("No GitHub repositories available")); }
     let mut outcomes = Vec::new();
     let cycle = session.cycle()?.to_owned();
-    for repo in repositories {
+    let total = repositories.len();
+    on_progress(0, total, "Repository GitHub enumerati");
+    for (index, repo) in repositories.into_iter().enumerate() {
         let slug = repo["full_name"].as_str().ok_or_else(|| err("GitHub repository full_name missing"))?;
         safe_slug(slug)?;
         let step = format!("repo:{slug}:native");
         if session.done(&step) {
             outcomes.push(json!({"repository":slug,"resumed":true}));
+            on_progress(index + 1, total, "Checkpoint repository riutilizzato");
             continue;
         }
         let stage = TempDir::new_in(output)?;
@@ -256,6 +260,7 @@ pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
         }
         session.record(&step, &meta_dest)?;
         outcomes.push(json!({"repository":slug, "fingerprint":fp, "metadata":info}));
+        on_progress(index + 1, total, "Mirror e metadati cifrati");
     }
     let result = json!({
         "schema":1, "backend":"github", "cycle":cycle, "account":login,
@@ -268,6 +273,10 @@ pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
     session.record("native-summary",&summary_dir.join("native-github-summary.json"))?;
     session.finish()?;
     Ok(result)
+}
+pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
+    -> GithubResult<Value> {
+    backup_with_progress(output, recipient, resume, max_runs, |_,_,_|{})
 }
 
 #[cfg(test)]

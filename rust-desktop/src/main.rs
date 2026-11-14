@@ -166,11 +166,21 @@ impl NativeApp {
         thread::spawn(move || {
             let _ = tx.send(Event::Status("Preparazione e verifica dei checkpoint…".into()));
             let result = if provider == "github" {
-                github_client::backup(&output, &recipient, resume, max_runs)
-                    .map_err(|e| e.to_string())
+                github_client::backup_with_progress(
+                    &output, &recipient, resume, max_runs,
+                    |done, total, message| {
+                        let fraction = if total == 0 {0.0}
+                            else {(done as f32 / total as f32) * 0.96};
+                        let _ = tx.send(Event::Progress(fraction, message.into()));
+                    }).map_err(|e|e.to_string())
             } else {
-                dropbox_client::backup(&output, &remote, &recipient, resume)
-                    .map_err(|e| e.to_string())
+                dropbox_client::backup_with_progress(
+                    &output, &remote, &recipient, resume,
+                    |done, total, message| {
+                        let fraction = if total == 0 {0.0}
+                            else {(done as f32 / total as f32) * 0.96};
+                        let _ = tx.send(Event::Progress(fraction, message.into()));
+                    }).map_err(|e|e.to_string())
             };
             match result {
                 Ok(info) => {
@@ -546,9 +556,10 @@ impl NativeApp {
         }
     }
     fn about(&mut self, ctx: &Context) {
+        let mut open = self.about;
         egui::Window::new("About Multi Backup")
             .collapsible(false).resizable(true)
-            .open(&mut self.about).default_width(430.)
+            .open(&mut open).default_width(430.)
             .show(ctx, |ui| {
                 if let Some(logo) = &self.logo {
                     ui.image((logo.id(), Vec2::new(72.,72.)));
@@ -566,6 +577,7 @@ impl NativeApp {
                      provider e restore ancora in qualificazione."
                 ).color(MUTED));
             });
+        self.about = open;
     }
 }
 impl eframe::App for NativeApp {
