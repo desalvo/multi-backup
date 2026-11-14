@@ -67,6 +67,18 @@ def validate():
                         jobs['publications-smoke']['steps'])
     assert 'scripts/capture-ui.py' in doc_steps and 'scripts/build-publications.py' in doc_steps
     assert 'docs/screenshots/about.png' in doc_steps, 'About screenshot validation missing'
+    # Prevent releasing outdated PDF manuals while Rust operations change.
+    for path in ('docs/R038_OPERATIONS_IT.md', 'docs/R038_OPERATIONS_EN.md'):
+        guide=(ROOT/path).read_text('utf-8')
+        for token in ('gc-preview','gc-collect','verify-chain',
+                      'delete-backup','--mode incremental','--target-account',
+                      'schedule run'):
+            assert token in guide, f'Operational reference missing {token}: {path}'
+    publisher=(ROOT/'scripts/build-publications.py').read_text('utf-8')
+    for token in ('append_r038_rust_preview_chapters','Rust r038:',
+                  'gc-collect','verify-chain'):
+        assert token in publisher, f'PDF manual generator missing Rust r038: {token}'
+    assert "for manual in docs/manuals/*.pdf" in doc_steps, 'PDF r038 content smoke missing'
     assert jobs['native-release']['needs']==[
         'production-gate','macos-smoke','publications-smoke',
         'rust-server-validation','rust-desktop-smoke',
