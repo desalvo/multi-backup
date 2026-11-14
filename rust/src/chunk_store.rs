@@ -465,16 +465,19 @@ impl Store {
                 if !safe_hash(old_id)||old_id==&stripe.id {
                     return Err("Invalid parity repack predecessor".into());
                 }
-                let predecessor=by_id.get(old_id.as_str())
-                    .ok_or("Repack predecessor parity index missing")?;
                 if !superseded.insert(old_id.to_owned()) {
                     return Err("Concurrent repack replacements for one stripe".into());
                 }
-                if stripe.members.len()>=predecessor.members.len() ||
-                   stripe.members.iter().any(|live|
-                       !predecessor.members.iter().any(|m|m.id==live.id &&
-                           m.sha256==live.sha256&&m.bytes==live.bytes)){
-                    return Err("Repack must retain a strict subset of original members".into());
+                // After GC the predecessor's obsolete index can be absent.
+                // While present, require the replacement to retain exactly a
+                // strict subset of authenticated original chunk references.
+                if let Some(predecessor)=by_id.get(old_id.as_str()) {
+                    if stripe.members.len()>=predecessor.members.len() ||
+                       stripe.members.iter().any(|live|
+                           !predecessor.members.iter().any(|m|m.id==live.id &&
+                               m.sha256==live.sha256&&m.bytes==live.bytes)){
+                        return Err("Repack must retain a strict subset of original members".into());
+                    }
                 }
                 let base=self.root.join("parity")
                     .join(&stripe.id[..2]).join(&stripe.id);
@@ -491,14 +494,82 @@ impl Store {
                 }
             }
         }
-        // A replacement may not itself be replaced in the same sweep:
-        // prevents supersession cycles and ambiguous commit chains.
-        if all.iter().any(|s|s.supersedes.as_ref().is_some_and(|old|
-            superseded.contains(&s.id)&&by_id.contains_key(old.as_str()))){
-            return Err("Nested repack supersession chain not supported".into());
+        // Chains of successive repacks are allowed, but not cycles.
+        for s in &all {
+            let mut seen=HashSet::new();
+            let mut cursor=s.supersedes.as_deref();
+            while let Some(id)=cursor {
+                if id==s.id || !seen.insert(id) {
+                    return Err("Cyclic parity repack lineage".into());
+                }
+                cursor=by_id.get(id).and_then(|x|x.supersedes.as_deref());
+            }
         }
         Ok(all.into_iter().filter(|s|!superseded.contains(&s.id)).collect())
     }
+    /// Prepare a smaller 8+2 stripe containing only surviving chunks.
+    /// Writes encrypted parity first, authenticates both shards, and commits
+    /// a superseding encrypted index LAST. No old object is deleted here.
+    /// A crash before the index leaves the original stripe authoritative;
+    /// a crash after commit leaves both on disk until grace-qualified GC.
+    fn repack_mixed_stripes_locked(&self,identity:&Path,
+                                   live:&HashSet<String>)->Res<usize> {
+        let stripes=self.read_protection(identity)?;
+        let mut count=0usize;
+        for old in &stripes {
+            let remaining:Vec<ChunkRef>=old.members.iter().filter(|m|
+                live.contains(&m.id)).cloned().collect();
+            if remaining.is_empty()||remaining.len()==old.members.len(){
+                continue;
+            }
+            let ciphertexts:Vec<Vec<u8>>=remaining.iter().map(|m|->Res<Vec<u8>>{
+                self.read_chunk(identity,m)?;
+                Ok(fs::read(self.chunk_path(&m.id)?)?)
+            }).collect::<Res<_>>()?;
+            let (meta,shards)=crate::parity::encode(&ciphertexts)?;
+            let mut random=[0u8;32];
+            rand::rngs::OsRng.fill_bytes(&mut random);
+            let new_id=hex::encode(random);
+            let folder=self.root.join("parity").join(&new_id[..2]).join(&new_id);
+            for parity_index in 0..crate::parity::PARITY{
+                let plaintext=&shards[crate::parity::DATA+parity_index];
+                let encrypted=age(plaintext,Some(&self.cfg.recipient),None)?;
+                let destination=folder.join(format!("{parity_index}.age"));
+                if !write_new(&destination,&encrypted)?{
+                    return Err("Repack parity collision".into());
+                }
+                let checked=age(&fs::read(&destination)?,None,Some(identity))?;
+                if checked!=*plaintext{
+                    return Err("Repacked parity verification failed".into());
+                }
+            }
+            #[cfg(unix)] {
+                File::open(&folder)?.sync_all()?;
+                File::open(folder.parent().ok_or("Parity directory missing")?)?
+                    .sync_all()?;
+            }
+            let successor=Protection{
+                id:new_id.clone(),members:remaining,stripe:meta,
+                supersedes:Some(old.id.clone())
+            };
+            let index=self.root.join("stripes").join(format!("{new_id}.json.age"));
+            let authenticated=age(&serde_json::to_vec(&successor)?,
+                                  Some(&self.cfg.recipient),None)?;
+            if !write_new(&index,&authenticated)?{
+                return Err("Repack index collision".into());
+            }
+            #[cfg(unix)] File::open(index.parent().ok_or("Index parent missing")?)?
+                .sync_all()?;
+            // All live data must still verify under the newly active index.
+            // Keeping the old stripe until a later GC provides crash recovery.
+            if !self.read_protection(identity)?.iter().any(|s|s.id==new_id){
+                return Err("Parity repack commit was not discoverable".into());
+            }
+            count+=1;
+        }
+        Ok(count)
+    }
+
     /// Create 8+2 stripes over age ciphertext. Parity itself is encrypted to
     /// the same age recipient, and stripe metadata is independently encrypted.
     /// Existing protected chunk IDs are reused without creating duplicate parity.
