@@ -13,6 +13,9 @@ GUI="rust-desktop/target/release/multi-backup-desktop"
 test -x "$CLI" && test -x "$GUI"
 "$CLI" --version
 "$GUI" --self-test
+# Execute real encrypted create -> verify -> restored-byte comparison on
+# the same native macOS architecture used by the final preview app.
+cargo test --manifest-path rust/Cargo.toml --test native_cli_restore_matrix
 APP="dist-rust/Multi Backup Rust Preview.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "dist-rust"
