@@ -418,9 +418,13 @@ struct Protection {
     id: String,
     members: Vec<ChunkRef>,
     stripe: crate::parity::Stripe,
+    /// Authenticated atomic repack commit: successor stripe takes precedence
+    /// only after its 8+2 parity has been durably written and checked.
+    #[serde(default)]
+    supersedes: Option<String>,
 }
 impl Store {
-    fn read_protection(&self, identity: &Path) -> Res<Vec<Protection>> {
+    fn read_protection_all(&self, identity: &Path) -> Res<Vec<Protection>> {
         let folder = self.root.join("stripes");
         if !folder.exists() { return Ok(Vec::new()); }
         let mut found = Vec::new();
@@ -444,6 +448,56 @@ impl Store {
             }
         }
         Ok(found)
+    }
+
+    /// An authenticated new stripe index is the atomic commit point.
+    /// Before that index exists, its old stripe stays authoritative.
+    /// After a crash following commit, both indexes may exist until GC;
+    /// readers deterministically choose the verified replacement.
+    fn read_protection(&self, identity: &Path) -> Res<Vec<Protection>> {
+        let all=self.read_protection_all(identity)?;
+        let by_id:std::collections::HashMap<&str,&Protection>=all.iter()
+            .map(|s|(s.id.as_str(),s)).collect();
+        if by_id.len()!=all.len() {return Err("Duplicate parity stripe ID".into());}
+        let mut superseded=HashSet::new();
+        for stripe in &all {
+            if let Some(old_id)=&stripe.supersedes {
+                if !safe_hash(old_id)||old_id==&stripe.id {
+                    return Err("Invalid parity repack predecessor".into());
+                }
+                let predecessor=by_id.get(old_id.as_str())
+                    .ok_or("Repack predecessor parity index missing")?;
+                if !superseded.insert(old_id.to_owned()) {
+                    return Err("Concurrent repack replacements for one stripe".into());
+                }
+                if stripe.members.len()>=predecessor.members.len() ||
+                   stripe.members.iter().any(|live|
+                       !predecessor.members.iter().any(|m|m.id==live.id &&
+                           m.sha256==live.sha256&&m.bytes==live.bytes)){
+                    return Err("Repack must retain a strict subset of original members".into());
+                }
+                let base=self.root.join("parity")
+                    .join(&stripe.id[..2]).join(&stripe.id);
+                for index in 0..crate::parity::PARITY {
+                    let path=base.join(format!("{index}.age"));
+                    let meta=fs::symlink_metadata(&path)?;
+                    if !meta.file_type().is_file(){return Err("Unsafe repacked parity shard".into());}
+                    let bytes=age(&fs::read(path)?,None,Some(identity))?;
+                    let slot=crate::parity::DATA+index;
+                    if bytes.len()!=stripe.stripe.shard_size ||
+                       sha(&bytes)!=stripe.stripe.info[slot].sha256{
+                        return Err("Repacked parity shard failed integrity".into());
+                    }
+                }
+            }
+        }
+        // A replacement may not itself be replaced in the same sweep:
+        // prevents supersession cycles and ambiguous commit chains.
+        if all.iter().any(|s|s.supersedes.as_ref().is_some_and(|old|
+            superseded.contains(&s.id)&&by_id.contains_key(old.as_str()))){
+            return Err("Nested repack supersession chain not supported".into());
+        }
+        Ok(all.into_iter().filter(|s|!superseded.contains(&s.id)).collect())
     }
     /// Create 8+2 stripes over age ciphertext. Parity itself is encrypted to
     /// the same age recipient, and stripe metadata is independently encrypted.
@@ -480,7 +534,8 @@ impl Store {
                     return Err("Parity filename conflict".into());
                 }
             }
-            let index = Protection {id:id.clone(), members:group.to_vec(),stripe:meta};
+            let index = Protection {id:id.clone(),members:group.to_vec(),stripe:meta,
+                supersedes:None};
             let protected_index = age(&serde_json::to_vec(&index)?,
                 Some(&self.cfg.recipient),None)?;
             if !write_new(&self.root.join("stripes").join(format!("{id}.json.age")),
