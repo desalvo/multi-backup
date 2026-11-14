@@ -307,3 +307,9 @@ Audited recent Rust CLI operations, GUI settings, backup_chain/scheduler/account
 **Version truth:** r018 Python/Tk remains the last published installer; r038 Rust in draft PR #10 is not yet RC-certified. Legacy Python archive conversion is optional, NOT a release gate. Current documentation does not imply a new green latest-head CI.
 
 Remaining qualification includes the current-head Production Gate, byte-identical FULL/INC and selective restore before/after GC, interruption recovery of multi-manifest rebase and GC, crash-safe compacting of mixed 8+2 stripes, provider metadata/ACL, GitHub/Dropbox real cross-account restore, scheduler GUI and installed OS runtime, signed installer/update rollback, WORM/security audit. Publication-smoke must verify that the **generated bilingual PDFs**, not just their source code, contain r038 addenda.
+
+## r038 — Gate obbligatorio parity repack e documentazione
+
+La PR #10 contiene ora repack automatico delle stripe Reed-Solomon 8+2 miste nella GC confermata. La nuova parità viene cifrata e verificata prima del commit dell'indice autenticato, e la vecchia stripe è mantenuta per un grace period successivo. La GC ripulisce anche preparazioni incomplete prive di indice dopo la scadenza. Test aggiunti in garbage_collection_roundtrip.rs; serve la CI del **SHA corrente** e una qualifica indipendente con fault injection prima/dopo ogni shard, prima/dopo commit, durante il retire, su più generazioni e con byte-for-byte restore.
+
+Gate documentazione: scripts/check-documentation-consistency.py deve coprire entrambe le guide Rust r038 (OPERATIONS_R038_IT.md e OPERATIONS_R038_EN.md), FEATURE_INVENTORY_R038.md, DOCUMENTATION_INDEX_R038.md, CHUNK_STORAGE_V1.md, questa matrice e il generatore PDF. I vecchi PDF con screenshot Python/Tk sono storici; i PDF aggiornati devono essere rigenerati e verificati. Nessuna RC firmata/stable finché mancano CI, real account E2E, installazioni, firma e rollback.
