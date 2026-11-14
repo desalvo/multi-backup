@@ -25,6 +25,7 @@ pub mod scheduler;
 pub mod mount_probe;
 pub mod afs_volume;
 pub mod agent_protocol;
+pub mod execution_policy;
 
 use std::collections::HashSet;
 
