@@ -203,3 +203,29 @@ details. The returned `rw_mount_option` is only a kernel flag, never proof
 of actual remote write permissions, verified identity or successful backup.
 It launches no client or mount command, accesses no user data or remote
 credentials, and does not certify a generic adapter.
+
+## r036 — user-controlled protection of individual backup instances
+
+- Native content-addressed logical backups can be **protected/unprotected**
+  explicitly. Protection state is an age-encrypted per-backup marker, not
+  8+2 parity and not the WORM vault. `Store::load/list` now surfaces
+  protection status, with corrupted marker fail-closed.
+- New CLI commands `storage protect-backup/unprotect-backup/delete-backup`.
+  Unprotect and delete require exact full ID confirmation. Protected backup
+  deletion is rejected. Manifest deletion deliberately does **not** remove
+  shared ciphertext chunks/parity pending a safe, independently verified GC.
+- Desktop Storage displays a protected lock and offers Protect, confirmed
+  Unprotect and confirmed Delete only when unprotected.
+- ZIP64 transport and full-storage relocation carry the encrypted hold,
+  preserving the protected status across imports or copies.
+- Legacy encrypted `.tar.gz.age` archives gained a separate per-archive
+  protection marker with CLI `archive protect/unprotect`, and deletion
+  is blocked while protected. Mutation uses an exclusive root lock.
+- The policy-only retention planner honors an explicit `protected` flag
+  regardless of age or default 30-day expiry. Autonomous recurring
+  retention and GC remain **not implemented**; no automatic deletion has
+  been enabled by this change.
+- Added integration/unit tests for shared chunks, protected ZIP import,
+  corrupt holds, wrong-ID rejection and protected legacy archive deletion.
+- No claim of immutable hardware WORM protection or completed remote plugin
+  enforcement; independent vault and provider certification remain pending.
