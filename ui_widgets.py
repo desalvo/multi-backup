@@ -6,6 +6,7 @@ paint their own labelled surfaces; no platform-specific button styling is requir
 from __future__ import annotations
 
 import colorsys
+import math
 import time
 import tkinter as tk
 from tkinter import font as tkfont, ttk
@@ -49,10 +50,16 @@ def progress_color(percent: float) -> str:
     """Red at 0%, yellow at midpoint, and green at 100%, inclusive."""
     # Prefer the tested Rust-native colour kernel when it is bundled; the
     # mathematical Python fallback keeps old/source builds fully compatible.
-    native = native_progress_color(percent)
+    try:
+        clean = float(percent)
+    except (ValueError, TypeError):
+        clean = 0.
+    if not math.isfinite(clean):
+        clean = 0.
+    native = native_progress_color(clean)
     if native is not None:
         return native
-    value = max(0., min(100., float(percent)))
+    value = max(0., min(100., clean))
     red, green, blue = colorsys.hsv_to_rgb(value / 300., 0.86, 0.91)
     return '#%02X%02X%02X' % (round(red * 255), round(green * 255),
                                 round(blue * 255))

@@ -174,6 +174,9 @@ class BackupGUI(tk.Tk):
                         background='#7062E1', thickness=16)
         style.configure('Vertical.TScrollbar', background='#4B5D9E',
                         troughcolor=PAGE_BG, arrowcolor='#ECF2FF')
+        style.configure('Sidebar.Vertical.TScrollbar', background='#31457F',
+                        troughcolor=SIDEBAR_BG, arrowcolor='#AFC5F4',
+                        bordercolor=SIDEBAR_BG, arrowsize=7, width=8)
 
     def _make_shell(self):
         # Canvas navigation ensures explicitly readable text on macOS Aqua:
@@ -205,6 +208,7 @@ class BackupGUI(tk.Tk):
         self.nav_scroller = tk.Canvas(nav_holder, bg=SIDEBAR_BG,
                                       borderwidth=0, highlightthickness=0)
         scrollbar = ttk.Scrollbar(nav_holder, orient='vertical',
+                                  style='Sidebar.Vertical.TScrollbar',
                                   command=self.nav_scroller.yview)
         self.nav_scroller.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side='right', fill='y')

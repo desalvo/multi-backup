@@ -53,6 +53,9 @@ def validate():
     assert "--windowed --onedir" in build_macos, 'Missing relocatable GUI bundle'
     assert "Contents/Resources/bin" in build_macos, 'Native helper executables not embedded'
     assert 'MAC_UNSIGNED_SMOKE' in build_macos, 'Missing test app build mode'
+    assert '--add-binary rust/target/release/libmulti_backup_core.dylib:rust-native' in build_macos, 'Mac CLI/GUI must embed the compiled Rust core'
+    windows_steps=str(release['windows']['steps'])
+    assert 'rust/target/release/multi_backup_core.dll;rust-native' in windows_steps, 'Windows CLI/GUI must embed the compiled Rust core'
     test_package=(ROOT/'scripts/package-macos-test-dmg.sh').read_text('utf-8')
     for token in ('Signature=adhoc','hdiutil create','hdiutil attach','ditto',
                   '--self-test','codesign --verify --deep --strict','checksums-macos-'):

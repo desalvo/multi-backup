@@ -52,6 +52,8 @@ class AntialiasTests(unittest.TestCase):
             self.assertEqual(progress_color(step), expected)
         self.assertEqual(progress_color(0), '#E82020')
         self.assertEqual(progress_color(100), '#20E820')
+        self.assertEqual(progress_color(float('nan')), progress_color(0))
+        self.assertEqual(progress_color(float('inf')), progress_color(0))
         bar = progress_patch(440, 43, 100, '#152753', progress_color)
         r, g, b = bar.getpixel((25, 20))[:3]
         self.assertGreater(r, g * 1.35)

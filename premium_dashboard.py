@@ -206,7 +206,7 @@ class DashboardView(tk.Canvas):
         self._hotspots.append((box, action))
         _button_background(image, box, self._hover == index or self._focus == index, primary)
         self._text(x + width / 2, y + (height - 4) / 2, text,
-                   12 if width < 150 else 13, weight='bold', anchor='center')
+                   11 if width < 205 else 13, weight='bold', anchor='center')
 
     def _tag(self, image, x, y, text, *, enabled=True, width=85):
         rounded_overlay(

@@ -105,7 +105,8 @@ class AboutDialog(tk.Toplevel):
                             round(77 - 24 * frac), 255))
 
         if self._raw_photo is None:
-            self._raw_photo = (self._image('backup-hero.jpg') or
+            self._raw_photo = (self._image('backup-sidebar.jpg') or
+                               self._image('backup-hero.jpg') or
                                self._image('hero.jpg'))
         if self._raw_photo is not None:
             # ImageOps.contain preserves the entire photograph without stretch/crop.
