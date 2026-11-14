@@ -1,6 +1,8 @@
-//! Single-user web preview for the compiled Rust backup core.
+//! Authenticated Rust web server for the compiled backup core.
 //! Fail closed: local Argon2id login is operational; LDAP/OIDC MUST NOT be
 //! advertised or enabled until implemented and externally verified.
+mod smtp;
+use smtp::SmtpConfig;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
     password_hash::SaltString};
 use axum::{extract::{Form, Json, State}, http::{header, HeaderMap, StatusCode},
@@ -24,6 +26,7 @@ struct AppConfig {
     identity: Option<PathBuf>,
     exports: PathBuf,
     audit: PathBuf,
+    smtp: Option<SmtpConfig>,
     sessions: Mutex<HashMap<String, Session>>,
 }
 #[derive(Clone)]
@@ -152,6 +155,37 @@ async fn export(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<Ex
     audit(&state.0,"selective_export_completed");
     Ok(Json(json!({"files":result,"server_directory":dir.to_string_lossy()})))
 }
+async fn smtp_status(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    if session(&headers,&state.0).is_none(){return Err(unauthorized());}
+    Ok(Json(json!({"configured":state.0.smtp.is_some(),
+        "tls":state.0.smtp.as_ref().map(|v|v.protocol())})))
+}
+async fn smtp_test(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    if !same_origin(&headers,&state.0)||
+        headers.get("x-csrf-token").and_then(|s|s.to_str().ok())!=Some(auth.csrf.as_str()){
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"csrf_rejected"}))));
+    }
+    let cfg=state.0.smtp.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"smtp_not_configured"}))))?;
+    let outcome=tokio::task::spawn_blocking(move||{
+        cfg.send_notice("Multi Backup - test SMTP(S)",
+            "Invio di verifica Multi Backup: TLS SMTP abilitato.").map_err(|e|e.to_string())
+    }).await;
+    match outcome{
+        Ok(Ok(()))=>{
+            audit(&state.0,"smtp_test_delivered");
+            Ok(Json(json!({"sent":true})))
+        },
+        _=>{
+            audit(&state.0,"smtp_test_failed");
+            Err((StatusCode::BAD_GATEWAY,Json(json!({"error":"smtp_send_failed"}))))
+        }
+    }
+}
+
 async fn logout(State(state):State<AppState>,headers:HeaderMap)->Response {
     if let Some((token,s))=session(&headers,&state.0) {
         if same_origin(&headers,&state.0) &&
@@ -197,8 +231,9 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
+    let smtp=SmtpConfig::from_env()?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,root,exports,identity,audit,
+        name,password_hash:hash,origin,root,exports,identity,audit,smtp,
         sessions:Mutex::new(HashMap::new()),
     }));
     let app=Router::new().route("/healthz",get(health))
@@ -207,6 +242,8 @@ async fn main()->Result<(),Box<dyn std::error::Error>> {
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
         .route("/api/export",post(export))
+        .route("/api/smtp/status",get(smtp_status))
+        .route("/api/smtp/test",post(smtp_test))
         .route("/logout",post(logout))
         .with_state(state);
     let bind=std::env::var("MULTI_BACKUP_BIND").unwrap_or_else(|_|"0.0.0.0:8080".into());

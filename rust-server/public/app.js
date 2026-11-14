@@ -105,3 +105,15 @@ document.getElementById("logout").addEventListener("click",async()=>{
   window.location.assign("/login");
 });
 load().catch(e=>notice.textContent=e.message);
+
+const smtpButton=document.getElementById("smtp-test");
+smtpButton.addEventListener("click",async()=>{
+  const report=document.getElementById("smtp-result");
+  smtpButton.disabled=true;report.textContent="Invio SMTP(S) in corso...";
+  try {
+    const response=await fetch("/api/smtp/test",{method:"POST",credentials:"same-origin",
+      headers:{"X-CSRF-Token":csrf}});
+    report.textContent=response.ok?"Email di prova inviata":"Errore SMTP: verificare host, TLS e secret";
+  } catch(error) {report.textContent="SMTP non disponibile";}
+  finally {smtpButton.disabled=false;}
+});

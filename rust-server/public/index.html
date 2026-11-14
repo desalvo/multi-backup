@@ -6,5 +6,10 @@
 <button id="view" type="button" aria-pressed="false">Vista a icone</button>
 <button id="export-selected" type="button" disabled>Esporta selezione</button>
 <span id="selected-count" class="muted">0 elementi selezionati</span></div><div id="alert" role="status"></div><div id="backups"></div></section>
+<section><h2>Notifiche SMTP(S)</h2>
+<p class="muted">Il server può inviare un messaggio di prova al destinatario configurato.
+La password viene letta da un Secret separato; TLS e certificato server sono obbligatori.</p>
+<div class="controls"><button type="button" id="smtp-test">Invia messaggio di prova</button>
+<span id="smtp-result" role="status" class="muted"></span></div></section>
 <section><h2>Esportazione selettiva</h2><p class="muted">Seleziona un singolo file o una cartella. Il restore viene verificato e scritto in una nuova directory sul server, senza sovrascrivere l'origine.</p><div id="result" role="status"></div></section>
 </main></div><script src="/app.js"></script></body></html>

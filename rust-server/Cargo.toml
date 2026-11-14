@@ -17,3 +17,5 @@ hex = "0.4"
 chrono = { version = "0.4", features = ["clock"] }
 rpassword = "7.3"
 zeroize = "1.8"
+
+lettre = { version = "=0.11.23", default-features = false, features = ["builder","smtp-transport","rustls-tls"] }
