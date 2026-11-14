@@ -73,7 +73,7 @@ class PluginTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         gui=(root/'gui.py').read_text('utf-8')
         sidebar=(root/'sidebar_nav.py').read_text('utf-8')
-        self.assertIn('SidebarNavItem(self.sidebar,translated[name],icon',gui)
+        self.assertIn('SidebarNavItem(self.nav_content,translated[name],icon',gui)
         self.assertIn("'Encryption':'Vault e chiavi'",gui)
         self.assertIn('self.nav[key].set_active(key==name)',gui)
         self.assertIn("fill=NAV_TEXT",sidebar)
