@@ -23,7 +23,7 @@ cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
 cargo build --manifest-path rust-desktop/Cargo.toml --release --bin multi-backup-desktop
 rust-desktop/target/release/multi-backup-desktop --self-test
 rust/target/release/multi-backup-native --version
-version="0.1.0~preview1+deb$DEBIAN_VERSION"
+version="0.1.0~preview38+deb$DEBIAN_VERSION"
 stage="$(mktemp -d)"
 unpack="$(mktemp -d)"
 trap 'rm -rf "$stage" "$unpack"' EXIT
