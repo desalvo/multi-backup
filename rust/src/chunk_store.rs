@@ -1206,6 +1206,8 @@ pub struct GarbageCollectionReport {
     pub blocked_chunks_by_shared_parity:usize,
     pub mixed_stripes_to_repack:usize,
     pub repacked_stripes:usize,
+    pub orphan_parity_directories:usize,
+    pub deleted_orphan_parity_directories:usize,
     /// Old repack protection is retained until its new replacement ages past
     /// the grace boundary. Physical freeing may need a future GC cycle.
     pub reclaimable_bytes:u64,
@@ -1325,6 +1327,55 @@ impl Store {
                 .ok_or("GC size overflow")?;
             obsolete_stripes.push((stripe.id.clone(),files,folder));
         }
+        // A power loss before the replacement INDEX commit can leave only
+        // prepared encrypted parity shards behind. Those folders do not form
+        // a committed stripe; reclaim them only after their OWN grace period.
+        let parity_root=self.root.join("parity");
+        let mut orphan_parity=Vec::new();
+        if parity_root.exists(){
+            if !fs::symlink_metadata(&parity_root)?.file_type().is_dir(){
+                return Err("Unsafe parity tree".into());
+            }
+            let known:HashSet<&str>=stripes.iter().map(|s|s.id.as_str()).collect();
+            for item in WalkDir::new(&parity_root).follow_links(false)
+                .min_depth(2).max_depth(2) {
+                let item=item?;
+                if !item.file_type().is_dir() {
+                    return Err("Unexpected parity tree entry".into());
+                }
+                let folder=item.path().to_path_buf();
+                let id=folder.file_name().and_then(|s|s.to_str())
+                    .ok_or("Non-UTF8 parity directory")?;
+                if !safe_hash(id) || folder!=parity_root.join(&id[..2]).join(id) {
+                    return Err("Noncanonical parity directory".into());
+                }
+                if known.contains(id) {continue;}
+                let meta=fs::symlink_metadata(&folder)?;
+                if now.duration_since(meta.modified()?).is_err_or(|age|age<min_age){
+                    continue;
+                }
+                let mut candidates=Vec::new();
+                let mut bytes=0u64;
+                let mut safe=true;
+                for file in fs::read_dir(&folder)? {
+                    let path=file?.path();
+                    let name=path.file_name().and_then(|s|s.to_str())
+                        .ok_or("Non-UTF8 orphan parity filename")?;
+                    if name!="0.age"&&name!="1.age" {
+                        return Err("Unexpected orphan parity content".into());
+                    }
+                    if !old_enough(&path)?{safe=false;break;}
+                    bytes=bytes.checked_add(fs::symlink_metadata(&path)?.len())
+                        .ok_or("Orphan parity size overflow")?;
+                    candidates.push(path);
+                }
+                if safe {
+                    recoverable_bytes=recoverable_bytes.checked_add(bytes)
+                        .ok_or("GC size overflow")?;
+                    orphan_parity.push((folder,candidates,bytes));
+                }
+            }
+        }
         let root=self.root.join("chunks");
         let mut candidates=Vec::new();
         let mut blocked=0usize;
@@ -1370,6 +1421,8 @@ impl Store {
             blocked_chunks_by_shared_parity:blocked,
             mixed_stripes_to_repack:pending_repack,
             repacked_stripes:repacked,
+            orphan_parity_directories:orphan_parity.len(),
+            deleted_orphan_parity_directories:0,
             reclaimable_bytes:recoverable_bytes,
             deleted_chunks:0,deleted_stripes:0,reclaimed_bytes:0,
             grace_hours,
@@ -1387,6 +1440,13 @@ impl Store {
             fs::remove_dir(folder)?;
             report.deleted_stripes+=1;
             report.reclaimed_bytes=report.reclaimed_bytes.checked_add(size)
+                .ok_or("GC reclaimed size overflow")?;
+        }
+        for (folder,files,bytes) in orphan_parity {
+            for file in files {fs::remove_file(file)?;}
+            fs::remove_dir(folder)?;
+            report.deleted_orphan_parity_directories+=1;
+            report.reclaimed_bytes=report.reclaimed_bytes.checked_add(bytes)
                 .ok_or("GC reclaimed size overflow")?;
         }
         for (path,bytes) in candidates {
