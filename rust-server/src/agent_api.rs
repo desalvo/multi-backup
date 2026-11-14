@@ -89,6 +89,30 @@ pub async fn enqueue_pull(State(state):State<AppState>,headers:HeaderMap,
         _=>error(StatusCode::BAD_REQUEST,"agent_job_rejected")
     }
 }
+pub async fn policy(State(state):State<AppState>,headers:HeaderMap)->Response{
+    let Some(db)=state.0.cluster.clone() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE,"agent_registry_not_enabled");
+    };
+    match tokio::task::spawn_blocking(move||{
+        let approved=agents::authenticate(&db,&headers,"GET","/api/agents/policy")?;
+        if approved.proof.body_sha256!=multi_backup_core::agent_protocol::hex_sha(b""){
+            return Err("Unexpected signed policy request body".into());
+        }
+        agents::policy(&db,&approved)
+    }).await{
+        Ok(Ok(value))=>response(StatusCode::OK,value),
+        _=>error(StatusCode::UNAUTHORIZED,"agent_policy_authentication_failed")
+    }
+}
+pub async fn update_agent_limits(State(state):State<AppState>,headers:HeaderMap,
+                    Json(body):Json<agents::ChangeLimits>)->Response{
+    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    match tokio::task::spawn_blocking(move||
+        agents::update_limits(&db,&body)).await{
+        Ok(Ok(true))=>response(StatusCode::OK,json!({"updated":true})),
+        _=>error(StatusCode::BAD_REQUEST,"agent_limit_update_rejected")
+    }
+}
 pub async fn poll(State(state):State<AppState>,headers:HeaderMap)->Response{
     let Some(db)=state.0.cluster.clone() else {
         return error(StatusCode::SERVICE_UNAVAILABLE,"agent_registry_not_enabled")
@@ -189,6 +213,11 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
     if form.encrypted_bytes>MAX_UPLOAD_BYTES {
         return error(StatusCode::PAYLOAD_TOO_LARGE,"agent_upload_too_large");
     }
+    let limits=verified.limits.clone();
+    if tokio::task::spawn_blocking(move||limits.check_host()).await
+        .is_err_or(|result|result.is_err()){
+        return error(StatusCode::SERVICE_UNAVAILABLE,"server_resource_threshold_reached");
+    }
     let folder=match spool_directory(){
         Ok(v)=>v,Err(_)=>return error(StatusCode::SERVICE_UNAVAILABLE,"encrypted_spool_unavailable")
     };
@@ -209,11 +238,25 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
     let mut digest=Sha256::new();
     let mut bytes=0u64;
     let mut prefix=Vec::with_capacity(24);
+    let transfer_rate=verified.limits.max_transfer_bytes_per_sec;
+    let mut transfer_window=tokio::time::Instant::now();
+    let mut bytes_this_second=0u64;
     let mut failed=false;
     while let Some(chunk)=stream.next().await{
         let Ok(data)=chunk else {failed=true;break};
         bytes=bytes.saturating_add(data.len() as u64);
         if bytes>MAX_UPLOAD_BYTES || bytes>form.encrypted_bytes {failed=true;break;}
+        if let Some(limit)=transfer_rate {
+            if transfer_window.elapsed()>=std::time::Duration::from_secs(1){
+                transfer_window=tokio::time::Instant::now();bytes_this_second=0;
+            }
+            if bytes_this_second.saturating_add(data.len() as u64)>limit{
+                tokio::time::sleep(std::time::Duration::from_secs(1)
+                    .saturating_sub(transfer_window.elapsed())).await;
+                transfer_window=tokio::time::Instant::now();bytes_this_second=0;
+            }
+            bytes_this_second=bytes_this_second.saturating_add(data.len() as u64);
+        }
         digest.update(&data);
         if prefix.len()<24 {
             let n=(24-prefix.len()).min(data.len());
