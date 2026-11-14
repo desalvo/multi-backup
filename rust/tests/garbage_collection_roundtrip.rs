@@ -61,6 +61,9 @@ fn purge_keeps_objects_until_explicit_grace_qualified_gc(){
     fs::write(input.join("current.txt"),b"completely new payload").unwrap();
     let second=store.backup_in_namespace_mode(&key,"incremental","",&sources,
         BackupKind::Incremental,Some(&first.id)).unwrap();
+    // Parity 8+2 and the explicit user-requested backup hold are distinct.
+    assert!(store.protect_backup(&key,&second.id).unwrap());
+    assert!(store.is_backup_protected(&key,&second.id).unwrap());
     store.unprotect_backup(&key,&first.id,&first.id).unwrap();
     // Existing descendants cannot be silently modified while protected.
     assert!(store.delete_backup_rebase(&key,&first.id,&first.id).is_err());
