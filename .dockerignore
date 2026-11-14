@@ -1,0 +1,9 @@
+.git
+**/target
+**/__pycache__
+**/.pytest_cache
+**/.venv
+*.age
+*.agevault
+*.key
+.env

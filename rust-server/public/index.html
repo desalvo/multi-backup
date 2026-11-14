@@ -1,0 +1,6 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="csrf-token" content="CSRF_TOKEN"><title>Multi Backup</title><link rel="stylesheet" href="/app.css"></head><body>
+<div class="layout"><aside><div class="logo"><span>◈</span> Multi Backup</div><div class="footer">Alessandro De Salvo<br>EUPL-1.2 · Rust server preview</div></aside>
+<main><div class="hero"><div><h1>Multi Backup</h1><p>Backup logici unificati, chunk cifrati e browsing verificato</p></div><div class="cloud" aria-hidden="true">☁</div></div>
+<section><div class="controls"><h2>Archivi logici</h2><button id="refresh" type="button">Aggiorna</button><button id="logout" type="button">Esci</button></div><div id="alert" role="status"></div><div id="backups"></div></section>
+<section><h2>Esportazione selettiva</h2><p class="muted">Seleziona un singolo file o una cartella. Il restore viene verificato e scritto in una nuova directory sul server, senza sovrascrivere l'origine.</p><div id="result" role="status"></div></section>
+</main></div><script src="/app.js"></script></body></html>

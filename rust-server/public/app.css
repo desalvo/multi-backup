@@ -1,0 +1,21 @@
+:root{font-family:Inter,system-ui,-apple-system,sans-serif;color:#f3f6ff;background:#07132c;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 75% 0,#30205d 0,transparent 42%),linear-gradient(140deg,#091a40,#10183b)}
+a{color:#79dcf7}.layout{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+aside{background:#09162c;border-right:1px solid #41528c;padding:22px;display:flex;flex-direction:column;gap:18px}
+.logo{font-weight:800;letter-spacing:.02em;font-size:1.3rem;color:white}.logo span{color:#75dfff}
+aside .footer{margin-top:auto;color:#b3bedf;font-size:.73rem;line-height:1.5}
+main{max-width:1400px;padding:30px 38px;margin:auto;width:100%}
+.hero{border:1px solid #5265a8;box-shadow:0 16px 50px #0007;border-radius:22px;padding:32px;background:linear-gradient(110deg,#10204f 0%,#292267 58%,#143c72 100%);min-height:170px;display:flex;justify-content:space-between;align-items:center}
+h1{font-size:clamp(1.5rem,3vw,2.8rem);margin:0 0 8px}.hero p{color:#cbd5fa;line-height:1.5}
+.cloud{font-size:4rem;filter:drop-shadow(0 0 12px #46d1ff)}
+section{background:#132653bd;border:1px solid #405696;border-radius:17px;padding:22px;margin:25px 0;box-shadow:0 9px 24px #050b2588}
+button{background:linear-gradient(110deg,#5249d3,#187bd0);color:white;border:1px solid #a3b7f1;border-radius:12px;padding:11px 18px;font-weight:700;cursor:pointer;transition:transform .15s,filter .15s}
+button:hover{filter:brightness(1.2);transform:translateY(-1px)}button:focus-visible,input:focus-visible{outline:3px solid #77f1ff}
+button[disabled]{opacity:.6;cursor:default}input{border:1px solid #667bb6;background:#071632;border-radius:9px;padding:12px;color:#fff;width:100%;font:inherit}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.muted{color:#bdc9e8}
+.folder{border:1px solid #425b97;border-radius:12px;padding:12px;margin:9px 0;background:#0e2049}
+.file{display:flex;align-items:center;gap:10px;word-break:break-word;padding:8px;border-top:1px solid #40518a}
+.file button{margin-left:auto;font-size:.8rem;padding:6px 9px}.small{font-size:.8rem}
+#alert{min-height:32px;margin-top:15px;color:#80e6fc}
+@media(max-width:800px){.layout{grid-template-columns:1fr}aside{padding:13px 17px;border-right:0;border-bottom:1px solid #425d9c;flex-direction:row;align-items:center}aside .footer{display:none}main{padding:16px}.hero{padding:20px}.cloud{font-size:2rem}section{padding:15px}.file{flex-wrap:wrap}.file button{margin:4px 0 0 auto}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
