@@ -178,3 +178,8 @@ It never mounts, reads customer files or writes any data.
 ## r038 — native plugin runtime preview (not certified)
 
 Five executable **development-preview backup pairs** now have a Rust code path: POSIX→POSIX, NFS→POSIX, SMB→POSIX, SSHFS→POSIX, and GPFS CES→POSIX. The output is a verified age-encrypted POSIX chunk store. POSIX→POSIX fresh-directory restore is the one generic reverse restore path implemented. Mounted remote sources run only on Linux when the selected path is an exact matching **read-only OS mount** and the operator explicitly acknowledges a consistent snapshot. No snapshot can be proven from a user flag or mount type; ACL/xattr and live provider consistency still require end-to-end acceptance. The registered catalog remains **32 plugins, 53 declared backup roles**, with **0/682 certified generic pairs**. The remaining directions are not executors.
+
+## r038 — Portabilità degli account e storage GC
+
+Per ogni plugin che usa login, il restore deve poter indicare un utente di destinazione distinto da quello originale, autorizzato con credenziali proprie. Le implementazioni Rust dedicate attuali permettono un nuovo repository GitHub o un file Dropbox su un altro account, senza certificare ancora il restore parziale universale. Lo storage POSIX impiega FULL/INCREMENTAL, purge con rebase e GC con repack automatico delle parità 8+2. Questo non aumenta il numero dei plugin genericamente certificati: 0/682. Fonte [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md).
+
