@@ -298,3 +298,36 @@ multi-backup-native plugins backup --input nfs --output posix --source /mnt/nfs-
 ```
 
 For GPFS CES use `--input gpfs --input-gpfs-access ces-nfs|ces-smb`. No remote mounts, proprietary clients, overwrite or automatic remote deletion are performed. See [plugin architecture](docs/PLUGIN_API.md) and [RC gates](docs/RC_CERTIFICATION_MATRIX.md).
+
+
+## Rust r038 — full/incremental backups, chain-preserving purge and GC
+
+A new Rust backup can be **full** (`--mode full`) or **incremental**
+(`--mode incremental --parent BACKUP_ID`). Incremental manifests retain
+a complete logical file inventory but only introduce new immutable chunks
+when bytes change. File statistics include count, uncompressed size,
+compressed size, compressed+deduplicated size and new compressed increment
+data. `storage info` also shows the complete chain and reference full.
+
+```bash
+multi-backup-native storage backup --root /private/backup-store --identity /private/keys/backup-age.txt --sources-json sources.json --label "Full" --mode full
+multi-backup-native storage backup --root /private/backup-store --identity /private/keys/backup-age.txt --sources-json sources.json --label "Increment" --mode incremental --parent FULL_OR_PREVIOUS_INCREMENT_ID
+multi-backup-native storage info --root /private/backup-store --identity /private/keys/backup-age.txt --id INCREMENT_ID
+multi-backup-native storage verify-chain --root /private/backup-store --identity /private/keys/backup-age.txt --id INCREMENT_ID
+multi-backup-native storage delete-backup --root /private/backup-store --identity /private/keys/backup-age.txt --id OLD_BACKUP_ID --confirm-id OLD_BACKUP_ID
+multi-backup-native storage gc-preview --root /private/backup-store --identity /private/keys/backup-age.txt
+# Only after reviewing preview and explicitly confirming:
+multi-backup-native storage gc-collect --root /private/backup-store --identity /private/keys/backup-age.txt --confirm ERASE-ORPHANS
+```
+
+A confirmed deletion automatically re-links direct descendants or promotes
+incremental successors to full when the deleted ancestor was a full.
+Protected successors must be explicitly unprotected first. **Purge does not
+free physical chunk space**. The separate manually confirmed GC only
+removes old unreferenced encrypted data after a grace period (default 48h).
+Partially live parity groups cannot yet be repacked safely, so their
+obsolete member chunks are temporarily retained. Native scheduler
+`schedule run/daemon` supports full/incremental jobs and periodic
+chain verification, defaulting to complete-chain checks; production
+deployment and UI-based schedule persistence still require acceptance.
+These r038 features are development previews, not a published stable RC.
