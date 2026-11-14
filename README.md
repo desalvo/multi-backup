@@ -200,8 +200,7 @@ conversion, live mounts, GUI configuration and provider parity remain open.
 - [Server deployment, identity/security and registry CI](docs/SERVER_DEPLOYMENT.md)
 - [Original visual asset provenance](docs/PHOTO_CREDITS.md)
 
-**Do not merge the draft or publish a stable image without successful
-production gate, cross-platform restored data verification and secret setup.**
+**PR #9 was merged to main as a development-only source baseline after green production CI. Do not publish a stable installer, server image or recovery guarantee before full real-provider restored-data acceptance, signing, update/rollback validation and secure configuration.**
 
 
 ### Rust storage v1 — certified behavior vs development-only functionality
