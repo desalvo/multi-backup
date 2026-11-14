@@ -180,7 +180,8 @@ impl NativeApp {
         let vault_path = default_vault_path();
         let must_unlock_on_start = std::fs::symlink_metadata(&vault_path).is_ok();
         let migrated = read_legacy_settings();
-        let prefs = migrated.as_ref().unwrap_or(&serde_json::Value::Null);
+        let empty_prefs = serde_json::Value::Null;
+        let prefs = migrated.as_ref().unwrap_or(&empty_prefs);
         let output = prefs["output_directory"].as_str()
             .filter(|s| !s.is_empty() && s.len() < 4096)
             .unwrap_or_else(|| "").to_owned();
