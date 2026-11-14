@@ -1,7 +1,6 @@
-//! Standalone native Rust CLI for existing Multi Backup encrypted archives.
-//! This is intentionally separate from the legacy Python backup CLI while
-//! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins};
+//! Standalone native Rust encrypted backup CLI. Native plugin execution is
+//! the primary development path; Python data migration is optional.
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -13,6 +12,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins backup --input posix --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--json]\n\
+       multi-backup-native plugins restore --input posix --output posix --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--top-namespace PATH]\n\
        multi-backup-native storage retention-preview --root DIR --identity IDENTITY [--days 30] [--keep-last 1] [--json]\n\
@@ -158,9 +159,10 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&item)?);
                 } else {
-                    println!("{:?}: {} -> {} (input={:?}, output={:?}); executable={}",
+                    println!("{:?}: {} -> {} (input={:?}, output={:?}); executable={}; preview_executable={}",
                              item.mode, item.source_plugin, item.destination_plugin,
-                             item.source_stage, item.destination_stage, item.executable);
+                             item.source_stage, item.destination_stage, item.executable,
+                             item.preview_executable);
                     println!("{}", item.reason);
                     for check in &item.required_preflight {
                         println!("preflight: {check}");
@@ -178,6 +180,34 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 else {println!("{} {} fs={} rw_flag={} (read-only probe)",
                     evidence.plugin,evidence.mountpoint,evidence.fs_type,
                     evidence.rw_mount_option);}
+            },
+            "backup" => {
+                accepted(&flags, &["--input","--output","--source","--root",
+                                    "--identity","--label","--namespace","--top-namespace"])?;
+                let snapshot = plugin_executor::backup(
+                    required(&flags,"--input")?,required(&flags,"--output")?,
+                    Path::new(required(&flags,"--source")?),
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--label")?,
+                    flags.get("--namespace").copied().unwrap_or("files"),
+                    flags.get("--top-namespace").copied().unwrap_or(""))?;
+                if json { println!("{}",serde_json::to_string_pretty(&snapshot)?); }
+                else {println!("Verified encrypted plugin backup {} ({} files)",
+                              snapshot.id,snapshot.entries.len());}
+            },
+            "restore" => {
+                accepted(&flags, &["--input","--output","--root","--identity",
+                                    "--id","--destination","--selection"])?;
+                let count = plugin_executor::restore(
+                    required(&flags,"--input")?,required(&flags,"--output")?,
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--id")?,
+                    Path::new(required(&flags,"--destination")?),
+                    flags.get("--selection").copied())?;
+                if json { println!("{}",serde_json::json!({"restored_files":count})); }
+                else {println!("Restored {count} verified files to a new directory");}
             },
             _ => return Err(usage().into()),
         }
