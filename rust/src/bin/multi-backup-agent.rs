@@ -260,14 +260,26 @@ fn push(config:&Config,profile_id:&str,force:bool,limits:&ExecutionLimits,
         pull_job_id:Option<&str>)->Res<()>{
     let p=profile(config,profile_id)?;
     if !p.enable_push&&!force {return Err("This agent profile has push disabled".into());}
-    let encrypted=age_encrypt_to_spool(config,&p,limits)?;
+    // Push is initiated by the AGENT, independently of a server schedule,
+    // but it still obtains the server's signed-session policy BEFORE running.
+    let effective=if force{
+        limits.clone() // Already intersected with server policy by signed poll.
+    }else{
+        let policy=request(config,"GET","/api/agents/policy",None,b"",limits)?;
+        if policy["approved"]!=true{return Err("Agent is not approved".into());}
+        let server:ExecutionLimits=serde_json::from_value(
+            policy.get("limits").cloned().ok_or("Missing server resource policy")?
+        ).map_err(err)?;
+        ExecutionLimits::strictest(&server,&config.limits)?
+    };
+    let encrypted=age_encrypt_to_spool(config,&p,&effective)?;
     let id=hex::encode(rand::random::<[u8;32]>());
     let size=fs::metadata(&encrypted).map_err(err)?.len();
     let manifest=UploadManifest{backup_id:&id,profile_id:&p.id,provider:"afs",
         cell:&p.job.cell,volume:&p.job.volume,encrypted_bytes:size,
         recipient:&p.recipient,pull_job_id};
     let meta=serde_json::to_vec(&manifest).map_err(err)?;
-    match request(config,"POST","/api/agents/upload",Some(&encrypted),&meta,limits){
+    match request(config,"POST","/api/agents/upload",Some(&encrypted),&meta,&effective){
         Ok(result)=>{
             fs::remove_file(encrypted).map_err(err)?;
             println!("{}",result);
