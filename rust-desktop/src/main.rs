@@ -12,7 +12,7 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const VERSION: &str = "0.1.0-r020-native-preview";
+const VERSION: &str = "0.1.0-r038-native-preview";
 const AUTHOR: &str = "Alessandro De Salvo";
 const REPO: &str = "https://github.com/desalvo/multi-backup";
 const NAVY: Color32 = Color32::from_rgb(10, 26, 60);
