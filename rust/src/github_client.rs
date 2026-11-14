@@ -5,7 +5,7 @@ use crate::{archive, journal};
 use chrono::Utc;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs::{self, File}, io::Write, path::Path, process::{Command, Stdio}};
+use std::{fs::{self, File}, io::{Read, Write}, path::Path, process::{Command, Stdio}};
 use tempfile::TempDir;
 
 pub type GithubResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -95,12 +95,49 @@ fn json_file(path: &Path, data: &Value) -> GithubResult<()> {
     file.sync_all()?;
     Ok(())
 }
+/// Reusing an immutable encrypted archive is safe only after authenticating
+/// its local SHA-256 sidecar. Never silently skip an existing corrupt shard.
+fn verify_existing_archive(path: &Path) -> GithubResult<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.file_type().is_file() || !path.to_string_lossy().ends_with(".tar.gz.age") {
+        return Err(err("Unsafe encrypted Git snapshot"));
+    }
+    let sidecar = std::path::PathBuf::from(format!("{}.sha256", path.display()));
+    if !fs::symlink_metadata(&sidecar)?.file_type().is_file() {
+        return Err(err("Missing or symlinked encrypted archive checksum"));
+    }
+    let reference = fs::read_to_string(&sidecar)?;
+    let expected = reference.split_whitespace().next()
+        .ok_or_else(|| err("Missing encrypted archive SHA-256"))?;
+    if expected.len() != 64 || !expected.bytes().all(|b|b.is_ascii_hexdigit()) {
+        return Err(err("Malformed encrypted archive checksum"));
+    }
+    let mut stream = File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut bytes = [0u8; 65536];
+    loop {
+        let count = stream.read(&mut bytes)?;
+        if count == 0 { break; }
+        hash.update(&bytes[..count]);
+    }
+    let actual = format!("{:x}", hash.finalize());
+    if actual != expected.to_ascii_lowercase() {
+        return Err(err("Encrypted Git snapshot SHA-256 mismatch"));
+    }
+    Ok(())
+}
+
 fn checked_clone(slug: &str, into: &Path) -> GithubResult<()> {
     safe_slug(slug)?;
     if into.exists() { return Err(err("Git mirror staging directory already exists")); }
     let target = into.to_str().ok_or_else(|| err("Non-UTF8 mirror staging path"))?;
     run_capture("gh", &["repo", "clone", slug, target, "--", "--mirror"], None)?;
     run_capture("git", &["-C", target, "fsck", "--full"], None)?;
+    // Git LFS content is not included by a plain --mirror clone. Fetch all
+    // objects while online, or fail rather than producing an incomplete mirror.
+    let status = Command::new("git").args(["-C", target, "lfs", "fetch", "--all"])
+        .stdout(Stdio::null()).stderr(Stdio::null()).status()?;
+    if !status.success() { return Err(err("Unable to fetch all Git LFS objects")); }
     Ok(())
 }
 fn fingerprint(mirror: &Path) -> GithubResult<String> {
@@ -252,6 +289,7 @@ pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
             archive::create(&stage.path().join("git"), &dest, recipient,
                 &format!("multi-backup/repositories/{slug}/git"))?;
         }
+        verify_existing_archive(&dest)?;
         let meta_stage = TempDir::new_in(output)?;
         let info = metadata_for(slug, meta_stage.path(), max_runs)?;
         let info_folder = meta_stage.path().join("repositories").join(slug);
@@ -262,13 +300,21 @@ pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
             archive::create(&info_folder, &meta_dest, recipient,
                 &format!("multi-backup/repositories/{slug}"))?;
         }
+        verify_existing_archive(&meta_dest)?;
         session.record(&step, &meta_dest)?;
         outcomes.push(json!({"repository":slug, "fingerprint":fp, "metadata":info}));
         on_progress(index + 1, total, "Mirror e metadati cifrati");
     }
     let result = json!({
         "schema":1, "backend":"github", "cycle":cycle, "account":login,
-        "repositories":outcomes, "complete":true,
+        "repositories":outcomes,
+        // Optional read-denied resources are archived as omissions, not
+        // fabricated as complete metadata. The native GUI surfaces them.
+        "complete":outcomes.iter().all(|repo: &Value| {
+            repo["resumed"] == true ||
+            repo["metadata"]["metadata"].as_array().is_some_and(|items|
+                items.iter().all(|item| item["ok"] == true))
+        }),
         "remote_cleanup":"disabled"
     });
     let summary_dir = output.join("metadata").join("cycles").join(&cycle);
@@ -291,6 +337,18 @@ mod tests {
             assert!(safe_slug(value).is_err(), "{value}");
         }
         assert_eq!(safe_slug("team/repo.name").unwrap(), ("team","repo.name"));
+    }
+    #[test] fn corrupt_or_unverified_existing_archive_never_reused() {
+        let dir=tempfile::tempdir().unwrap();
+        let item=dir.path().join("one.tar.gz.age");
+        fs::write(&item, b"encrypted").unwrap();
+        assert!(verify_existing_archive(&item).is_err());
+        let checksum=std::path::PathBuf::from(format!("{}.sha256",item.display()));
+        fs::write(&checksum, format!("{:x}  one.tar.gz.age\n",
+            Sha256::digest(b"encrypted"))).unwrap();
+        assert!(verify_existing_archive(&item).is_ok());
+        fs::write(&item, b"modified!").unwrap();
+        assert!(verify_existing_archive(&item).is_err());
     }
     #[test] fn disallows_shell_program_execution() {
         assert!(run_capture("sh", &["-c","echo unsafe"], None).is_err());
