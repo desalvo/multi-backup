@@ -12,7 +12,59 @@ pub type DeleteResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 fn err(message: &'static str) -> Box<dyn std::error::Error + Send + Sync> {
     message.into()
 }
-pub fn plan(output: &Path, archive: &Path) -> DeleteResult<Vec<PathBuf>> {
+fn marker(archive:&Path)->PathBuf{
+    PathBuf::from(format!("{}.protected.json",archive.display()))
+}
+fn protected_state(archive:&Path)->DeleteResult<bool>{
+    let path=marker(archive);
+    let meta=match fs::symlink_metadata(&path){
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok(false),
+        Err(e)=>return Err(e.into()),
+        Ok(meta)=>meta,
+    };
+    if !meta.file_type().is_file()||meta.len()>4096{
+        return Err(err("Unsafe archive protection marker"));
+    }
+    let value:Value=serde_json::from_reader(File::open(path)?)?;
+    if value["version"]!=1||value["protected"]!=true||
+       value["archive"]!=archive.file_name()
+            .and_then(|x|x.to_str()).unwrap_or("") {
+        return Err(err("Invalid archive protection marker"));
+    }
+    Ok(true)
+}
+fn root_lock(root:&Path)->DeleteResult<File>{
+    let canonical=root.canonicalize()?;
+    if fs::symlink_metadata(root)?.file_type().is_symlink(){
+        return Err(err("Archive management root must not be a symlink"));
+    }
+    let state=canonical.join(".state");
+    match fs::symlink_metadata(&state){
+        Ok(meta) if !meta.is_dir()||meta.file_type().is_symlink()=>
+            return Err(err("Unsafe archive management state directory")),
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound=>{
+            fs::create_dir(&state)?;
+            #[cfg(unix)]{
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&state,fs::Permissions::from_mode(0o700))?;
+            }
+        },
+        Err(e)=>return Err(e.into()),
+        _=>{},
+    }
+    let lock=state.join(".archive-management.lock");
+    match fs::symlink_metadata(&lock){
+        Ok(meta) if !meta.file_type().is_file()=>return Err(err("Unsafe management lock")),
+        Err(e) if e.kind()!=std::io::ErrorKind::NotFound=>return Err(e.into()),
+        _=>{},
+    }
+    let handle=OpenOptions::new().create(true).write(true).open(&lock)?;
+    if !handle.metadata()?.is_file(){return Err(err("Unsafe management lock"));}
+    fs2::FileExt::lock_exclusive(&handle)?;
+    Ok(handle)
+}
+fn plan_internal(output: &Path, archive: &Path,
+                 permit_protected:bool)->DeleteResult<Vec<PathBuf>> {
     if fs::symlink_metadata(output)?.file_type().is_symlink() {
         return Err(err("Backup root cannot be a symlink"));
     }
@@ -50,6 +102,9 @@ pub fn plan(output: &Path, archive: &Path) -> DeleteResult<Vec<PathBuf>> {
     };
     if !is_registered {
         return Err(err("Archive not in the authorized local catalog"));
+    }
+    if !permit_protected && protected_state(&checked)?{
+        return Err(err("Backup is PROTECTED; remove protection explicitly before deletion"));
     }
     let state = root.join(".state");
     if state.exists() && fs::symlink_metadata(&state)?.file_type().is_symlink() {
@@ -93,12 +148,48 @@ pub fn plan(output: &Path, archive: &Path) -> DeleteResult<Vec<PathBuf>> {
     }
     Ok(files)
 }
+pub fn plan(output:&Path,archive:&Path)->DeleteResult<Vec<PathBuf>>{
+    plan_internal(output,archive,false)
+}
+/// Archive-level protection for the legacy encrypted tar format, distinct
+/// from content-addressed logical backup holds and 8+2 parity protection.
+pub fn protect(output:&Path,archive:&Path)->DeleteResult<bool>{
+    let _lock=root_lock(output)?;
+    let list=plan_internal(output,archive,true)?;
+    let checked=&list[0];
+    if protected_state(checked)?{return Ok(false);}
+    let path=marker(checked);
+    let mut file=OpenOptions::new().create_new(true).write(true).open(&path)?;
+    #[cfg(unix)]{
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    serde_json::to_writer(&mut file,&json!({
+        "version":1,"protected":true,
+        "archive":checked.file_name().and_then(|x|x.to_str()).unwrap_or("")
+    }))?;
+    file.sync_all()?;
+    Ok(true)
+}
+/// Explicit unprotection requires the exact archive name. Retention and GC
+/// must not call this method automatically.
+pub fn unprotect(output:&Path,archive:&Path,confirmation:&str)->DeleteResult<bool>{
+    if archive.file_name().and_then(|x|x.to_str())!=Some(confirmation){
+        return Err(err("Unprotect confirmation must match exact archive filename"));
+    }
+    let _lock=root_lock(output)?;
+    let files=plan_internal(output,archive,true)?;
+    if !protected_state(&files[0])?{return Ok(false);}
+    fs::remove_file(marker(&files[0]))?;
+    Ok(true)
+}
 pub fn delete(output: &Path, archive: &Path,
               confirmation: &str, in_use: bool) -> DeleteResult<Vec<String>> {
     if in_use { return Err(err("Backup/restore operation is active")); }
     if archive.file_name().and_then(|x| x.to_str()) != Some(confirmation) {
         return Err(err("Confirmation must exactly match encrypted archive filename"));
     }
+    let _lock=root_lock(output)?;
     let files = plan(output, archive)?;
     let root = output.canonicalize()?;
     let state = root.join(".state");
@@ -161,6 +252,33 @@ mod tests {
         let log = fs::read_to_string(root.join(".state/archive-deletions.jsonl")).unwrap();
         assert!(log.contains("local-delete-only"));
         assert!(log.contains("\"complete\":true"));
+    }
+    #[test] fn archive_protection_requires_explicit_unlock_and_blocks_deletion(){
+        let temp=tempfile::tempdir().unwrap();
+        let metadata=temp.path().join("metadata");fs::create_dir(&metadata).unwrap();
+        let archive=metadata.join("snapshot.tar.gz.age");
+        fs::write(&archive,b"ciphertext").unwrap();
+        assert!(protect(temp.path(),&archive).unwrap());
+        assert!(!protect(temp.path(),&archive).unwrap());
+        assert!(plan(temp.path(),&archive).is_err());
+        assert!(delete(temp.path(),&archive,"snapshot.tar.gz.age",false).is_err());
+        assert!(archive.exists());
+        assert!(unprotect(temp.path(),&archive,"WRONG").is_err());
+        assert!(plan(temp.path(),&archive).is_err());
+        assert!(unprotect(temp.path(),&archive,"snapshot.tar.gz.age").unwrap());
+        assert!(plan(temp.path(),&archive).is_ok());
+        assert!(delete(temp.path(),&archive,"snapshot.tar.gz.age",false).is_ok());
+        assert!(!archive.exists());
+    }
+    #[test] fn corrupt_or_symlink_protection_marker_fails_closed(){
+        let temp=tempfile::tempdir().unwrap();
+        let metadata=temp.path().join("metadata");fs::create_dir(&metadata).unwrap();
+        let archive=metadata.join("snapshot.tar.gz.age");
+        fs::write(&archive,b"ciphertext").unwrap();
+        fs::write(marker(&archive),b"corrupted").unwrap();
+        assert!(plan(temp.path(),&archive).is_err());
+        assert!(delete(temp.path(),&archive,"snapshot.tar.gz.age",false).is_err());
+        assert!(archive.exists());
     }
     #[test] fn refuses_outside_root_even_with_matching_filename() {
         let d = tempfile::tempdir().unwrap();
