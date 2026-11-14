@@ -92,6 +92,56 @@ def main() -> None:
             resolved = (ROOT / Path(path).parent / value).resolve()
             if not resolved.is_relative_to(ROOT.resolve()) or not resolved.exists():
                 raise AssertionError(f"Broken local link in {path}: {link}")
+    # r039: every native agent, source transport and cluster policy change
+    # must have bilingual operational references and compiled source coverage.
+    r039_manuals = [
+        "docs/AGENTS_AFS_R039_IT.md",
+        "docs/AGENTS_AFS_R039_EN.md",
+        "docs/CLUSTER_ORCHESTRATION_R039_IT.md",
+        "docs/CLUSTER_ORCHESTRATION_R039_EN.md",
+    ]
+    for path in r039_manuals:
+        body = read(path)
+        require(body, "r039", "AFS", "TLS", "agent")
+        if (chr(92) + chr(96)) in body or body.count("~~~") % 2:
+            raise AssertionError(f"Broken r039 Markdown commands in {path}")
+        for link in re.findall(r"\]\(([^)]+)\)", body):
+            dest = link.split("#", 1)[0]
+            if not dest or dest.startswith(("https://", "http://", "mailto:", "#")):
+                continue
+            resolved = (ROOT / Path(path).parent / dest).resolve()
+            if not resolved.is_relative_to(ROOT.resolve()) or not resolved.exists():
+                raise AssertionError(f"Broken r039 manual reference {path}: {link}")
+    require(read("rust/src/execution_policy.rs"),
+            "ExecutionLimits", "max_concurrent_jobs", "threads_per_job",
+            "max_transfer_bytes_per_sec", "max_host_cpu_percent",
+            "max_host_memory_percent", "min_free_memory_bytes", "strictest")
+    require(read("rust/src/cluster_placement.rs"),
+            "NodeLocal", "Shared", "owner_replica", "eligible")
+    require(read("rust-server/src/cluster.rs"),
+            "SKIP LOCKED", "lease_token", "mb_cluster_jobs",
+            "mb_cluster_replicas", "mb_cluster_storage")
+    require(read("rust-server/src/agent_registry.rs"),
+            "device_public_key", "token_sha256",
+            "mb_agent_request_nonces", "set_approval", "update_limits")
+    require(read("rust/src/afs_volume.rs"), "stream_dump_limited",
+            "LocalAuth", "SshAgentless", "Incremental")
+    require(read("rust/src/bin/multi-backup-agent.rs"),
+            '"push"', '"poll"', "ThrottledReader", "ExecutionLimits")
+    require(read("k8s/multi-backup-cluster-r039.preview.yaml"),
+            "replicas: 3", "ReadWriteMany", "/readyz",
+            "MULTI_BACKUP_CLUSTER_EXECUTOR")
+    flow = read(".github/workflows/ci.yml")
+    for matrix in ("rust-agent-macos:", "rust-agent-windows:",
+                   "rust-agent-debian:", "rust-agent-rpm:"):
+        require(flow, matrix)
+    for source in ("scripts/package-rust-agent-unix.sh",
+                   "scripts/package-rust-agent-windows.ps1",
+                   "packaging/linux/multi-backup-agent.spec",
+                   "packaging/windows/rust-agent-preview.iss"):
+        read(source)
+    print("Rust r039 agent, AFS and cluster documentation contract: PASS")
+
     print("Rust r038 documentation contract: PASS")
 
 if __name__ == "__main__":
