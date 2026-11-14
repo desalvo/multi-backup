@@ -1,7 +1,8 @@
 # Multi Backup - portable project handoff
 
 **Project:** `desalvo/multi-backup`  
-**Version:** `0.1.0-r006-rc1`  
+**Last working distributed build:** `0.1.0-r018-rc1` (Python/Tk)  
+**Merged development baseline:** Rust-native r037 preview on main; not a certified stable release  
 **Origin:** `desalvo/github-backup` 0.1.0-r001 (history remains in that repository; Multi Backup has a new initial repository history).  
 **License:** EUPL-1.2  
 **Languages:** CLI and help in English; README, manuals and brochures in English and Italian.
@@ -461,3 +462,12 @@ Expanded scope makes the previous 57.5% product-wide readiness estimate outdated
   age-based cleanup. Output plugin-level capacity is partially supported
   for pre-mounted filesystems; cloud API quotas/namespace index
   persistence still require integration and live verification.
+
+
+## r038 continuation after PR #9 merge — 2026-11-14
+
+- Repository: `desalvo/multi-backup`; `main` now contains squash-merge `b7e757d9378d2503b57fa43267577a3a55f60fd2` of [PR #9](https://github.com/desalvo/multi-backup/pull/9). The feature head was `860d390a`.
+- [Full premerge Production CI #43640869549](https://github.com/desalvo/multi-backup/actions/runs/43640869549) completed successfully: 19 build/test/security/docs jobs passed, 0 failed, 2 publication jobs intentionally skipped, 17 preview artifact groups uploaded. Native CLI encrypted backup+byte-identical restore acceptance has been wired into Linux, macOS, Windows and Debian packaging, and passed this CI.
+- Merge is **source integration**, not promotion: `main` still includes the working Python/Tk implementation for compatible releases and a Rust-only development desktop + CLI + experimental server. Last previous early-release assets are not invalidated. No `[full-ci]` on squash commit, and no stable or Docker publication requested.
+- For the next chat: check main CI and resolve any regressions. Preserve version compatibility, protected age identity and protected logical manifests; never activate destructive automatic cleanup/GC based only on retention preview. Qualify full GitHub/Dropbox restore with real providers, CI artifacts/LFS, crash-resume, macOS physical Touch ID, Windows sign/installer, legacy import, multi-GB acceptance, WebDAV real OS mounting, rollback, signature and independent security gates before publicly promoting RC.
+- `docs/RC_CERTIFICATION_MATRIX.md` is authoritative for *what remains unverified*. Use the compiled preview binaries and screenshots from Actions run 43640869549 for physical acceptance; do not claim live-account or signed release evidence not actually observed.
