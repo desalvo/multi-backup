@@ -67,6 +67,23 @@ fn posix_pair_encrypts_verifies_and_restores_without_python() {
         "--destination",path(&all)],true);
     assert_eq!(fs::read(all.join("Projects/Team/github/README.txt")).unwrap(),b"shared metadata");
 
+    // Corrupt exactly one encrypted chunk. Authenticated 8+2 parity repair
+    // must restore the backup before atomically publishing the new target.
+    let first_chunk=snapshot["entries"][0]["chunks"][0]["id"].as_str().unwrap();
+    let block_path=root.join(".multi-backup-v1/chunks")
+        .join(&first_chunk[..2]).join(&first_chunk[2..4])
+        .join(format!("{first_chunk}.age"));
+    let mut encrypted=fs::read(&block_path).unwrap();
+    let midpoint=encrypted.len()/2;
+    encrypted[midpoint]^=0x40;
+    fs::write(&block_path,&encrypted).unwrap();
+    let parity_restore=tmp.path().join("recovered-from-parity");
+    cli(&["plugins","restore","--input","posix","--output","posix",
+        "--root",path(&root),"--identity",path(&key),"--id",id,
+        "--destination",path(&parity_restore)],true);
+    assert_eq!(fs::read(parity_restore.join("Projects/Team/github/nested/data.bin")).unwrap(),payload);
+    assert_eq!(fs::read(parity_restore.join("Projects/Team/github/README.txt")).unwrap(),b"shared metadata");
+
     // Unsupported generic adapters cannot fall back to a misleading POSIX copy.
     cli(&["plugins","backup","--input","nfs","--output","posix",
         "--source",path(&source),"--root",path(&root),"--identity",path(&key),
