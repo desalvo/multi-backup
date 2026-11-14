@@ -22,7 +22,7 @@ complete backup appliance. Preserve the working r018 Python/Tk release assets wh
 | Identity/auth | Local + LDAPS + OIDC SSO, roles, account lockout, TLS | Argon2id local prototype; LDAP/OIDC absent |
 | SMTP(S) and audit | TLS certificate check, immutable audit, retention, retries | Minimal JSONL audit; SMTP absent |
 | Desktop mount | Read-only FUSE/WinFsp mount with on-demand chunk reads, unmount and symlink controls | Not implemented |
-| Storage conversion | Old tar.gz.age ⇄ content-addressed, in-place storage move with rollback | Not implemented |
+| Legacy data conversion (optional) | Python-made archive migration is no longer an RC gate by user decision | Optional conversion paths retained; not a blocker for native functional certification |
 | Packaging | One readable logical backup; original branded images; manuals/photos | Original artwork source, PDF/manual regeneration; review pending |
 | Live provider acceptance | Real GitHub/Dropbox backup & restore, rate limit, interruption, 5 snapshots | Not run; private credentials unavailable |
 | Durability | Independent full restore, no data loss during crash, parity corruption, key loss drills | Needs long-running test/certification |
@@ -269,3 +269,10 @@ deletion/truncation/shortened retention despite stolen ingestion credentials.
 PR #9 was merged to `main` as `b7e757d9378d2503b57fa43267577a3a55f60fd2`. The premerge feature head `860d390a` passed all **19 required verification jobs** in [CI #43640869549](https://github.com/desalvo/multi-backup/actions/runs/43640869549); **0 failed**, **2 publication jobs skipped** by PR safety policy. Artifact groups include Rust-native macOS ARM64 and Intel DMG, Windows x64 installer/ZIP, Ubuntu desktop, Debian 12/13 AMD64/ARM64, Rocky/Alma EL8/9/10, GUI/PDF previews and compatibility macOS images. Tests cover compiled CLI encrypted archive byte-for-byte recovery, sidecar tampering, wrong key, protected-backup deletion and namespace roundtrip. No update, physical installation, external credential or live provider restore acceptance was inferred from this result.
 
 **Disposition remains NOT CERTIFIED for stable production.** No stable signing/notarization, real GitHub/Dropbox/LFS/CI restore drill, large-scale performance, WORM recovery, or independent security audit is evidenced; the runtime scheduler and safe mark-and-sweep garbage collector have not been implemented/certified. Never treat this document's older historical FAIL status lines as the latest run; the most recent premerge CI above supersedes those historical CI states, while outstanding functional blockers still apply. The merge commit has no `[full-ci]` publication trigger, preserving published r018 assets. Follow-up main CI and all required external acceptance must still be recorded before any RC promotion.
+
+
+## r038 release policy override — functional Rust first
+
+The user confirmed Python-produced archives are not in critical active use and **old archive format migration is not a release blocker**. Keep optional conversion source and existing files, without automatic deletion. Require instead native encrypted backup/verify/full and selective restore, real live GitHub/Dropbox account acceptance (LFS, CI metadata, throttling and resumable jobs), genuine native GUI functionality, protected retention/GC, installed upgrade/rollback and production signing. Rust preview packaged binaries exist but are not yet a certified RC.
+
+A narrow common Rust plugin execution path is now coded: POSIX→POSIX and Linux read-only mounted NFS/SMB/SSHFS/GPFS CES→POSIX encrypted store, followed by POSIX→POSIX verified restore. Remote snapshot consistency/ACL/xattr fidelity are **not proven** by a mount probe or attestation flag. These are previews, not production Ready adapters. PR #10 CI must succeed before merge.
