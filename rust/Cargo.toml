@@ -27,3 +27,4 @@ tar = "0.4"
 tempfile = "3.10"
 walkdir = "2.5"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
+url = "2.5"

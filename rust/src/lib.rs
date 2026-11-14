@@ -9,6 +9,7 @@ pub mod archive_management;
 pub mod checkpoint_audit;
 pub mod journal;
 pub mod remote_restore;
+pub mod updater;
 pub mod dropbox_hash;
 pub mod dropbox_client;
 pub mod github_client;

@@ -1,7 +1,7 @@
 //! Standalone native Rust CLI for existing Multi Backup encrypted archives.
 //! This is intentionally separate from the legacy Python backup CLI while
 //! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, vault};
+use multi_backup_core::{archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -34,6 +34,8 @@ fn usage() -> &'static str {
        multi-backup-native vault export --file SOURCE.agevault --destination RECOVERY.agevault [--password-stdin]\n\
        multi-backup-native vault import --file RECOVERY.agevault --destination NEW.agevault [--password-stdin]\n\
        multi-backup-native vault change-password --file PROTECTED.agevault [--password-stdin]\n\
+       multi-backup-native updates check --channel early-release|stable\n\
+       multi-backup-native updates stage --channel early-release|stable --directory PRIVATE_UPDATE_DIR\n\
      Safety: explicit identity required, encrypted output only, no overwriting.\n"
 }
 
@@ -89,6 +91,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "updates" {
+        if password_stdin { return Err("No credentials accepted for update checks".into()); }
+        accepted(&flags, if command == "stage" {
+            &["--channel", "--directory"] } else { &["--channel"] })?;
+        let channel = required(&flags, "--channel")?;
+        let info = updater::get_release(channel)?;
+        match command {
+            "check" => {
+                if json { println!("{}", serde_json::to_string_pretty(&info)?); }
+                else {
+                    println!("Native Rust release: {} ({})", info.tag, info.channel);
+                    println!("Matching verified asset: {}",
+                        info.asset.as_ref().map_or("unavailable", |a|a.name.as_str()));
+                }
+            }
+            "stage" => {
+                let directory = Path::new(required(&flags, "--directory")?);
+                let file = updater::stage(&info, directory)?;
+                println!("SHA-256 verified native update staged; NOT installed: {}", file.display());
+            }
+            _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
     if family == "vault" {
         if json { return Err("--json is not supported for vault operations".into()); }
         let count = match command {
