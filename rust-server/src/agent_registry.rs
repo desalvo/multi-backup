@@ -3,7 +3,7 @@
 //! This code never issues a certificate bypass and never authorizes devices
 //! merely because a valid token is presented before administrator approval.
 use crate::cluster::Database;
-use multi_backup_core::agent_protocol::{self as wire,AgentProof};
+use multi_backup_core::{agent_protocol::{self as wire,AgentProof},execution_policy::ExecutionLimits};
 use base64::{engine::general_purpose::STANDARD as B64,Engine as _};
 use serde_json::{json,Value};
 use subtle::ConstantTimeEq;
@@ -34,6 +34,7 @@ pub struct UploadManifest{
     pub backup_id:String,pub profile_id:String,pub provider:String,
     pub cell:String,pub volume:String,pub encrypted_bytes:u64,
     pub recipient:String,
+    #[serde(default)]pub pull_job_id:Option<String>,
 }
 fn sha256(s:&str)->String{wire::token_sha(s)}
 fn valid_hash(s:&str)->bool{s.len()==64&&s.bytes().all(|b|b.is_ascii_hexdigit())}
@@ -82,6 +83,21 @@ pub fn list(db:&Database)->Res<Value>{
         "registered":r.get::<_,String>(6)
     })).collect::<Vec<_>>()}))
 }
+#[derive(Debug,serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeLimits {pub agent_id:String,pub limits:ExecutionLimits}
+pub fn update_limits(db:&Database,update:&ChangeLimits)->Res<bool>{
+    if !wire::valid_id(&update.agent_id){return Err(fail("Invalid agent ID"));}
+    update.limits.validate().map_err(fail)?;
+    let limits=serde_json::to_value(&update.limits)?;
+    let mut conn=db.connect()?;
+    Ok(conn.execute("UPDATE mb_agent_registry SET execution_limits=$2
+        WHERE agent_id=$1 AND NOT revoked",&[&update.agent_id,&limits])?==1)
+}
+pub fn policy(db:&Database,agent:&Verified)->Res<Value>{
+    if !record_sequence(db,&agent.proof)?{return Err(fail("Agent policy replay denied"));}
+    Ok(json!({"approved":true,"limits":agent.limits}))
+}
 pub fn enqueue_pull(db:&Database,job:&PullJob)->Res<String>{
     if !wire::valid_id(&job.agent_id)||!wire::valid_id(&job.profile_id)||
        !valid_hash(&job.profile_sha256){return Err(fail("Invalid approved profile hash"));}
@@ -96,7 +112,7 @@ pub fn enqueue_pull(db:&Database,job:&PullJob)->Res<String>{
     Ok(id)
 }
 pub struct Verified {pub agent_id:String,pub owner_user:String,pub proof:AgentProof,
-                     pub metadata:Vec<u8>}
+                     pub metadata:Vec<u8>,pub limits:ExecutionLimits}
 pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
     ->Res<Verified>{
     let authorization=headers.get("authorization").and_then(|v|v.to_str().ok())
@@ -122,7 +138,7 @@ pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
     }
     let mut conn=db.connect()?;
     let row=conn.query_opt("SELECT owner_user,device_public_key,token_sha256,
-            last_sequence,approved,revoked
+            last_sequence,approved,revoked,execution_limits
             FROM mb_agent_registry WHERE agent_id=$1",&[&proof.agent_id])?
         .ok_or("Unknown agent")?;
     let owner:String=row.get(0);
@@ -131,6 +147,8 @@ pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
     let last:i64=row.get(3);
     let approved:bool=row.get(4);
     let revoked:bool=row.get(5);
+    let limits:ExecutionLimits=serde_json::from_value(row.get::<_,Value>(6))?;
+    limits.validate().map_err(fail)?;
     if !approved||revoked||owner!=proof.user{
         return Err(fail("Agent account not approved or revoked"));
     }
@@ -144,7 +162,7 @@ pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
     wire::verify(&key,&proof,method,path,&metadata,
         (last as u64).saturating_sub(1024),wire::now())
         .map_err(|_|fail("Device signature or replay check failed"))?;
-    Ok(Verified{agent_id:proof.agent_id.clone(),owner_user:owner,proof,metadata})
+    Ok(Verified{agent_id:proof.agent_id.clone(),owner_user:owner,proof,metadata,limits})
 }
 /// Finish each signed request under an atomic monotonic sequence predicate.
 /// Concurrent replays may pass the preflight but at most one can commit.
@@ -180,7 +198,7 @@ pub fn poll(db:&Database,identity:&Verified)->Res<Value>{
            ORDER BY created_at LIMIT 4 FOR UPDATE SKIP LOCKED
         )
         RETURNING job_id,profile_id,profile_sha256",&[&identity.agent_id])?;
-    Ok(json!({"approved":true,"jobs":rows.into_iter().map(|r|json!({
+    Ok(json!({"approved":true,"limits":identity.limits,"jobs":rows.into_iter().map(|r|json!({
         "job_id":r.get::<_,String>(0),
         "profile_id":r.get::<_,String>(1),
         "profile_sha256":r.get::<_,String>(2)
@@ -192,7 +210,8 @@ pub fn validate_upload(meta:&[u8])->Res<UploadManifest>{
     if !valid_hash(&form.backup_id)||!wire::valid_id(&form.profile_id)||
         form.provider!="afs"||!wire::valid_id(&form.cell)||
         !wire::valid_id(&form.volume)||form.encrypted_bytes==0||
-        !form.recipient.starts_with("age1")||form.recipient.len()>120{
+        !form.recipient.starts_with("age1")||form.recipient.len()>120||
+        form.pull_job_id.as_deref().is_some_and(|v|!valid_hash(v)){
         return Err(fail("Invalid agent backup metadata or identity"));
     }
     Ok(form)
@@ -206,13 +225,22 @@ pub fn commit_upload(db:&Database,identity:&Verified,form:&UploadManifest,
         return Err(fail("Agent upload sequence was replayed or revoked"));
     }
     let mut conn=db.connect()?;
-    conn.execute("INSERT INTO mb_agent_uploads
+    let mut tx=conn.transaction()?;
+    if let Some(job_id)=&form.pull_job_id{
+        let changed=tx.execute("UPDATE mb_agent_pull_jobs SET state='success',
+            lease_until=NULL WHERE job_id=$1 AND agent_id=$2 AND profile_id=$3
+            AND state='leased' AND lease_until>now()",
+            &[&job_id,&identity.agent_id,&form.profile_id])?;
+        if changed!=1{return Err(fail("Pull job lease expired or not approved"));}
+    }
+    tx.execute("INSERT INTO mb_agent_uploads
         (backup_id,agent_id,owner_user,profile_id,cell,volume,
          recipient,blob_path,encrypted_bytes,ciphertext_sha256)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         &[&form.backup_id,&identity.agent_id,&identity.owner_user,
           &form.profile_id,&form.cell,&form.volume,&form.recipient,
           &path,&(bytes as i64),&digest])?;
+    tx.commit()?;
     Ok(())
 }
 #[cfg(test)]
