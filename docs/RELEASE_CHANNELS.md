@@ -79,3 +79,8 @@ Following feedback from macOS early testers, the rolling early-release uses the 
 - The original bilingual PDF manual chapters and screenshots document the previously distributed r018 Python/Tk interface. The report generator `scripts/build-publications.py` has separately labelled r038 Rust development-preview addendum chapters; `publications-smoke` must regenerate and text-verify them.
 - Historical brochures remain promotional documentation for their earlier release; they do NOT certify native Rust GC, cross-account metadata migration or production adapter readiness.
 - Stable packages require independent platform signing/notarization, real recovery drills, installed upgrade/rollback and production security qualification. Documentation changes do not publish a release.
+
+## Stato del canale Rust r038 (14 novembre 2026)
+
+Le sezioni storiche qui sopra descrivono anche la distribuzione Python/Tk r010-r018. Il codice Rust 0.1.0-r038 è in PR #10 come anteprima di sviluppo, **non** una RC stabile/pubblicata. I nuovi gate includono backup totali/incrementali, restore verificato, purge con rebase, GC con repack automatico 8+2, restore verso altro account, test di interruzione, installazione reale, firma/notarizzazione e update/rollback. Documentazione corrente: [indice](DOCUMENTATION_INDEX_R038.md) e [matrice RC](RC_CERTIFICATION_MATRIX.md).
+
