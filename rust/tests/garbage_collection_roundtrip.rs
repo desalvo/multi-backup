@@ -115,10 +115,60 @@ fn shared_parity_prevents_unsafe_space_reclamation(){
     store.delete_backup_rebase(&key,&first.id,&first.id).unwrap();
     old(&chunk(&root,&abandoned));
     age_stripe(&root,&old_stripe);
+    let preview=store.garbage_collect(&key,48,false).unwrap();
+    assert_eq!(preview.mixed_stripes_to_repack,1);
+    assert_eq!(preview.repacked_stripes,0);
     let report=store.garbage_collect(&key,48,true).unwrap();
+    assert_eq!(report.repacked_stripes,1);
     assert_eq!(report.deleted_chunks,0);
     assert_eq!(report.deleted_stripes,0);
     assert!(report.blocked_chunks_by_shared_parity>0);
     assert!(chunk(&root,&abandoned).exists());
     assert!(store.verify(&key,&second.id).unwrap().healthy);
+    let all:Vec<_>=fs::read_dir(root.join(".multi-backup-v1/stripes")).unwrap()
+        .map(|v|v.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(all.len(),2,"Old protection remains for crash recovery");
+    let fresh=all.iter().find(|s|!s.starts_with(&old_stripe)).unwrap();
+    let fresh_path=root.join(".multi-backup-v1/stripes").join(fresh);
+    old(&fresh_path); // Simulate another GC after the committed replacement's grace.
+    let status=store.garbage_collect(&key,48,true).unwrap();
+    assert_eq!(status.deleted_stripes,1);
+    assert_eq!(status.deleted_chunks,1);
+    assert!(!chunk(&root,&abandoned).exists());
+    assert!(store.verify(&key,&second.id).unwrap().healthy);
+    let output=temp.path().join("after-repack");
+    store.restore(&key,&second.id,None,&output).unwrap();
+    assert_eq!(fs::read(output.join("files/shared.bin")).unwrap(),
+        b"content retained across cycles");
+}
+
+#[test]
+fn incomplete_parity_repack_preparation_is_ignored_then_garbage_collected(){
+    let temp=tempdir().unwrap();
+    let (recipient,key)=credentials(temp.path());
+    let root=temp.path().join("store");
+    Store::init(&root,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&root,&key).unwrap();
+    let input=temp.path().join("input");fs::create_dir(&input).unwrap();
+    fs::write(input.join("file.txt"),b"still protected").unwrap();
+    let snapshot=store.backup(&key,"full",&[Source {
+        namespace:"files".into(),directory:input
+    }]).unwrap();
+    // Model a crash between parity preparation and atomic index commit:
+    // only orphan encrypted shard bytes exist, without a stripe index.
+    let orphan_id="b".repeat(64);
+    let orphan=root.join(".multi-backup-v1/parity/bb").join(&orphan_id);
+    fs::create_dir_all(&orphan).unwrap();
+    fs::write(orphan.join("0.age"),b"uncommitted encrypted parity").unwrap();
+    old(&orphan.join("0.age"));
+    // Make the directory itself old after creating its contents.
+    old(&orphan);
+    assert!(store.verify(&key,&snapshot.id).unwrap().healthy);
+    let preview=store.garbage_collect(&key,48,false).unwrap();
+    assert_eq!(preview.orphan_parity_directories,1);
+    assert!(orphan.exists());
+    let report=store.garbage_collect(&key,48,true).unwrap();
+    assert_eq!(report.deleted_orphan_parity_directories,1);
+    assert!(!orphan.exists());
+    assert!(store.verify(&key,&snapshot.id).unwrap().healthy);
 }
