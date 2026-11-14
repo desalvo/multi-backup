@@ -178,3 +178,27 @@ The r020 PR CI builds standalone **Python-free** Rust desktop previews alongside
 The r020 Rust desktop now keeps the age identity only in zeroizing memory after vault unlock, supports authenticated local and remote restore without a plaintext key file, bundles a Mac Touch ID adapter (hardware certification pending), and includes Python-free preview RPM build jobs for Rocky/AlmaLinux EL8–10. These previews are not signed stable installers. See [native migration acceptance inventory](docs/RUST_PORT_INVENTORY.md).
 
 The native Rust GUI now enforces vault unlock at startup using the exact legacy OS-specific application settings location, supports native read-only update discovery and verified (never auto-installed) download staging, and requires a vault before starting backups. The r020 branch remains a preview requiring real-account functional parity and production trust qualification.
+
+
+## Experimental r021 chunk store and Rust server (draft PR #9)
+
+A separate, opt-in Rust storage format can create **one logical backup**
+containing GitHub repositories, CI, metadata and Dropbox namespaces. Objects
+are HMAC-addressed, zstd-compressed and individually encrypted with age, with
+optional/automatic 8+2 Reed–Solomon parity and selective restore to new paths.
+Existing tar.gz.age backups and Python release builds are left untouched.
+
+Rust native CLI: storage init / backup / list / protect / repair / restore.
+The experimental Rust web server has responsive read-only browsing, authenticated
+selective export to a fresh server-side directory, Argon2id local login,
+CSRF checks and append-only audit. Dockerfile, Compose, Helm, Kustomize and a
+compiled Kustomize wizard are included **as development artifacts**, not as a
+production-certified/public image. LDAP/OIDC/SMTP, ZIP volumes, storage
+conversion, live mounts, GUI configuration and provider parity remain open.
+
+- [Storage architecture, object diagram, repair and migration](docs/CHUNK_STORAGE_V1.md)
+- [Server deployment, identity/security and registry CI](docs/SERVER_DEPLOYMENT.md)
+- [Original visual asset provenance](docs/PHOTO_CREDITS.md)
+
+**Do not merge the draft or publish a stable image without successful
+production gate, cross-platform restored data verification and secret setup.**

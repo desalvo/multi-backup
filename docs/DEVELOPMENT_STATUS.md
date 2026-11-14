@@ -291,3 +291,31 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
 - Rust standalone desktop now resolves the same protected vault path as Python 0.1.0 on macOS (`~/Library/Application Support/multi-backup/keys/default.agevault`), Windows (`%APPDATA%/multi-backup/keys/default.agevault`) and Linux (`$XDG_CONFIG_HOME/multi-backup/keys/default.agevault`), independent of the user-selected backup destination. If that vault already exists (including a rejected symlink), startup is locked; only an authenticated password or already enrolled Mac Touch ID can unlock backup UI. For a new installation without a vault, Start/Resume takes the user to the Vault panel and requires generation/unlock rather than permitting unsecured backups. An identity already unlocked for the current application session is held exclusively in a zeroized Rust allocation.
 - Added the new Rust updater module and operational CLI/UI controls. They retrieve the official fixed GitHub Releases endpoint by stable/early-release, select native architecture-specific Rust-only assets, reject non-HTTPS/off-domain URL hops and missing official SHA-256 digests, bound redirects/file sizes and stage the bytes atomically. No downloaded executable is installed/launched automatically. Physical system signing and version-by-version upgrade/rollback remain separate release acceptance tests.
 - Existing r018 Python GUI and archives on `main` have not changed. The r020 feature branch is **not** yet a fully certified replacement: external provider E2E with private authenticated accounts, UI/pixel/accessibility review, physical biometry, signed/notarized distribution and end-to-end upgrade/rollback still fail to have sufficient verified evidence.
+
+
+## r021 experimental Rust storage and server macroarea (2026-11-14)
+
+**Branch:** feature/r019-rust-native-encrypted-archive, PR #9 (draft).
+**Do not promote main r018 or stable.** The following are implemented
+development commits, not qualified stable functionality:
+
+- New opt-in chunk-store v1, keyed content addresses, age/zstd objects,
+  encrypted per-cycle unified manifest, selective new-directory restore.
+- 8+2 encrypted-ciphertext Reed–Solomon parity with authenticated stripe
+  indexes, health repair, checksum checks and quarantine.
+- Rust web server prototype, responsive browser, Argon2id login, sessions,
+  CSRF/origin validation, audit, selective server-side export.
+- Docker image build recipe, Compose, Helm/Kustomize manifests and Rust wizard.
+  GitHub Actions gated Docker Hub publishing is defined but NOT triggered
+  until credentials are configured and main CI passes.
+- Original offline project artwork replaces former Unsplash/imgix source.
+  Legacy brochures/old screenshots require a fresh licensed-asset audit.
+- Rust/Python + end-to-end corruption test source added. Remote CI results,
+  image publication and cross-OS installation still unverified in this cycle.
+
+**Open critical gaps:** full legacy Python-to-Rust feature parity, vault
+in-memory unlock for chunk store and web, CI metadata/preservation policy
+parity, real provider backups, original folder restore, FUSE/WinFsp, ZIP64
+multipart, storage migration/GC, LDAP/SSO, SMTP(S), audit retention and
+security/penetration testing. No numeric overall completion estimate until
+a verified inventory with explicit scope and acceptance gates exists.

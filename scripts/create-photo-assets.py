@@ -96,7 +96,7 @@ def main():
     save_atomic(generate((1600, 420)), ASSETS / "backup-hero.jpg")
     save_atomic(generate((436, 260), sidebar=True), ASSETS / "backup-sidebar.jpg")
     save_atomic(generate((1600, 420)), ASSETS / "hero.jpg")
-    print("Generated original offline Multi Backup imagery; no imgix/stock images")
+    print("Generated original offline Multi Backup imagery; no remote sources")
 
 
 if __name__ == "__main__":

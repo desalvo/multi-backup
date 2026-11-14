@@ -39,7 +39,8 @@ fn logical_backup_dedup_and_corruption_recovery() {
     let chunk_file=root.join(".multi-backup-v1/chunks")
         .join(&chunk[..2]).join(&chunk[2..4]).join(format!("{chunk}.age"));
     let mut ciphertext=fs::read(&chunk_file).unwrap();
-    ciphertext[ciphertext.len()/2]^=0x80;
+    let midpoint=ciphertext.len()/2;
+    ciphertext[midpoint]^=0x80;
     fs::write(&chunk_file,ciphertext).unwrap();
     let target=workspace.path().join("restored");
     assert_eq!(store.restore(&identity,&first.id,None,&target).unwrap(),2);

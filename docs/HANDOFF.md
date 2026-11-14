@@ -195,3 +195,30 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
 - Rust standalone desktop now resolves the same protected vault path as Python 0.1.0 on macOS (`~/Library/Application Support/multi-backup/keys/default.agevault`), Windows (`%APPDATA%/multi-backup/keys/default.agevault`) and Linux (`$XDG_CONFIG_HOME/multi-backup/keys/default.agevault`), independent of the user-selected backup destination. If that vault already exists (including a rejected symlink), startup is locked; only an authenticated password or already enrolled Mac Touch ID can unlock backup UI. For a new installation without a vault, Start/Resume takes the user to the Vault panel and requires generation/unlock rather than permitting unsecured backups. An identity already unlocked for the current application session is held exclusively in a zeroized Rust allocation.
 - Added the new Rust updater module and operational CLI/UI controls. They retrieve the official fixed GitHub Releases endpoint by stable/early-release, select native architecture-specific Rust-only assets, reject non-HTTPS/off-domain URL hops and missing official SHA-256 digests, bound redirects/file sizes and stage the bytes atomically. No downloaded executable is installed/launched automatically. Physical system signing and version-by-version upgrade/rollback remain separate release acceptance tests.
 - Existing r018 Python GUI and archives on `main` have not changed. The r020 feature branch is **not** yet a fully certified replacement: external provider E2E with private authenticated accounts, UI/pixel/accessibility review, physical biometry, signed/notarized distribution and end-to-end upgrade/rollback still fail to have sufficient verified evidence.
+
+
+## r021 handoff — experimental content-addressed storage & server (2026-11-14)
+
+- Continue on PR #9 \`feature/r019-rust-native-encrypted-archive\`; main r018
+  remains the release baseline. Do not squash/merge/publish until review.
+- Rust chunk store v1: HMAC-addressed 4-MiB chunks, zstd/age,
+  one encrypted logical manifest (across provider namespaces), selective
+  restore to fresh destination; 8+2 ciphertext parity with reconstruction
+  and quarantine. CLI \`storage\` subcommands added.
+- Rust server: Argon2id local login, 8-hour cookie sessions, origin/CSRF
+  checks, JSONL audit, responsive browse and server-side selective export;
+  no LDAP/OIDC/SMTP implementation yet.
+- Dockerfile, Compose, Helm, Kustomize, compiled wizard and GitHub conditional
+  Docker Hub publication workflow. Registry secret/variable must be configured
+  and CI validated before official OCI images exist.
+- Original offline artwork generator replaces remote Unsplash dependency.
+  Rust desktop draws a vector hero reading "Multi Backup". Regenerate all
+  old PDF brochures and screenshot assets before publication.
+- Tests added for original art, age-encrypted roundtrip/dedup and erasure
+  corruption scenarios. These are NOT yet confirmed passing remotely.
+- Remaining: full vault interoperability, GUI storage/settings, content-
+  defined chunking, garbage collection, ZIP64 portable volumes, storage
+  migration wizard, FUSE/WinFsp mounts, restore-to-origin, LDAP/SSO/SMTP,
+  robust audit/retention, image publication and security review.
+- Docs: CHUNK_STORAGE_V1.md, SERVER_DEPLOYMENT.md. Keep this handoff and
+  cumulative GitHub branch commits; no unverified completion percentage.

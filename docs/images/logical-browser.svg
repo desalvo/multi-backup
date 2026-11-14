@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="510" viewBox="0 0 1200 510" role="img" aria-label="Browser unificato del backup logico con file, cartelle e restore selettivo">
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#081a40"/><stop offset="1" stop-color="#36236d"/></linearGradient></defs>
+<rect width="1200" height="510" rx="25" fill="url(#bg)"/>
+<rect x="45" y="45" width="1110" height="415" rx="18" fill="#102655" stroke="#70d7ee" stroke-width="2"/>
+<rect x="45" y="45" width="1110" height="58" rx="18" fill="#233e83"/>
+<g font-family="sans-serif"><text x="70" y="82" fill="white" font-size="25" font-weight="bold">Multi Backup · Backup logico 2026-11-14</text>
+<text x="85" y="148" fill="#78e8ff" font-size="21">▾  Backup completo</text>
+<text x="120" y="190" fill="#e7efff" font-size="19">▸  github / repo-a /</text><text x="120" y="228" fill="#e7efff" font-size="19">▾  ci / workflows /</text><text x="165" y="266" fill="#d0e3fb" font-size="18">☑  run-4349.json</text><text x="120" y="304" fill="#e7efff" font-size="19">▸  metadata /</text><text x="120" y="342" fill="#e7efff" font-size="19">▸  dropbox /</text>
+<rect x="650" y="140" width="440" height="265" rx="17" fill="#19366a" stroke="#7194e1"/>
+<text x="680" y="188" fill="#fff" font-size="23" font-weight="bold">Restore della selezione</text>
+<text x="680" y="237" fill="#d6e8fc" font-size="18">1 file selezionato</text>
+<rect x="680" y="274" width="178" height="57" rx="13" fill="#2f8ccc"/><text x="696" y="310" fill="#fff" font-size="18">Export locale</text>
+<rect x="877" y="274" width="190" height="57" rx="13" fill="#7550cc"/><text x="890" y="310" fill="#fff" font-size="18">Restore origine*</text>
+<text x="680" y="366" fill="#bdceef" font-size="15">* richiederà diff e conferma esplicita</text>
+<text x="72" y="430" fill="#b3ceef" font-size="15">Diagramma UX progettato — non screenshot di funzionalità completate</text></g></svg>
