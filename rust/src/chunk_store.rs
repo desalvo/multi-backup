@@ -1299,18 +1299,29 @@ impl Store {
                 continue;
             }
             let folder=self.root.join("parity").join(&stripe.id[..2]).join(&stripe.id);
-            if !fs::symlink_metadata(&folder)?.file_type().is_dir(){
-                return Err("Unsafe orphan parity folder".into());
+            match fs::symlink_metadata(&folder){
+                Ok(meta) if !meta.file_type().is_dir()=>
+                    return Err("Unsafe obsolete parity folder".into()),
+                Err(error) if error.kind()!=std::io::ErrorKind::NotFound=>
+                    return Err(error.into()),
+                _=>()
             }
             let mut files=vec![record];
-            // Validate all planned removes before starting the destructive pass.
+            // A crash may have removed one obsolete shard after commit.
+            // Missing retired shards are safe only for a no-longer-active
+            // fully orphan stripe or a mature superseded old stripe.
             for i in 0..crate::parity::PARITY {
                 let shard=folder.join(format!("{i}.age"));
-                if !old_enough(&shard)?{
-                    files.clear();
-                    break;
+                match fs::symlink_metadata(&shard) {
+                    Err(error) if error.kind()==std::io::ErrorKind::NotFound=>continue,
+                    Err(error)=>return Err(error.into()),
+                    Ok(meta) if !meta.file_type().is_file()=>
+                        return Err("Unsafe obsolete parity shard".into()),
+                    Ok(_)=>{
+                        if !old_enough(&shard)?{files.clear();break;}
+                        files.push(shard);
+                    }
                 }
-                files.push(shard);
             }
             if files.is_empty() {
                 for item in &stripe.members {
@@ -1437,7 +1448,7 @@ impl Store {
                     .ok_or("GC stripe size overflow")?)
             })?;
             for path in files {fs::remove_file(path)?;}
-            fs::remove_dir(folder)?;
+            if folder.exists(){fs::remove_dir(folder)?;}
             report.deleted_stripes+=1;
             report.reclaimed_bytes=report.reclaimed_bytes.checked_add(size)
                 .ok_or("GC reclaimed size overflow")?;
