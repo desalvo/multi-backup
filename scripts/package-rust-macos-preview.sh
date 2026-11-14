@@ -65,14 +65,46 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 "$APP/Contents/Resources/bin/multi-backup-native" --version
 DMG="multi-backup-rust-preview-macos-$ARCH.dmg"
 rm -f "$DMG"
-hdiutil create -quiet -fs HFS+ -volname "Multi Backup Rust Preview" \
-  -srcfolder "$APP" -format UDZO "$DMG"
+STAGE="$(mktemp -d -t multi-backup-rust-stage.XXXXXXXX)"
 MOUNT="$(mktemp -d -t multi-backup-rust-mount.XXXXXXXX)"
-hdiutil attach -quiet -nobrowse -mountpoint "$MOUNT" "$DMG"
-cleanup() { hdiutil detach -quiet "$MOUNT" || true; rmdir "$MOUNT" || true; }
+cleanup() {
+  if mount | grep -F "$MOUNT" >/dev/null; then hdiutil detach -quiet "$MOUNT" || true; fi
+  rm -rf "$STAGE"
+  rmdir "$MOUNT" 2>/dev/null || true
+}
 trap cleanup EXIT
+# Exactly one native app plus the familiar Applications drag-install shortcut.
+ditto "$APP" "$STAGE/Multi Backup Rust Preview.app"
+ln -s /Applications "$STAGE/Applications"
+test -L "$STAGE/Applications"
+# macOS Intel runners can collide with diskimages services. Retry only
+# a confirmed transient busy error, never bypass a signing or integrity check.
+for attempt in 1 2 3 4; do
+  if hdiutil create -fs HFS+ -volname "Multi Backup Rust Preview" \
+    -srcfolder "$STAGE" -format UDZO "$DMG" >"$STAGE/hdiutil-create.log" 2>&1; then
+    break
+  fi
+  cat "$STAGE/hdiutil-create.log" >&2
+  if ! grep -Eqi 'Resource busy|Resource temporarily unavailable' "$STAGE/hdiutil-create.log" ||
+     [[ "$attempt" == 4 ]]; then exit 1; fi
+  rm -f "$DMG"
+  sleep "$((attempt*3))"
+done
+test -f "$DMG"
+for attempt in 1 2 3 4; do
+  if hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG" \
+       >"$STAGE/hdiutil-attach.log" 2>&1; then break; fi
+  cat "$STAGE/hdiutil-attach.log" >&2
+  if ! grep -Eqi 'Resource busy|Resource temporarily unavailable' "$STAGE/hdiutil-attach.log" ||
+     [[ "$attempt" == 4 ]]; then exit 1; fi
+  sleep "$((attempt*3))"
+done
 test -d "$MOUNT/Multi Backup Rust Preview.app"
-test "$(find "$MOUNT" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1
+test -L "$MOUNT/Applications"
+test "$(readlink "$MOUNT/Applications")" = "/Applications"
+test "$(find "$MOUNT" -mindepth 1 -maxdepth 1 \
+  ! -name '.DS_Store' ! -name '.Trashes' ! -name '.fseventsd' |
+  wc -l | tr -d ' ')" = 2
 "$MOUNT/Multi Backup Rust Preview.app/Contents/MacOS/Multi Backup" --self-test
 codesign --verify --deep --strict "$MOUNT/Multi Backup Rust Preview.app"
 shasum -a 256 "$DMG" > "$DMG.sha256"
