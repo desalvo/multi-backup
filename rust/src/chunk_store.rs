@@ -1050,3 +1050,166 @@ impl Store {
         Ok(crate::backup_policy::expiry_preview(&records,policy,now)?)
     }
 }
+
+
+/// Conservative reference-counting GC: purge/rebase changes only manifests.
+/// GC is the sole place where orphan ciphertext may be physically deleted.
+/// Mixed live/dead 8+2 parity stripes are retained until a separate
+/// crash-safe repack can replace them; no protection is silently weakened.
+#[derive(Debug,serde::Serialize)]
+pub struct GarbageCollectionReport {
+    pub dry_run:bool,
+    pub live_backups:usize,
+    pub live_chunks:usize,
+    pub orphan_chunk_candidates:usize,
+    pub obsolete_stripe_candidates:usize,
+    pub blocked_chunks_by_shared_parity:usize,
+    pub reclaimable_bytes:u64,
+    pub deleted_chunks:usize,
+    pub deleted_stripes:usize,
+    pub reclaimed_bytes:u64,
+    pub grace_hours:u64,
+}
+impl Store {
+    pub fn garbage_collect(&self,identity:&Path,grace_hours:u64,execute:bool)
+        ->Res<GarbageCollectionReport>{
+        if !(24..=24*365).contains(&grace_hours){
+            return Err("GC grace must be 24 hours to 365 days".into());
+        }
+        // Every writer, including storage backups and manifest rebase, must
+        // hold the same .lock. Re-evaluate all references under this lock.
+        let _guard=self.app_lock()?;
+        let backups=self.list(identity)?;
+        let mut live=HashSet::new();
+        for backup in &backups {
+            // Fail closed for malformed chains, lost refs, corrupt data or
+            // parity. No partial cleanup when live backup integrity is suspect.
+            crate::backup_chain::ancestors(self,identity,&backup.id)?;
+            let result=self.verify(identity,&backup.id)?;
+            if !result.healthy {
+                return Err(format!("GC blocked by unhealthy live backup {}",backup.id).into());
+            }
+            for entry in &backup.entries {
+                for chunk in &entry.chunks {live.insert(chunk.id.clone());}
+            }
+        }
+        let now=std::time::SystemTime::now();
+        let min_age=std::time::Duration::from_secs(grace_hours*3600);
+        let old_enough=|path:&Path|->Res<bool>{
+            let md=fs::symlink_metadata(path)?;
+            if !md.file_type().is_file(){return Err("GC refuses non-regular file".into());}
+            Ok(now.duration_since(md.modified()?).is_ok_and(|age|age>=min_age))
+        };
+        let stripes=self.read_protection(identity)?;
+        let mut retained_stripe_members=HashSet::new();
+        let mut obsolete_stripes=Vec::new();
+        let mut recoverable_bytes=0u64;
+        for stripe in &stripes {
+            let record=self.root.join("stripes").join(format!("{}.json.age",stripe.id));
+            let referenced=stripe.members.iter().any(|item|live.contains(&item.id));
+            if referenced || !old_enough(&record)? {
+                for item in &stripe.members {
+                    retained_stripe_members.insert(item.id.clone());
+                }
+                continue;
+            }
+            let folder=self.root.join("parity").join(&stripe.id[..2]).join(&stripe.id);
+            if !fs::symlink_metadata(&folder)?.file_type().is_dir(){
+                return Err("Unsafe orphan parity folder".into());
+            }
+            let mut files=vec![record];
+            // Validate all planned removes before starting the destructive pass.
+            for i in 0..crate::parity::PARITY {
+                let shard=folder.join(format!("{i}.age"));
+                if !old_enough(&shard)?{
+                    files.clear();
+                    break;
+                }
+                files.push(shard);
+            }
+            if files.is_empty() {
+                for item in &stripe.members {
+                    retained_stripe_members.insert(item.id.clone());
+                }
+                continue;
+            }
+            let mut bytes=0u64;
+            for file in &files {
+                bytes=bytes.checked_add(fs::symlink_metadata(file)?.len())
+                    .ok_or("Parity GC size overflow")?;
+            }
+            recoverable_bytes=recoverable_bytes.checked_add(bytes)
+                .ok_or("GC size overflow")?;
+            obsolete_stripes.push((stripe.id.clone(),files,folder));
+        }
+        let root=self.root.join("chunks");
+        let mut candidates=Vec::new();
+        let mut blocked=0usize;
+        if root.exists(){
+            if !fs::symlink_metadata(&root)?.file_type().is_dir(){
+                return Err("Invalid chunk store directory".into());
+            }
+            for item in WalkDir::new(&root).follow_links(false).min_depth(1).max_depth(3){
+                let item=item?;
+                if item.file_type().is_symlink(){
+                    return Err("GC encountered a symlink in chunk storage".into());
+                }
+                if item.file_type().is_dir(){continue;}
+                if !item.file_type().is_file(){
+                    return Err("GC encountered a special chunk storage entry".into());
+                }
+                let path=item.path().to_path_buf();
+                let file=path.file_name().and_then(|s|s.to_str())
+                    .ok_or("Non-UTF8 chunk name")?;
+                let id=file.strip_suffix(".age").ok_or("Unexpected chunk file")?;
+                if !safe_hash(id){
+                    return Err("Unsafe chunk object identifier".into());
+                }
+                if self.chunk_path(id)? != path{
+                    return Err("Chunk does not match canonical object path".into());
+                }
+                if live.contains(id){continue;}
+                if retained_stripe_members.contains(id){
+                    blocked+=1;
+                    continue;
+                }
+                if !old_enough(&path)? {continue;}
+                let bytes=fs::symlink_metadata(&path)?.len();
+                recoverable_bytes=recoverable_bytes.checked_add(bytes)
+                    .ok_or("GC size overflow")?;
+                candidates.push((path,bytes));
+            }
+        }
+        let mut report=GarbageCollectionReport{
+            dry_run:!execute,live_backups:backups.len(),live_chunks:live.len(),
+            orphan_chunk_candidates:candidates.len(),
+            obsolete_stripe_candidates:obsolete_stripes.len(),
+            blocked_chunks_by_shared_parity:blocked,
+            reclaimable_bytes:recoverable_bytes,
+            deleted_chunks:0,deleted_stripes:0,reclaimed_bytes:0,
+            grace_hours,
+        };
+        if !execute{return Ok(report);}
+        // Delete orphan stripe INDEX first: no live chunk depends on it.
+        // Parity pieces are only removed for fully orphan, grace-qualified
+        // groups; mixed groups are preserved intact for future compaction.
+        for (_id,files,folder) in obsolete_stripes {
+            let size=files.iter().try_fold(0u64,|sum,path|->Res<u64>{
+                Ok(sum.checked_add(fs::symlink_metadata(path)?.len())
+                    .ok_or("GC stripe size overflow")?)
+            })?;
+            for path in files {fs::remove_file(path)?;}
+            fs::remove_dir(folder)?;
+            report.deleted_stripes+=1;
+            report.reclaimed_bytes=report.reclaimed_bytes.checked_add(size)
+                .ok_or("GC reclaimed size overflow")?;
+        }
+        for (path,bytes) in candidates {
+            fs::remove_file(path)?;
+            report.deleted_chunks+=1;
+            report.reclaimed_bytes=report.reclaimed_bytes.checked_add(bytes)
+                .ok_or("GC reclaimed size overflow")?;
+        }
+        Ok(report)
+    }
+}
