@@ -73,14 +73,14 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
     let parent = destination.parent().filter(|p| !p.as_os_str().is_empty())
         .ok_or("Restore must specify an explicit destination parent")?;
     let parent = regular_directory(parent)?;
-    if parent.starts_with(&root) || root.starts_with(&parent) {
-        return Err("Restore destination and encrypted store may not overlap".into());
-    }
     let name = destination.file_name().ok_or("Invalid restore directory name")?;
     if name == "." || name == ".." {
         return Err("Invalid restore directory name".into());
     }
     let full_destination = parent.join(name);
+    if full_destination.starts_with(&root) || root.starts_with(&full_destination) {
+        return Err("Restore destination and encrypted store may not overlap".into());
+    }
     if fs::symlink_metadata(&full_destination).is_ok() {
         return Err("Refusing to overwrite an existing plugin restore destination".into());
     }
