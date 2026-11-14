@@ -4,6 +4,16 @@
 //! differential compatibility tests and all native E2E workflows are certified.
 //! This Rust module intentionally does not open or modify existing archives.
 
+pub mod archive;
+pub mod archive_management;
+pub mod checkpoint_audit;
+pub mod journal;
+pub mod remote_restore;
+pub mod dropbox_hash;
+pub mod dropbox_client;
+pub mod github_client;
+pub mod vault;
+
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

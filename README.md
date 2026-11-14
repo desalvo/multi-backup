@@ -170,3 +170,9 @@ The native installers bundle two **local** server-storage photographic composite
     python scripts/create-photo-assets.py
 
 This fetches the free-license photo from a pinned Unsplash URL **at build time**. It is not a runtime dependency, and the installed app never contacts Unsplash. For credited artwork details see docs/PHOTO_CREDITS.md. If building without network access, pre-generate the two local JPG assets before invoking the native packaging script.
+
+### Rust desktop previews — installation tests
+
+The r020 PR CI builds standalone **Python-free** Rust desktop previews alongside the r018 compatibility installers: single-app ad-hoc signed macOS DMGs (Apple Silicon / Intel), Windows x64 Inno Setup installer and ZIP, and an Ubuntu 24.04 x64 archive. These are **not signed stable releases**; real-account provider parity, Mac notarization, Windows code-signing and EL8/9/10 RPM builds remain open.
+
+The r020 Rust desktop now keeps the age identity only in zeroizing memory after vault unlock, supports authenticated local and remote restore without a plaintext key file, bundles a Mac Touch ID adapter (hardware certification pending), and includes Python-free preview RPM build jobs for Rocky/AlmaLinux EL8–10. These previews are not signed stable installers. See [native migration acceptance inventory](docs/RUST_PORT_INVENTORY.md).

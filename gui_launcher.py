@@ -12,6 +12,7 @@ def bundle_self_test():
     import backends.dropbox_backend
     from gui import asset
     from premium_dashboard import format_size, summarize_catalog
+    import rust_bridge
     assert format_size(0) == '0 B'
     assert summarize_catalog([], '.', now=0)['count'] == 0
     from runtime_bootstrap import configure_path
@@ -28,6 +29,7 @@ def bundle_self_test():
             raise RuntimeError('Missing bundled image: '+filename)
         with Image.open(path) as picture:
             picture.verify()
+    assert rust_bridge.native_progress_color(0) == '#E82020' or rust_bridge.native_progress_color(0) is None
     print('Multi Backup GUI bundle self-test OK')
     return 0
 
