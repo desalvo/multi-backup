@@ -1021,6 +1021,15 @@ impl Store {
                 fs::set_permissions(&destination,fs::Permissions::from_mode(0o600))?;
             }
         }
+        // Authenticate every rewritten successor under its NEW lineage
+        // before the original ancestor can be removed.
+        for child in &children {
+            let checked=crate::backup_chain::verify_chain(
+                self,identity,&child.id,true)?;
+            if !checked.healthy {
+                return Err("Rebased successor did not pass independent chain integrity verification".into());
+            }
+        }
         let manifest=self.manifest_path(id)?;
         if !fs::symlink_metadata(&manifest)?.file_type().is_file(){
             return Err("Unsafe manifest deletion".into());
