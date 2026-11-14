@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore, scheduler};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -14,6 +14,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins restore --input posix --output posix --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
+       multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
+       multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--mode full|incremental] [--parent BACKUP_ID] [--top-namespace PATH]\n\
        multi-backup-native storage info --root DIR --identity IDENTITY --id HASH [--json]\n\
@@ -74,7 +76,7 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
-        if ["--dry-run","--source-snapshot-attested","--no-chain","--rebase-dependents"].contains(&args[pos].as_str()) {
+        if ["--dry-run","--source-snapshot-attested","--no-chain","--rebase-dependents","--force"].contains(&args[pos].as_str()) {
             let flag=args[pos].as_str();
             if parsed.insert(flag,"true").is_some() {
                 return Err(format!("Duplicate {flag} flag"));
@@ -221,6 +223,48 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 else {println!("Restored {count} verified files to a new directory");}
             },
             _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
+    if family == "schedule" {
+        if password_stdin {return Err("Scheduler uses separate age identity paths".into());}
+        accepted(&flags,&["--config","--state","--force","--poll-seconds"])?;
+        let config=Path::new(required(&flags,"--config")?);
+        let state=Path::new(required(&flags,"--state")?);
+        match command {
+            "run"=>{
+                if flags.contains_key("--poll-seconds") {
+                    return Err("Polling interval is valid only in daemon mode".into());
+                }
+                let now=std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                let output=scheduler::run_once(config,state,flags.contains_key("--force"),now)?;
+                println!("{}",serde_json::to_string_pretty(&output)?);
+            },
+            "daemon"=>{
+                if flags.contains_key("--force"){
+                    return Err("--force is only valid for a one-shot manual run".into());
+                }
+                let poll=flags.get("--poll-seconds").copied().unwrap_or("60").parse::<u64>()?;
+                if !(10..=3600).contains(&poll){return Err("Poll seconds must be 10..3600".into());}
+                loop {
+                    let now=std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                    match scheduler::run_once(config,state,false,now){
+                        Ok(events)=>{
+                            for event in events {
+                                if event.executed {
+                                    println!("Scheduler {} completed; backup={:?}",
+                                        event.job_id,event.backup_id);
+                                }
+                            }
+                        },
+                        Err(error)=>eprintln!("Scheduler run failed: {error}"),
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(poll));
+                }
+            },
+            _=>return Err(usage().into())
         }
         return Ok(());
     }
