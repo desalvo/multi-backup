@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -574,8 +574,21 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let from = Path::new(required(&flags, "--archive")?);
         match command {
             "github" => {
-                accepted(&flags, &["--archive", "--identity", "--vault", "--target", "--visibility", "--confirm"])?;
+                accepted(&flags, &["--archive", "--identity", "--vault", "--target", "--visibility", "--confirm",
+                                    "--source-account","--target-account"])?;
                 let target = required(&flags, "--target")?;
+                let (target_owner,_)=remote_restore::github_slug(target)?;
+                if let Some(expected)=flags.get("--target-account") {
+                    if !expected.eq_ignore_ascii_case(target_owner){
+                        return Err("GitHub destination account must match new repository owner".into());
+                    }
+                }
+                if let Some(origin)=flags.get("--source-account") {
+                    let _plan=account_restore::AccountRestorePlan::prepare(
+                        "github",origin,target_owner,Vec::new())?;
+                    // The source account is informational. gh login + owner
+                    // permissions authorize writes only to the new account.
+                }
                 let visibility = flags.get("--visibility").copied().unwrap_or("private");
                 if visibility != "private" && visibility != "public" {
                     return Err("Visibility must be private or public".into());
@@ -590,12 +603,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("New GitHub repository restored: {url}");
             },
             "dropbox" => {
-                accepted(&flags, &["--archive", "--identity", "--vault", "--path", "--confirm"])?;
+                accepted(&flags, &["--archive", "--identity", "--vault", "--path", "--confirm",
+                                    "--source-account","--target-account"])?;
                 let path = required(&flags, "--path")?;
+                let target_account=flags.get("--target-account").copied();
+                if let Some(origin)=flags.get("--source-account") {
+                    let destination=target_account.ok_or(
+                        "Cross-user Dropbox restore requires explicit --target-account")?;
+                    let _plan=account_restore::AccountRestorePlan::prepare(
+                        "dropbox",origin,destination,Vec::new())?;
+                }
                 let result = if let Some(secret) = &secret {
-                    remote_restore::dropbox_new_file_from_memory(from, secret, path)?
+                    if let Some(destination)=target_account {
+                        remote_restore::dropbox_new_file_for_account_from_memory(
+                            from,secret,path,destination)?
+                    }else {
+                        remote_restore::dropbox_new_file_from_memory(from,secret,path)?
+                    }
                 } else {
-                    remote_restore::dropbox_new_file(from, Path::new(plain.unwrap()), path)?
+                    if let Some(destination)=target_account {
+                        remote_restore::dropbox_new_file_for_account(
+                            from,Path::new(plain.unwrap()),path,destination)?
+                    }else{
+                        remote_restore::dropbox_new_file(from,Path::new(plain.unwrap()),path)?
+                    }
                 };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
