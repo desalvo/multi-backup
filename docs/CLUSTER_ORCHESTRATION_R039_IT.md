@@ -133,3 +133,8 @@ Per verificare funzionamento e guasti:
 **Gate ancora aperti:** strumenti OpenAFS e keytab/localauth su host autorizzati, hard CPU/RAM per SSH remoto e host, full multiprovider orchestration, storage object writers, push/pull reali, fencing transazionale, ricongiungimento OIDC, routing restore locale da altre repliche, test CI di tutti gli OS e test Kubernetes, firma/notarizzazione degli installer, security audit e rollback.
 
 Riferimenti: [agenti IT](AGENTS_AFS_R039_IT.md), [agenti EN](AGENTS_AFS_R039_EN.md), [catalogo plugin](PLUGIN_MATRIX.md), [certificazione RC](RC_CERTIFICATION_MATRIX.md), [stato sviluppo](DEVELOPMENT_STATUS.md).
+
+## Aggiornamento UI r039 — stato condiviso fra le repliche (15 novembre 2026)
+
+Nell'interfaccia web Rust è stato aggiunto il pannello **Cluster, agenti e backup paralleli**. Visualizza in sola lettura, con accesso amministrativo, l'insieme delle repliche (heartbeat e capacità), storage condivisi o locali con owner, ultimi job con stato/replica/trasporto e agenti approvati, offline o revocati. Il pannello interroga GET /api/cluster/status e GET /api/agents/admin/list sul server raggiunto e riceve lo stesso registro PostgreSQL indipendentemente dalla replica. Nessun input del database viene interpretato come HTML; l'interfaccia usa contenuti testuali sicuri. La gestione di registrazione, policy e cancellazione degli agenti resta effettuata tramite API amministrative protette; non è un'interfaccia di gestione completa degli agenti. Da collaudare su deployment Kubernetes con bilanciatore e sessioni condivise.
+
