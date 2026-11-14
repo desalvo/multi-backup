@@ -80,3 +80,5 @@ Tutte le pagine sono scorrevoli; la sidebar include Restore e rimane collassabil
 ### Anteprime Rust native — test installazione
 
 La CI della PR r020 genera pacchetti **senza Python** separati dalla r018: DMG a singola app macOS ARM64/Intel con firma ad hoc, installer Inno Setup e ZIP Windows x64, archivio eseguibile Ubuntu 24.04 x64. Sono anteprime non notarizzate Apple e non firmate Windows, senza ancora gli RPM Rust Rocky/Alma. La r018 rimane disponibile e invariata.
+
+La GUI Rust r020 conserva la chiave age decifrata soltanto in RAM dopo lo sblocco del vault e permette ripristini locali/remoti senza un file di chiave privata in chiaro. Per macOS è predisposto il supporto Touch ID nativo (da validare su hardware reale); la CI include anche sei RPM Rust per Rocky/AlmaLinux 8/9/10. I pacchetti rimangono anteprime non stabili e non firmate per la produzione. Consultare [l'inventario della migrazione](docs/RUST_PORT_INVENTORY.md).

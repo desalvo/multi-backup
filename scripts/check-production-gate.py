@@ -31,6 +31,12 @@ def validate():
     assert jobs['rust-desktop-smoke']['needs']==['production-gate'], 'Rust-only desktop must follow the security gate'
     assert jobs['rust-macos-native-preview']['needs']==['production-gate'], 'Rust-only macOS DMGs must follow production gate'
     assert jobs['rust-windows-native-preview']['needs']==['production-gate'], 'Rust-only Windows setup must follow production gate'
+    assert jobs['rust-linux-rpm-native-preview']['needs']==['production-gate'], 'Rust-only EL RPMs must follow production gate'
+    el_matrix=jobs['rust-linux-rpm-native-preview']['strategy']['matrix']['include']
+    assert {(x['distro'],int(x['el'])) for x in el_matrix}=={
+        ('rocky',8),('rocky',9),('rocky',10),('alma',8),('alma',9),('alma',10)
+    }, 'Rust-only RPM builds must cover all six Rocky/Alma platforms'
+    assert 'multi-backup-rust.spec' in str(jobs['rust-linux-rpm-native-preview']['steps']), 'Native Rust RPM spec missing'
     mac_matrix=jobs['rust-macos-native-preview']['strategy']['matrix']['include']
     assert {x['arch'] for x in mac_matrix}=={'arm64','x86_64'}, 'Both native Mac architectures are mandatory'
     assert 'package-rust-macos-preview.sh' in str(jobs['rust-macos-native-preview']['steps']), 'Native Mac DMG packaging missing'
@@ -39,6 +45,9 @@ def validate():
     assert (ROOT/'packaging/windows/rust-native-preview.iss').is_file(), 'Native Windows installer definition missing'
     assert (ROOT/'scripts/package-rust-macos-preview.sh').is_file(), 'Native Mac packager missing'
     assert (ROOT/'scripts/package-rust-windows-preview.ps1').is_file(), 'Native Windows packager missing'
+    assert 'swiftc -O packaging/macos/biometric.swift' in (ROOT/'scripts/package-rust-macos-preview.sh').read_text('utf-8'), 'Native Rust Mac bundle lacks Touch ID adapter'
+    assert 'restored_from_protected_vault' in (ROOT/'scripts/test-rust-archive-compat.py').read_text('utf-8'), 'Native protected vault restore parity not tested'
+    assert 'archive::extract_from_memory' in (ROOT/'rust-desktop/src/main.rs').read_text('utf-8'), 'Native GUI uses an unprotected plaintext restore path'
     assert 'rust-desktop/Cargo.toml' in str(jobs['rust-desktop-smoke']['steps'])
     assert '--smoke' in str(jobs['rust-desktop-smoke']['steps'])
 
