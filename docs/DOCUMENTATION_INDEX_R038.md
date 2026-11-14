@@ -1,7 +1,7 @@
 # Multi Backup — r038 documentation index and coverage audit
 
 **Audit date:** 2026-11-14. **Current engineering branch:** PR #10,
-\`feature/r038-rust-primary-plugin-executor\`. Status: **Rust development
+`feature/r038-rust-primary-plugin-executor`. Status: **Rust development
 preview; not a published RC**. This page is the point of entry for users,
 release reviewers and future development handoff.
 
@@ -45,7 +45,7 @@ production certification.
 
 ## Legacy document separation
 
-The PDF manuals/brochures under \`docs/manuals/\` and \`docs/brochures/\`
+The PDF manuals/brochures under `docs/manuals/` and `docs/brochures/`
 originated from the **r018 Python/Tk** interface and may show Tk screenshots.
 They must not be described as screenshots of the Rust GUI. The publication
 generator now appends the r038 Rust operational procedures and labels the
@@ -62,15 +62,15 @@ does not qualify later PR #10 functional changes.
 
 For any new command, setting, behavior or security rule:
 1. Update the affected Rust code and acceptance test.
-2. Update both \`OPERATIONS_R038_IT.md\` and \`OPERATIONS_R038_EN.md\`
+2. Update both `OPERATIONS_R038_IT.md` and `OPERATIONS_R038_EN.md`
    with executable examples, defaults, limitations and failure behavior.
-3. Update \`FEATURE_INVENTORY_R038.md\` and the relevant engineering reference.
-4. Update \`DEVELOPMENT_STATUS.md\`, \`HANDOFF.md\` and the RC matrix, including
+3. Update `FEATURE_INVENTORY_R038.md` and the relevant engineering reference.
+4. Update `DEVELOPMENT_STATUS.md`, `HANDOFF.md` and the RC matrix, including
    the exact CI run / SHA only after results are actually available.
 5. Regenerate bilingual PDF manuals/brochures from
-   \`scripts/build-publications.py\`; distinguish legacy Tk screenshots from
+   `scripts/build-publications.py`; distinguish legacy Tk screenshots from
    Rust native screenshot evidence. Inspect text and rendered pages.
-6. Run \`python scripts/check-documentation-consistency.py\` inside the
+6. Run `python scripts/check-documentation-consistency.py` inside the
    Production Gate; do not merge if any required operational coverage is lost.
 7. Do not claim signed RC, fully migrated plugin roles, WORM, live backup
    certification or physical user installation without independent proof.
