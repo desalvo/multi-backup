@@ -1,7 +1,7 @@
 //! Full/incremental logical lineage, chain verification and exact byte metrics.
 //! Every snapshot contains a complete encrypted manifest of chunk references;
 //! incrementals reuse deduplicated chunks, not fragile delta-only payloads.
-use crate::chunk_store::{age, BackupKind, Entry, LogicalBackup, Store};
+use crate::chunk_store::{BackupKind, Entry, LogicalBackup, Store};
 use serde::Serialize;
 use std::{collections::{HashMap, HashSet}, path::Path};
 
