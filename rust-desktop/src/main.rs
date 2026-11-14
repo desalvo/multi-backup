@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault};
+use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -24,17 +24,17 @@ const VIOLET: Color32 = Color32::from_rgb(113, 87, 231);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Page {
-    Dashboard, Backup, Archives, Restore, Plugins, Vault, Updates, Settings,
+    Dashboard, Backup, Archives, Restore, Storage, Plugins, Vault, Updates, Settings,
 }
 impl Page {
-    const ALL: [Self; 8] = [
-        Self::Dashboard, Self::Backup, Self::Archives, Self::Restore,
+    const ALL: [Self; 9] = [
+        Self::Dashboard, Self::Backup, Self::Archives, Self::Restore, Self::Storage,
         Self::Plugins, Self::Vault, Self::Updates, Self::Settings,
     ];
     fn label(self) -> &'static str {
         match self {
             Self::Dashboard => "Dashboard", Self::Backup => "Backup",
-            Self::Archives => "Archivi", Self::Restore => "Ripristina",
+            Self::Archives => "Archivi", Self::Restore => "Ripristina", Self::Storage => "Storage chunk",
             Self::Plugins => "Plugin", Self::Vault => "Vault e chiavi",
             Self::Updates => "Aggiornamenti", Self::Settings => "Impostazioni",
         }
@@ -46,6 +46,7 @@ enum Event {
     Success(String),
     Failure(String),
     UpdateInfo(updater::ReleaseInfo),
+    ChunkCatalog(Vec<chunk_store::LogicalBackup>),
 }
 #[derive(Default)]
 struct Fields {
@@ -63,6 +64,18 @@ struct Fields {
     remote_repo: String,
     remote_file: String,
     delete_confirm: String,
+    chunk_root: String,
+    chunk_identity: String,
+    chunk_destination: String,
+    chunk_git: String,
+    chunk_ci: String,
+    chunk_metadata: String,
+    chunk_dropbox: String,
+    chunk_label: String,
+    chunk_selection: String,
+    chunk_legacy_json: String,
+    chunk_volume_mib: String,
+    chunk_size_mib: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -163,6 +176,8 @@ struct NativeApp {
     remote_confirm: Option<String>,
     update_channel: String,
     update_info: Option<updater::ReleaseInfo>,
+    chunk_backups: Vec<chunk_store::LogicalBackup>,
+    chunk_selected: String,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -201,6 +216,10 @@ impl NativeApp {
             recipient: age_recipient,
             vault_path: vault_path.display().to_string(),
             max_runs: max_runs.to_string(),
+            chunk_root: default_output_path.clone(),
+            chunk_label: "Backup completo".into(),
+            chunk_volume_mib: "2048".into(),
+            chunk_size_mib: "4".into(),
             ..Fields::default()
         };
         let entries = archive_catalog(Path::new(&fields.output));
@@ -223,6 +242,8 @@ impl NativeApp {
             remote_confirm: None,
             update_channel: update_channel.into(),
             update_info: None,
+            chunk_backups: Vec::new(),
+            chunk_selected: String::new(),
         }
     }
     fn rescan(&mut self) {
@@ -424,6 +445,13 @@ impl NativeApp {
                     Event::Failure(s) => {
                         self.status = format!("Errore: {}", s.chars().take(320).collect::<String>());
                         self.active = false; completed = true;
+                    }
+                    Event::ChunkCatalog(backups) => {
+                        if !backups.iter().any(|b| b.id == self.chunk_selected) {
+                            self.chunk_selected = backups.first()
+                                .map(|b|b.id.clone()).unwrap_or_default();
+                        }
+                        self.chunk_backups = backups;
                     }
                     Event::UpdateInfo(info) => {
                         self.status = if let Some(asset) = &info.asset {
@@ -898,6 +926,221 @@ impl NativeApp {
         ui.label(RichText::new(&self.status).color(INK));
         self.draw_progress(ui);
     }
+
+    fn run_chunk_action(&mut self, action:&str) {
+        if self.active {return;}
+        let root=self.fields.chunk_root.trim().to_string();
+        if root.is_empty(){self.status="Specificare il percorso storage".into();return;}
+        let key=self.fields.chunk_identity.trim().to_string();
+        if action!="init" && key.is_empty() {
+            self.status="Richiesta identità age esterna: il vault in RAM non viene esportato".into();
+            return;
+        }
+        let recipient=self.fields.recipient.trim().to_string();
+        let destination=self.fields.chunk_destination.trim().to_string();
+        let label=self.fields.chunk_label.trim().to_string();
+        let selection=self.fields.chunk_selection.clone();
+        let legacy=self.fields.chunk_legacy_json.clone();
+        let volume=self.fields.chunk_volume_mib.clone();
+        let chunk_size=self.fields.chunk_size_mib.clone();
+        let id=self.chunk_selected.clone();
+        let sources=[
+            ("github",self.fields.chunk_git.clone()),
+            ("ci",self.fields.chunk_ci.clone()),
+            ("metadata",self.fields.chunk_metadata.clone()),
+            ("dropbox",self.fields.chunk_dropbox.clone())
+        ];
+        let action=action.to_string();
+        let (tx,rx)=mpsc::channel();
+        self.receiver=Some(rx);
+        self.active=true;
+        self.progress=None;
+        self.started=Instant::now();
+        self.last_activity=Instant::now();
+        self.status=format!("Storage: {} in esecuzione",action);
+        thread::spawn(move ||{
+            let _=tx.send(Event::Status(format!("{}: verifica oggetti cifrati...",action)));
+            let result=(|| -> Result<String,String> {
+                let root=Path::new(&root);
+                let key=Path::new(&key);
+                if action=="init" {
+                    let size=chunk_size.parse::<usize>()
+                        .map_err(|_|"Dimensione chunk non valida")?;
+                    let bytes=size.checked_mul(1024*1024).ok_or("Chunk size overflow")?;
+                    chunk_store::Store::init(root,&recipient,bytes).map_err(|e|e.to_string())?;
+                    return Ok("Storage v1 creato senza toccare i backup esistenti".into());
+                }
+                if action=="import-zip" {
+                    let id=portable::import(Path::new(&destination),key,root)
+                        .map_err(|e|e.to_string())?;
+                    return Ok(format!("Backup logico {} importato e verificato",id));
+                }
+                let store=chunk_store::Store::open(root,key).map_err(|e|e.to_string())?;
+                let message=match action.as_str(){
+                    "list"=>format!("{} backup logici accessibili",store.list(key)
+                        .map_err(|e|e.to_string())?.len()),
+                    "backup"=>{
+                        let input:Vec<chunk_store::Source>=sources.iter()
+                            .filter(|(_,path)|!path.trim().is_empty())
+                            .map(|(namespace,path)|chunk_store::Source{
+                                namespace:(*namespace).to_owned(),
+                                directory:PathBuf::from(path.trim())
+                            }).collect();
+                        if input.is_empty(){return Err("Nessuna directory fonte selezionata".into());}
+                        let b=store.backup(key,&label,&input).map_err(|e|e.to_string())?;
+                        format!("Creato un solo backup logico {} con {} file",
+                            b.id,b.entries.len())
+                    },
+                    "migrate-legacy"=>{
+                        let json=std::fs::read_to_string(&legacy)
+                            .map_err(|e|format!("JSON archivi legacy: {e}"))?;
+                        let pairs:Vec<serde_json::Value>=serde_json::from_str(&json)
+                            .map_err(|e|e.to_string())?;
+                        let mut items=Vec::new();
+                        for pair in pairs {
+                            items.push(chunk_store::LegacySource{
+                                namespace:pair["namespace"].as_str()
+                                    .ok_or("Namespace legacy mancante")?.into(),
+                                archive:pair["archive"].as_str()
+                                    .ok_or("Percorso archivio legacy mancante")?.into()
+                            });
+                        }
+                        let b=store.import_legacy(key,&label,&items)
+                            .map_err(|e|e.to_string())?;
+                        format!("Migrati {} file in UN backup logico {}",
+                            b.entries.len(),b.id)
+                    },
+                    "verify"=>{
+                        let r=store.verify(key,&id).map_err(|e|e.to_string())?;
+                        if !r.healthy{return Err(format!("Integrità compromessa: {}",
+                            r.issues.join("; ")))}
+                        format!("Integrità age/HMAC/parità OK: {} chunk in {} file",
+                            r.unique_chunks,r.logical_files)
+                    },
+                    "repair"=>{
+                        let n=store.repair(key,&id).map_err(|e|e.to_string())?;
+                        format!("Riparazione completata: {} chunk ricostruiti",n)
+                    },
+                    "restore"=>{
+                        let choices:Vec<String>=selection.split(['\n',';'])
+                            .map(str::trim).filter(|s|!s.is_empty())
+                            .map(str::to_owned).collect();
+                        let n=store.restore_many(key,&id,&choices,Path::new(&destination))
+                            .map_err(|e|e.to_string())?;
+                        format!("{} file ricostruiti nella nuova directory {}",n,destination)
+                    },
+                    "export-zip"=>{
+                        let mib=volume.parse::<u64>()
+                            .map_err(|_|"Dimensione volumi ZIP non valida")?;
+                        let files=portable::export(&store,key,&id,Path::new(&destination),mib)
+                            .map_err(|e|e.to_string())?;
+                        format!("Esportati {} volumi ZIP64 cifrati",files.len())
+                    },
+                    "relocate"=>{
+                        let r=store.relocate(key,Path::new(&destination),false)
+                            .map_err(|e|e.to_string())?;
+                        format!("Storage copiato e verificato: {} backup logici, {} oggetti; origine preservata",
+                            r.logical_backups,r.encrypted_objects)
+                    },
+                    _=>return Err("Operazione storage sconosciuta".into())
+                };
+                if let Ok(catalog)=store.list(key){
+                    let _=tx.send(Event::ChunkCatalog(catalog));
+                }
+                Ok(message)
+            })();
+            match result {
+                Ok(message)=>{let _=tx.send(Event::Success(message));}
+                Err(error)=>{let _=tx.send(Event::Failure(error));}
+            }
+        });
+    }
+    fn storage(&mut self,ui:&mut egui::Ui){
+        ui.heading("Storage a chunk · un backup logico");
+        ui.label("I chunk, le parità e i manifest sono oggetti interni. Il browser mostra un solo backup per ciclo.");
+        ui.label("Directory del nuovo storage v1 (gli archivi .tar.gz.age esistenti non vengono modificati)");
+        ui.text_edit_singleline(&mut self.fields.chunk_root);
+        ui.label("File identity age esterno (temporaneo requisito del motore v1)");
+        ui.text_edit_singleline(&mut self.fields.chunk_identity);
+        ui.label("Recipient pubblico age");
+        ui.text_edit_singleline(&mut self.fields.recipient);
+        ui.horizontal_wrapped(|ui|{
+            ui.label("Chunk MiB");ui.text_edit_singleline(&mut self.fields.chunk_size_mib);
+            if ui.add_enabled(!self.active,egui::Button::new("Crea storage v1"))
+                .clicked(){self.run_chunk_action("init");}
+            if ui.add_enabled(!self.active,egui::Button::new("Aggiorna backup logici"))
+                .clicked(){self.run_chunk_action("list");}
+        });
+        ui.separator();
+        ui.label("Etichetta del backup logico completo");
+        ui.text_edit_singleline(&mut self.fields.chunk_label);
+        ui.label("Directory Git (opzionale; preparata dal motore/provider)");
+        ui.text_edit_singleline(&mut self.fields.chunk_git);
+        ui.label("Directory CI / Actions (opzionale)");
+        ui.text_edit_singleline(&mut self.fields.chunk_ci);
+        ui.label("Directory metadati (opzionale)");
+        ui.text_edit_singleline(&mut self.fields.chunk_metadata);
+        ui.label("Directory Dropbox (opzionale)");
+        ui.text_edit_singleline(&mut self.fields.chunk_dropbox);
+        if ui.add_enabled(!self.active,egui::Button::new("Crea UN backup logico cifrato")
+             .fill(VIOLET)).clicked(){self.run_chunk_action("backup");}
+        ui.separator();
+        ui.heading("Browser backup logici");
+        let backup_list=self.chunk_backups.clone();
+        egui::ScrollArea::vertical().max_height(300.0).show(ui,|ui|{
+            for backup in backup_list {
+                let selected=self.chunk_selected==backup.id;
+                let name=format!("{} ({} file) · {}",
+                    backup.label,backup.entries.len(),&backup.id[..12]);
+                if ui.selectable_label(selected,name).clicked() {
+                    self.chunk_selected=backup.id.clone();
+                }
+                if selected {
+                    for file in &backup.entries {
+                        ui.horizontal(|ui|{
+                            if ui.small_button("+").on_hover_text("Aggiungi alla selezione")
+                                .clicked(){
+                                if !self.fields.chunk_selection.is_empty(){
+                                    self.fields.chunk_selection.push('\n');
+                                }
+                                self.fields.chunk_selection.push_str(&file.path);
+                            }
+                            ui.label(format!("📄 {}  ({} B)",file.path,file.bytes));
+                        });
+                    }
+                }
+            }
+        });
+        ui.label("File/cartelle da ripristinare (una selezione per riga; vuoto = backup completo)");
+        ui.add(egui::TextEdit::multiline(&mut self.fields.chunk_selection).desired_rows(3));
+        ui.label("Nuova directory destinazione (restore, ZIP, import o copia storage)");
+        ui.text_edit_singleline(&mut self.fields.chunk_destination);
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(!self.active,egui::Button::new("Verifica integrità"))
+                .clicked(){self.run_chunk_action("verify");}
+            if ui.add_enabled(!self.active,egui::Button::new("Ripara con parità"))
+                .clicked(){self.run_chunk_action("repair");}
+            if ui.add_enabled(!self.active,egui::Button::new("Restore selezione"))
+                .clicked(){self.run_chunk_action("restore");}
+        });
+        ui.horizontal_wrapped(|ui|{
+            ui.label("ZIP64 MiB");ui.text_edit_singleline(&mut self.fields.chunk_volume_mib);
+            if ui.add_enabled(!self.active,egui::Button::new("Esporta ZIP64"))
+                .clicked(){self.run_chunk_action("export-zip");}
+            if ui.add_enabled(!self.active,egui::Button::new("Importa ZIP64"))
+                .clicked(){self.run_chunk_action("import-zip");}
+            if ui.add_enabled(!self.active,egui::Button::new("Copia storage verificato"))
+                .clicked(){self.run_chunk_action("relocate");}
+        });
+        ui.label("File JSON con gli archivi tar.gz.age legacy da riunire nello stesso backup");
+        ui.text_edit_singleline(&mut self.fields.chunk_legacy_json);
+        if ui.add_enabled(!self.active,egui::Button::new("Migra archivi legacy nel manifest unico"))
+            .clicked(){self.run_chunk_action("migrate-legacy");}
+        ui.label(RichText::new("La copia dello storage non elimina l'origine; usare una destinazione nuova. Nessun mount live ancora abilitato.").color(MUTED));
+        ui.label(RichText::new(&self.status).color(INK));
+        self.draw_progress(ui);
+    }
+
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.heading("Impostazioni");
         ui.label("Directory privata per gli archivi");
@@ -1066,6 +1309,7 @@ impl eframe::App for NativeApp {
                         Page::Backup => self.backup(ui),
                         Page::Archives => self.archives(ui),
                         Page::Restore => self.restore(ui),
+                        Page::Storage => self.storage(ui),
                         Page::Plugins => self.plugins(ui),
                         Page::Vault => self.vault(ui),
                         Page::Updates => self.updates(ui),
