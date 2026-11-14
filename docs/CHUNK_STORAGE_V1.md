@@ -145,7 +145,7 @@ speciali non sono ancora supportati nel formato sperimentale.
 | Conversione storage | copia -> verifica -> switch atomico -> conservazione sorgente | da implementare |
 | Migrazione da tar.gz.age | più archivi legacy -> chunk -> manifest logico unico senza tar plaintext | prototipo Rust implementato; real dataset QA pendente |
 | S3/NFS/Ceph backend | driver e lock coerenti per oggetti immutabili | da implementare |
-| Garbage collection | verifica e rimozione separata dei ciphertext orfani oltre grace di sicurezza | preview ed esecuzione locali presenti nella r038; compattazione di stripe miste e GC remoto NON certificati |
+| Garbage collection | verifica e rimozione separata dei ciphertext orfani oltre grace di sicurezza | preview/esecuzione Rust e repack automatico 8+2 disponibili nella r038; test crash e GC remota NON certificati |
 
 Gli ZIP portabili conterranno chunk age già cifrati, metadata cifrati e
 indice dei volumi (ID, dimensioni, checksum) senza renderli in plaintext.
