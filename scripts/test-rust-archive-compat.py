@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from archive_ops import extract_archive, list_members  # noqa: E402
 from github_engine import StreamingArchive  # noqa: E402
 from checkpoint import Journal  # noqa: E402
-from secure_vault import seal_identity  # noqa: E402
+from secure_vault import seal_identity, unlock, VaultError  # noqa: E402
 
 
 def invoke(*argv, expect_success=True, input_text=None):
@@ -65,6 +65,35 @@ def main():
         invoke(binary, "vault", "verify", "--file", vault_path,
                "--password-stdin", input_text="incorrect-password\n",
                expect_success=False)
+        native_vault = root / "native.agevault"
+        invoke(binary, "vault", "create", "--file", native_vault,
+               "--password-stdin", input_text="rust-original-password-123\n")
+        rust_identity, rust_recipient = unlock("rust-original-password-123", native_vault)
+        assert rust_recipient.startswith("age1")
+        assert b"AGE-SECRET-KEY-" in rust_identity
+        recovery = root / "encrypted-recovery.agevault"
+        invoke(binary, "vault", "export", "--file", native_vault,
+               "--destination", recovery, "--password-stdin",
+               input_text="rust-original-password-123\nrust-backup-password-123\n")
+        assert unlock("rust-backup-password-123", recovery) == (
+            rust_identity, rust_recipient)
+        imported = root / "imported.agevault"
+        invoke(binary, "vault", "import", "--file", recovery,
+               "--destination", imported, "--password-stdin",
+               input_text="rust-backup-password-123\nrust-local-password-123\n")
+        assert unlock("rust-local-password-123", imported) == (
+            rust_identity, rust_recipient)
+        invoke(binary, "vault", "change-password", "--file", native_vault,
+               "--password-stdin",
+               input_text="rust-original-password-123\nrust-changed-password-123\n")
+        assert unlock("rust-changed-password-123", native_vault) == (
+            rust_identity, rust_recipient)
+        try:
+            unlock("rust-original-password-123", native_vault)
+        except VaultError:
+            pass
+        else:
+            raise AssertionError("Previous vault password still works")
         source = root / "source"
         source.mkdir()
         (source / "fichier-été.txt").write_text("Confidential example, not an actual secret\n",

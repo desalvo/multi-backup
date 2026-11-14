@@ -17,6 +17,10 @@ fn usage() -> &'static str {
        multi-backup-native checkpoint audit --file ACTIVE.json [--json]\n\
        multi-backup-native dropbox hash --file LOCAL_FILE\n\
        multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
+       multi-backup-native vault create --file NEW.agevault [--password-stdin]\n\
+       multi-backup-native vault export --file SOURCE.agevault --destination RECOVERY.agevault [--password-stdin]\n\
+       multi-backup-native vault import --file RECOVERY.agevault --destination NEW.agevault [--password-stdin]\n\
+       multi-backup-native vault change-password --file PROTECTED.agevault [--password-stdin]\n\
      Safety: explicit identity required, encrypted output only, no overwriting.\n"
 }
 
@@ -72,25 +76,55 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
-    if family == "vault" && command == "verify" {
-        accepted(&flags, &["--file"])?;
-        if json { return Err("--json not valid for vault verification".into()); }
-        let file = Path::new(required(&flags, "--file")?);
-        let password = if password_stdin {
-            let mut raw = Zeroizing::new(Vec::new());
-            io::stdin().take(1026).read_to_end(&mut *raw)?;
-            let bytes = raw.strip_suffix(b"\n").unwrap_or(raw.as_slice());
-            let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
-            Zeroizing::new(String::from_utf8(bytes.to_vec())?)
-        } else {
-            Zeroizing::new(rpassword::prompt_password("Vault password: ")?)
+    if family == "vault" {
+        if json { return Err("--json is not supported for vault operations".into()); }
+        let count = match command {
+            "verify" | "create" => 1,
+            "export" | "import" | "change-password" => 2,
+            _ => return Err(usage().into()),
         };
-        let recipient = vault::verify(file, &password)?;
-        println!("Encrypted vault authenticated for recipient {recipient}; private key not exported");
+        if command == "export" || command == "import" {
+            accepted(&flags, &["--file", "--destination"])?;
+        } else {
+            accepted(&flags, &["--file"])?;
+        }
+        let secrets: Vec<Zeroizing<String>> = if password_stdin {
+            let mut input = Zeroizing::new(Vec::new());
+            io::stdin().take(4096).read_to_end(&mut *input)?;
+            let text = std::str::from_utf8(&input)?;
+            let lines: Vec<_> = text.lines().collect();
+            if lines.len() != count {
+                return Err("Expected the required number of passwords on stdin".into());
+            }
+            lines.iter().map(|line| Zeroizing::new(
+                line.trim_end_matches('\r').to_string())).collect()
+        } else {
+            let mut supplied = Vec::new();
+            for index in 0..count {
+                let prompt = format!("Vault password {}: ", index + 1);
+                supplied.push(Zeroizing::new(rpassword::prompt_password(prompt)?));
+            }
+            supplied
+        };
+        let file = Path::new(required(&flags, "--file")?);
+        let recipient = match command {
+            "verify" => vault::verify(file, &secrets[0])?,
+            "create" => vault::create(file, &secrets[0])?,
+            "export" => {
+                let to = Path::new(required(&flags, "--destination")?);
+                vault::export_recovery(file, to, &secrets[0], &secrets[1])?
+            }
+            "import" => {
+                let to = Path::new(required(&flags, "--destination")?);
+                vault::import_recovery(file, to, &secrets[0], &secrets[1])?
+            }
+            _ => vault::change_password(file, &secrets[0], &secrets[1])?,
+        };
+        println!("Vault {command} authenticated for recipient {recipient}; private identity not exported");
         return Ok(());
     }
     if password_stdin {
-        return Err("--password-stdin is only accepted by vault verify".into());
+        return Err("--password-stdin is only accepted by vault operations".into());
     }
     if family == "checkpoint" && command == "audit" {
         accepted(&flags, &["--file"])?;

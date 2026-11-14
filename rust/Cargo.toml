@@ -13,6 +13,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 aes-gcm = "0.10"
 base64 = "0.22"
+rand = "0.8"
 rpassword = "7.3"
 scrypt = "0.11"
 zeroize = "1.8"
