@@ -103,3 +103,8 @@ Test with at least two Kubernetes replicas, one truly shared store and one node_
 **Not yet RC-qualified:** exactly-once write fencing after lease loss, global aggregate bandwidth ceilings across replicas, remote host hard CPU/RAM enforcement over SSH, true generic cloud output adapters, fully common cluster browse/restore routing, OIDC pending state sharing, full agent enrollment automation, actual AFS incremental restore on a new server, signed installers and independent security review. These cannot be described as completed by a passing compile alone.
 
 See [Italian companion](CLUSTER_ORCHESTRATION_R039_IT.md), [agent manual EN](AGENTS_AFS_R039_EN.md), [feature inventory](FEATURE_INVENTORY_R038.md), [RC gates](RC_CERTIFICATION_MATRIX.md), [handoff](HANDOFF.md).
+
+## r039 unified web cluster and agent overview
+
+The Rust server GUI includes a read-only administrator **Cluster, agenti e backup paralleli** section, built from GET /api/cluster/status and GET /api/agents/admin/list. Each replica displays the same PostgreSQL inventory of live servers, capabilities, registered shared versus node-local stores, queued/running/finished jobs and agents awaiting approval, online or revoked. The dashboard never interprets database-sourced names as HTML. It does not yet implement the complete administration editor: enrolled agent approval/limits and storage registration remain protected API actions. Verify browser sessions and cluster state with a real multi-pod load balancer before claiming unified HA production readiness.
+
