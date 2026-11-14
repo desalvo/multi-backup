@@ -143,10 +143,10 @@ speciali non sono ancora supportati nel formato sperimentale.
 | Restore origine | singoli file/cartelle, diff e conferma | non abilitato; oggi solo nuova destinazione |
 | Export locale | directory nuova con sola selezione | prototipo CLI/server |
 | Mount read-only | macOS FUSE, Linux FUSE, Windows WinFsp, cache limitata | da implementare e qualificare |
-| Export ZIP portabile | ZIP64, pacchetti default 2 GiB, indice firmato/checksum | da implementare |
-| Import ZIP portabile | verifica tutti i volumi prima del commit | da implementare |
+| Export ZIP portabile | ZIP64, volumi default 2 GiB, indice age e checksum | prototipo implementato; manca qualifica multi-TB |
+| Import ZIP portabile | verifica tutti i volumi e i chunk prima del commit atomico | prototipo implementato e testato in CI base |
 | Conversione storage | copia -> verifica -> switch atomico -> conservazione sorgente | da implementare |
-| Migrazione da tar.gz.age | decrypt streaming -> chunk -> manifest -> verifica restore | da implementare |
+| Migrazione da tar.gz.age | più archivi legacy -> chunk -> manifest logico unico senza tar plaintext | prototipo Rust implementato; real dataset QA pendente |
 | S3/NFS/Ceph backend | driver e lock coerenti per oggetti immutabili | da implementare |
 | Garbage collection | mark-and-sweep da manifest e parità; dry-run | da implementare |
 
@@ -181,3 +181,8 @@ conversione finché i passi non sono stati certificati.
 
 **Gate:** nessuna produzione/stable finché i test reali, le migrazioni e
 l'interoperabilità con il vault protetto non saranno conclusi.
+
+
+## Comandi aggiunti nella revisione r022
+
+La CLI Rust include `storage verify`, `storage export-zip`, `storage import-zip` e `storage migrate-legacy`. Il nome del backup resta unico anche se il file JSON delle fonti legacy contiene repository Git, CI e metadati separati. Si può selezionare un insieme di file/cartelle per effettuare un unico restore verificato nella stessa directory di destinazione. L'importazione dei volumi ZIP richiede una directory nuova, un `bundle.index.age` autenticabile e tutti i part con checksum esatto. L'esportazione è non distruttiva. Il formato inverso chunk → archivio tar legacy e il mount FUSE/WinFsp sono ancora da sviluppare.

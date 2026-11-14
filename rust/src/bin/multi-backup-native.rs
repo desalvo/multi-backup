@@ -14,6 +14,9 @@ fn usage() -> &'static str {
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
+       multi-backup-native storage migrate-legacy --root DIR --identity IDENTITY --label NAME --archives-json SOURCES.json\n\
+       multi-backup-native storage export-zip --root DIR --identity IDENTITY --id HASH --destination NEW_DIR [--volume-mib 2048]\n\
+       multi-backup-native storage import-zip --root NEW_DIR --identity IDENTITY --bundle PORTABLE_DIR\n\
        multi-backup-native storage restore --root DIR --identity IDENTITY --id HASH --destination NEW_DIR [--selection PATH]\n\
        multi-backup-native archive create --source DIR --output FILE.tar.gz.age --recipient age1... [--prefix multi-backup]\n\
        multi-backup-native archive list --archive FILE.tar.gz.age --identity AGE_KEY [--json]\n\

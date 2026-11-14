@@ -202,3 +202,39 @@ conversion, live mounts, GUI configuration and provider parity remain open.
 
 **Do not merge the draft or publish a stable image without successful
 production gate, cross-platform restored data verification and secret setup.**
+
+
+### Rust storage v1 — certified behavior vs development-only functionality
+
+The new experimental branch supports keyed deduplicated age+zstd chunks,
+an encrypted logical manifest across ALL provider namespaces, 8+2 erasure
+protection, read-only verification, ZIP64 portable-volume export/import,
+multi-file and folder restore, and streaming migration of **multiple legacy
+tar.gz.age archives into one logical backup**. Migration does not delete
+the old archives, and no plaintext full tar staging file is created.
+
+Commands (from the Rust binary, not the legacy Python launcher):
+
+```bash
+# Storage must already exist and be decryptable with the identity.
+multi-backup-native storage verify --root ~/Multi-Backups --identity /keys/age.txt --id BACKUP_ID
+multi-backup-native storage export-zip \
+  --root ~/Multi-Backups --identity /keys/age.txt \
+  --id BACKUP_ID --destination ~/backup-portable --volume-mib 2048
+multi-backup-native storage import-zip \
+  --root ~/imported-storage --identity /keys/age.txt --bundle ~/backup-portable
+
+# JSON array includes all legacy parts of ONE backup cycle:
+# [{"namespace":"github","archive":"/path/repo.tar.gz.age"},
+#  {"namespace":"ci","archive":"/path/ci.tar.gz.age"},
+#  {"namespace":"metadata","archive":"/path/metadata.tar.gz.age"}]
+multi-backup-native storage migrate-legacy \
+  --root ~/Multi-Backups --identity /keys/age.txt \
+  --label "Imported legacy cycle" --archives-json sources.json
+```
+
+Only the future full qualification suite can warrant complete certification:
+signed installers, production identity vault compatibility, real provider
+backup+restore, signed/verified releases, TLS/OIDC/LDAP/SMTP integration,
+live filesystem mounts and migration/upgrade rollback are still missing.
+See [certification matrix](docs/RC_CERTIFICATION_MATRIX.md).

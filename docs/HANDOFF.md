@@ -231,3 +231,8 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
 - Web browser supports nested folders, list/grid and selecting files/folders across a unified backup.
 - CI publication interlocks now require full native Rust macOS/Windows/EL8-10, desktop Ubuntu, server OCI, publications, and Production Gate. Stable requires ENABLE_STABLE_RUST opt-in.
 - Certification matrix: docs/RC_CERTIFICATION_MATRIX.md. Do not mark stable or merge PR until real-platform signed packages and provider restore drills pass.
+
+
+## r022 continuation point
+
+On PR #9 the Rust backend has health verification, portable ZIP64 bundles, multiple-selection restore, and streaming legacy archive migration. Native eframe build correction, OCI and OS packaging requalification remain ongoing. Use the latest commit SHA, not the last successful older workflow. Do not merge or promote stable before signed installer E2E, real GitHub/Dropbox recovery and identity/auth integrations. Consult docs/RC_CERTIFICATION_MATRIX.md.

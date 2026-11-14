@@ -158,3 +158,8 @@ tag vX.Y.Z + stable enabled ───> Rust server test ──> Docker Hub stabl
 Al momento non risultano certificati il push sul registry, build multiarch
 completa, gestione LDAP/SSO/SMTP o sostituzione del frontend nativo.
 Non utilizzare le immagini come produzione fino a validazione e pubblicazione.
+
+
+## Browser gerarchico (revisione r022)
+
+Il frontend web include un albero per cartelle con icone, ricerca dei path, commutatore lista/griglia, selezione multipla con checkbox e `Esporta selezione`. La richiesta HTTPS autenticata invia `selections: [path, ...]` insieme all'ID del **solo backup logico** interessato. Il server usa `restore_many` in un'unica nuova directory, senza overwrite dell'origine. L'export è ancora **server-side**: il download diretto sullo smartphone, il mount live e il restore-in-place devono essere implementati e certificati prima della release.

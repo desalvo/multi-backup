@@ -319,3 +319,12 @@ parity, real provider backups, original folder restore, FUSE/WinFsp, ZIP64
 multipart, storage migration/GC, LDAP/SSO, SMTP(S), audit retention and
 security/penetration testing. No numeric overall completion estimate until
 a verified inventory with explicit scope and acceptance gates exists.
+
+
+## r022 — cross-platform native fixes, integrity and portable v1 (2026-11-14)
+
+- Repaired invalid Rust egui drawing syntax and API on the native desktop branch; full native matrix requalification requested.
+- Added storage verify health report with parity checks, ZIP64 encrypted object volumes, transactional import, multi-select restore, and authenticated streaming conversion from legacy age/tar members into unified chunk manifest.
+- Responsive web browser now supports nested folders, search, list/grid and selection across a single logical backup.
+- Publication policy now gates both OCI and native images on the Rust cross-platform matrix, and keeps stable opt-in disabled by default.
+- Never claim completed certification on a compile-only gate; details in docs/RC_CERTIFICATION_MATRIX.md.

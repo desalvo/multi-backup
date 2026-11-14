@@ -55,3 +55,13 @@ objects are storage internals, **never separately presented as user backups**.
 
 Do not treat signing/build compliance as equivalent to full backup
 recoverability or an external security certification.
+
+
+## r022 newly implemented and pending external qualification
+
+- Read-only health verification of every encrypted chunk plus parity checks.
+- ZIP64 volumes of encrypted content-addressed objects, with encrypted catalog and SHA-256 validation before atomic import.
+- Non-destructive streaming import of multiple legacy age/tar archives into a **single** logical backup.
+- Multi-selection restore and responsive file-manager-like web browse.
+
+These features require full post-merge qualification before marking them production certified. Reverse conversion, production native signing, live mount, OIDC/LDAPS and SMTP remain explicit release blockers.
