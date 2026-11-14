@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault};
+use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, plugins, plugin_executor};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -77,6 +77,11 @@ struct Fields {
     chunk_legacy_json: String,
     chunk_volume_mib: String,
     chunk_size_mib: String,
+    plugin_source: String,
+    plugin_input: String,
+    plugin_namespace: String,
+    plugin_gpfs_access: String,
+    plugin_snapshot_attested: bool,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -223,6 +228,9 @@ impl NativeApp {
             chunk_label: "Backup completo".into(),
             chunk_volume_mib: "2048".into(),
             chunk_size_mib: "4".into(),
+            plugin_input: "posix".into(),
+            plugin_namespace: "files".into(),
+            plugin_gpfs_access: "ces-nfs".into(),
             ..Fields::default()
         };
         let entries = archive_catalog(Path::new(&fields.output));
@@ -948,6 +956,11 @@ impl NativeApp {
         let legacy=self.fields.chunk_legacy_json.clone();
         let volume=self.fields.chunk_volume_mib.clone();
         let chunk_size=self.fields.chunk_size_mib.clone();
+        let plugin_source=self.fields.plugin_source.clone();
+        let plugin_input=self.fields.plugin_input.clone();
+        let plugin_namespace=self.fields.plugin_namespace.clone();
+        let plugin_gpfs_access=self.fields.plugin_gpfs_access.clone();
+        let plugin_snapshot_attested=self.fields.plugin_snapshot_attested;
         let id=self.chunk_selected.clone();
         let sources=[
             ("github",self.fields.chunk_git.clone()),
@@ -996,6 +1009,19 @@ impl NativeApp {
                             .map_err(|e|e.to_string())?;
                         format!("Creato un solo backup logico {} con {} file",
                             b.id,b.entries.len())
+                    },
+                    "plugin-backup"=>{
+                        let access=if plugin_input=="gpfs" {
+                            Some(plugins::GpfsAccess::parse(&plugin_gpfs_access)
+                                .map_err(|e|e.to_string())?)
+                        } else { None };
+                        let b=plugin_executor::backup(
+                            &plugin_input,"posix",Path::new(&plugin_source),root,key,
+                            &label,&plugin_namespace,&top_namespace,
+                            plugin_snapshot_attested,access
+                        ).map_err(|e|e.to_string())?;
+                        format!("Plugin Rust {}→POSIX: backup logico {} con {} file verificati",
+                            plugin_input,b.id,b.entries.len())
                     },
                     "migrate-legacy"=>{
                         let json=std::fs::read_to_string(&legacy)
@@ -1103,6 +1129,39 @@ impl NativeApp {
         ui.text_edit_singleline(&mut self.fields.chunk_label);
         ui.label("Namespace superiore (opzionale; può contenere cartelle annidate: Roma1/Cluster/VM)");
         ui.text_edit_singleline(&mut self.fields.chunk_top_namespace);
+        ui.separator();
+        ui.heading("Plugin Rust eseguibile → Storage POSIX cifrato");
+        ui.label("Sorgente POSIX, oppure su Linux mount NFS/SMB/SSHFS/GPFS CES preesistente e readonly");
+        egui::ComboBox::from_label("Plugin sorgente")
+            .selected_text(self.fields.plugin_input.clone())
+            .show_ui(ui,|ui|{
+                for id in ["posix","nfs","smb","sshfs","gpfs"] {
+                    ui.selectable_value(&mut self.fields.plugin_input,id.to_string(),id);
+                }
+            });
+        ui.label("Directory sorgente (mountpoint esatto per i filesystem remoti)");
+        ui.text_edit_singleline(&mut self.fields.plugin_source);
+        ui.label("Namespace del plugin nel backup logico");
+        ui.text_edit_singleline(&mut self.fields.plugin_namespace);
+        if self.fields.plugin_input!="posix" {
+            ui.checkbox(&mut self.fields.plugin_snapshot_attested,
+                "Attesto che questa sorgente è uno snapshot coerente su mount read-only");
+            if self.fields.plugin_input=="gpfs" {
+                egui::ComboBox::from_label("Protocollo GPFS CES")
+                    .selected_text(self.fields.plugin_gpfs_access.clone())
+                    .show_ui(ui,|ui|{
+                        for mode in ["ces-nfs","ces-smb"] {
+                            ui.selectable_value(&mut self.fields.plugin_gpfs_access,
+                                mode.to_string(),mode);
+                        }
+                    });
+            }
+            ui.label("La dichiarazione NON verifica indipendentemente lo snapshot remoto né ACL/xattr.");
+        }
+        if ui.add_enabled(!self.active,
+            egui::Button::new("Crea backup tramite plugin nativo Rust").fill(VIOLET))
+            .clicked(){self.run_chunk_action("plugin-backup");}
+        ui.separator();
         ui.label("Directory Git (opzionale; preparata dal motore/provider)");
         ui.text_edit_singleline(&mut self.fields.chunk_git);
         ui.label("Directory CI / Actions (opzionale)");
