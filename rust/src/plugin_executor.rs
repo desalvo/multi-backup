@@ -2,7 +2,7 @@
 //! POSIX->POSIX and read-only mounted NFS/SMB/SSHFS/GPFS sources to POSIX
 //! are enabled as development previews. Untested roles always fail closed.
 //! This layer will be extended with native per-provider adapters.
-use crate::{chunk_store::{LogicalBackup, Source, Store}, plugins::{self, Mode, GpfsAccess}, mount_probe};
+use crate::{chunk_store::{BackupKind, LogicalBackup, Source, Store}, plugins::{self, Mode, GpfsAccess}, mount_probe};
 use std::{fs, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -44,6 +44,14 @@ pub fn backup(input: &str, output: &str, source: &Path, root: &Path,
               identity: &Path, label: &str, namespace: &str,
               top_namespace: &str, snapshot_attested: bool,
               gpfs_access: Option<GpfsAccess>) -> Result<LogicalBackup> {
+    backup_with_mode(input,output,source,root,identity,label,namespace,
+        top_namespace,snapshot_attested,gpfs_access,BackupKind::Full,None)
+}
+pub fn backup_with_mode(input: &str, output: &str, source: &Path, root: &Path,
+              identity: &Path, label: &str, namespace: &str,
+              top_namespace: &str, snapshot_attested: bool,
+              gpfs_access: Option<GpfsAccess>,kind:BackupKind,
+              parent_id:Option<&str>) -> Result<LogicalBackup> {
     supported_pair(Mode::Backup, input, output)?;
     let source = regular_directory(source)?;
     if input == "posix" {
@@ -71,8 +79,9 @@ pub fn backup(input: &str, output: &str, source: &Path, root: &Path,
         return Err("Backup requires a nonempty label".into());
     }
     let store = Store::open(&root, &identity)?;
-    let snapshot = store.backup_in_namespace(&identity, label, top_namespace,
-        &[Source { namespace: namespace.to_owned(), directory: source }])?;
+    let snapshot = store.backup_in_namespace_mode(&identity,label,top_namespace,
+        &[Source { namespace: namespace.to_owned(), directory: source }],
+        kind,parent_id)?;
     if !store.verify(&identity, &snapshot.id)?.healthy {
         return Err("Created backup did not pass encrypted integrity verification".into());
     }
