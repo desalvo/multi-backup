@@ -24,6 +24,11 @@ for helper in age age-keygen gh git-lfs; do
   install -m 755 "$binary" "$APP/Contents/Resources/bin/$helper"
   "$APP/Contents/Resources/bin/$helper" --version >/dev/null
 done
+# LocalAuthentication/Keychain adapter is a compiled native Swift helper
+# rather than Python. It is device-only and never prints the vault password
+# except to the signed GUI over the explicitly requested unlock pipe.
+swiftc -O packaging/macos/biometric.swift -o "$APP/Contents/Resources/bin/multi-backup-biometric"
+test -x "$APP/Contents/Resources/bin/multi-backup-biometric"
 mkdir -p "$APP/Contents/Resources"
 ICONSET="$(mktemp -d -t multi-backup-icon.XXXXXXXX).iconset"
 mkdir -p "$ICONSET"
