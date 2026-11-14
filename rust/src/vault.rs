@@ -106,6 +106,13 @@ pub fn verify(path: &Path, password: &str) -> VaultResult<String> {
     Ok(recipient)
 }
 
+/// Unlock private age identity only in a zeroizing Rust allocation.
+/// Callers must never print/serialize or persist the returned secret.
+pub fn unlock_identity(path: &Path, password: &str) -> VaultResult<Zeroizing<Vec<u8>>> {
+    let (identity, _) = open(path, password)?;
+    Ok(identity)
+}
+
 fn seal(clear: &[u8], recipient: &str, password: &str) -> VaultResult<Value> {
     validate_password(password, true)?;
     if !allowed_recipient(recipient) || !valid_private_key(clear) || clear.len() > 16_384 {
