@@ -1,0 +1,34 @@
+services:
+  multi-backup:
+    # Image is only available AFTER the GitHub production gate publishes it.
+    image: desalvo/multi-backup:early-release
+    container_name: multi-backup
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      MULTI_BACKUP_ADMIN_USER: admin
+      MULTI_BACKUP_ADMIN_HASH_FILE: /run/secrets/admin_hash
+      MULTI_BACKUP_PUBLIC_ORIGIN: http://127.0.0.1:8080
+      MULTI_BACKUP_DATA_ROOT: /data/backups
+      MULTI_BACKUP_EXPORT_ROOT: /data/exports
+      MULTI_BACKUP_AGE_IDENTITY_FILE: /run/secrets/age_identity
+    secrets:
+      - admin_hash
+      - age_identity
+    volumes:
+      - backup_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+secrets:
+  admin_hash:
+    file: ./secrets/admin_hash
+  age_identity:
+    file: ./secrets/age_identity
+volumes:
+  backup_data:

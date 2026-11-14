@@ -1,0 +1,24 @@
+replicaCount: 1
+image:
+  repository: desalvo/multi-backup
+  tag: early-release
+  pullPolicy: IfNotPresent
+service:
+  port: 8080
+adminUser: admin
+# Must be an existing Secret with admin-hash and age-identity keys.
+existingSecret: multi-backup-auth
+publicOrigin: https://multi-backup.example.org
+ingress:
+  enabled: true
+  className: nginx
+  host: multi-backup.example.org
+  tlsSecretName: multi-backup-tls
+  annotations: {}
+storage:
+  existingClaim: ""
+  size: 100Gi
+  storageClassName: ""
+resources:
+  requests: {cpu: 250m, memory: 256Mi}
+  limits: {cpu: "2", memory: 2Gi}

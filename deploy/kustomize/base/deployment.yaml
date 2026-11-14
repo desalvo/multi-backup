@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: multi-backup}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: multi-backup}
+  template:
+    metadata:
+      labels: {app: multi-backup}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: multi-backup
+          image: desalvo/multi-backup:early-release
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: MULTI_BACKUP_ADMIN_USER, value: admin}
+            - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: "https://multi-backup.example.org"}
+            - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: /run/secrets/admin-hash}
+            - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: /run/secrets/age-identity}
+            - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
+            - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: temp, mountPath: /tmp}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "2", memory: 2Gi}}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: multi-backup-data}
+        - name: secrets
+          secret: {secretName: multi-backup-auth, defaultMode: 0400}
+        - name: temp
+          emptyDir: {sizeLimit: 64Mi}

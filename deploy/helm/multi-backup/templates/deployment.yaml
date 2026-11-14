@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: multi-backup, app.kubernetes.io/instance: "{{ .Release.Name }}"}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: multi-backup, app.kubernetes.io/instance: "{{ .Release.Name }}"}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: MULTI_BACKUP_ADMIN_USER, value: {{ .Values.adminUser | quote }}}
+            - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: {{ .Values.publicOrigin | quote }}}
+            - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: /run/secrets/admin-hash}
+            - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: /run/secrets/age-identity}
+            - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
+            - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: credentials, mountPath: /run/secrets, readOnly: true}
+            - {name: temp, mountPath: /tmp}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 30}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" .Release.Name) .Values.storage.existingClaim }}
+        - name: credentials
+          secret: {secretName: {{ .Values.existingSecret | quote }}, defaultMode: 0400}
+        - name: temp
+          emptyDir: {sizeLimit: 64Mi}
