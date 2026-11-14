@@ -234,3 +234,8 @@ This is an **OS-mountable WebDAV volume**, not a native FUSE/WinFsp
 filesystem image. Range requests, OS interoperability, long-lived mount
 sessions, performance, and credentials must be tested on the relevant
 platforms before enabling in production.
+
+
+## Paged audit viewer (r026 development)
+
+An administrator-only API GET /api/audit exposes recent JSONL audit entries with offset, limit (default 10, max 100), and event/actor search. The responsive web dashboard includes browsing and a next-page control. Any nonregular/symlinked audit file is rejected. Current storage is append-only JSONL, NOT yet a tamper-evident replicated audit database; ingestion, retention policy, chained signatures, LDAP/OIDC role mapping and archival require further acceptance.

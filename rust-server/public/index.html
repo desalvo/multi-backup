@@ -12,4 +12,9 @@ La password viene letta da un Secret separato; TLS e certificato server sono obb
 <div class="controls"><button type="button" id="smtp-test">Invia messaggio di prova</button>
 <span id="smtp-result" role="status" class="muted"></span></div></section>
 <section><h2>Esportazione selettiva</h2><p class="muted">Seleziona un singolo file o una cartella. Il restore viene verificato e scritto in una nuova directory sul server, senza sovrascrivere l'origine.</p><div id="result" role="status"></div></section>
+<section><h2>Audit · amministratore</h2>
+<div class="controls"><input id="audit-search" type="search" placeholder="Cerca evento o utente">
+<button id="audit-refresh" type="button">Aggiorna audit</button>
+<button id="audit-older" type="button">Pagina successiva</button></div>
+<div id="audit-events" role="status"></div></section>
 </main></div><script src="/app.js"></script></body></html>

@@ -260,3 +260,8 @@ Rust server has opt-in read-only WebDAV mount under /dav/:id, credential from da
 ## r025 update
 
 Store::export_legacy now provides non-destructive streaming v1 -> legacy tar.gz.age; CLI storage export-legacy and Rust desktop Storage chunk action. Old -> v1 import and v1 relocation already exist. Still missing: actual account-level integration and certified native mount/IdP tests.
+
+
+## r026 update
+
+Audit read-only admin API/UI with 10-per-page searching added; safe file type validation. Focused Rust CI now runs on push only, avoiding duplicate PR+push workloads. External audit retention/immutability not yet certified.

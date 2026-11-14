@@ -54,6 +54,10 @@ fn random_token() -> String {
 }
 fn audit_actor(state:&AppConfig,event:&str,actor:&str) {
     if let Some(parent)=state.audit.parent(){let _=fs::create_dir_all(parent);}
+    // Refuse nonregular/symlinked audit files; never append through a symlink.
+    if let Ok(meta)=fs::symlink_metadata(&state.audit) {
+        if !meta.file_type().is_file(){return;}
+    }
     if let Ok(mut log)=OpenOptions::new().create(true).append(true).open(&state.audit) {
         let line=json!({"time":chrono::Utc::now().to_rfc3339(),
             "event":event,"user":actor});
@@ -296,6 +300,62 @@ async fn export(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<Ex
     audit_actor(&state.0,"selective_export_completed",&auth.user);
     Ok(Json(json!({"files":result,"server_directory":dir.to_string_lossy()})))
 }
+#[derive(Deserialize)]
+struct AuditFilter {
+    offset:Option<usize>,
+    limit:Option<usize>,
+    query:Option<String>,
+}
+fn paginate_audit(rows:Vec<Value>,filter:&AuditFilter)->(usize,Vec<Value>){
+    let query=filter.query.as_deref().unwrap_or("").to_lowercase();
+    let matched:Vec<_>=rows.into_iter().filter(|row|{
+        let event=row["event"].as_str().unwrap_or("").to_lowercase();
+        let user=row["user"].as_str().unwrap_or("").to_lowercase();
+        query.is_empty()||event.contains(&query)||user.contains(&query)
+    }).collect();
+    let count=matched.len();
+    let page=matched.into_iter().rev()
+        .skip(filter.offset.unwrap_or(0).min(100000))
+        .take(filter.limit.unwrap_or(10).clamp(1,100)).collect();
+    (count,page)
+}
+async fn audit_list(State(state):State<AppState>,headers:HeaderMap,
+    axum::extract::Query(filter):axum::extract::Query<AuditFilter>)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    if auth.user!=state.0.name{
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"admin_required"}))));
+    }
+    if filter.query.as_deref().unwrap_or("").len()>256 ||
+       filter.offset.unwrap_or(0)>100000 {
+        return Err((StatusCode::BAD_REQUEST,Json(json!({"error":"audit_filter_invalid"}))));
+    }
+    let mut rows=Vec::new();
+    if let Ok(meta)=fs::symlink_metadata(&state.0.audit){
+        if !meta.file_type().is_file()||meta.len()>32*1024*1024 {
+            return Err((StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error":"audit_store_unavailable"}))));
+        }
+        use std::io::{BufRead,BufReader};
+        let log=fs::File::open(&state.0.audit).map_err(|_|(
+            StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"audit_read_failed"}))))?;
+        for record in BufReader::new(log).lines(){
+            let record=record.map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error":"audit_read_failed"}))))?;
+            if record.len()>8192 {
+                return Err((StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error":"audit_record_oversized"}))));
+            }
+            let row:Value=serde_json::from_str(&record).map_err(|_|(
+                StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"audit_record_corrupt"}))))?;
+            rows.push(row);
+        }
+    }
+    let (total,events)=paginate_audit(rows,&filter);
+    Ok(Json(json!({"total":total,"offset":filter.offset.unwrap_or(0),
+        "limit":filter.limit.unwrap_or(10).clamp(1,100),"events":events})))
+}
+
 async fn smtp_status(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)>{
     if session(&headers,&state.0).is_none(){return Err(unauthorized());}
@@ -405,6 +465,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/dav/:id/",axum::routing::any(dav::root))
         .route("/dav/:id/*path",axum::routing::any(dav::file))
         .route("/api/export",post(export))
+        .route("/api/audit",get(audit_list))
         .route("/api/smtp/status",get(smtp_status))
         .route("/api/smtp/test",post(smtp_test))
         .route("/logout",post(logout))
@@ -427,5 +488,26 @@ mod security_tests{
         assert_eq!(oidc_cookie_state(&headers).as_deref(),Some("abcdefgh12345678"));
         headers.insert(header::COOKIE,"mb_oidc_state=../../".parse().unwrap());
         assert!(oidc_cookie_state(&headers).is_none());
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    #[test]
+    fn pagination_is_recent_first_and_search_filters_actor_or_event(){
+        let rows=vec![
+            json!({"event":"login_failed","user":"alice"}),
+            json!({"event":"backup_restore","user":"bob"}),
+            json!({"event":"login_success","user":"alice"})
+        ];
+        let (total,page)=paginate_audit(rows.clone(),&AuditFilter{
+            offset:0,limit:Some(1),query:Some("alice".into())});
+        assert_eq!(total,2);
+        assert_eq!(page[0]["event"],"login_success");
+        let (total,page)=paginate_audit(rows,&AuditFilter{
+            offset:1,limit:Some(1),query:None});
+        assert_eq!(total,3);
+        assert_eq!(page[0]["event"],"backup_restore");
     }
 }

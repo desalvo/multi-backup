@@ -117,3 +117,30 @@ smtpButton.addEventListener("click",async()=>{
   } catch(error) {report.textContent="SMTP non disponibile";}
   finally {smtpButton.disabled=false;}
 });
+
+let auditOffset=0;
+async function showAudit(){
+  const output=document.getElementById("audit-events");
+  const q=document.getElementById("audit-search").value.trim();
+  const url="/api/audit?offset="+auditOffset+"&limit=10&query="+encodeURIComponent(q);
+  const result=await fetch(url,{credentials:"same-origin"});
+  if(result.status===403){output.textContent="Audit disponibile solo all'amministratore.";return;}
+  if(!result.ok){output.textContent="Audit non disponibile.";return;}
+  const data=await result.json();
+  output.replaceChildren();
+  output.append(el("p","Eventi: "+data.total+" · pagina "+(auditOffset/10+1),"muted"));
+  for(const item of data.events){
+    const row=el("div",undefined,"virtual-file");
+    row.append(el("span",String(item.time||"")),
+        el("strong",String(item.event||"")),
+        el("span",String(item.user||"")));
+    output.append(row);
+  }
+  document.getElementById("audit-older").disabled=(auditOffset+10>=data.total);
+}
+document.getElementById("audit-refresh").addEventListener("click",()=>{
+  auditOffset=0;showAudit().catch(()=>{});
+});
+document.getElementById("audit-older").addEventListener("click",()=>{
+  auditOffset+=10;showAudit().catch(()=>{});
+});

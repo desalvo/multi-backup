@@ -11,13 +11,6 @@ on:
       - "rust-server/**"
       - "Dockerfile"
       - ".github/workflows/rust-focused.yml"
-  pull_request:
-    paths:
-      - "rust/**"
-      - "rust-desktop/**"
-      - "rust-server/**"
-      - "Dockerfile"
-      - ".github/workflows/rust-focused.yml"
 
 permissions:
   contents: read
