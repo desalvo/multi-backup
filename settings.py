@@ -18,6 +18,7 @@ DEFAULTS = {
     'keep_ci_runs': 5,
     'cleanup_ci_artifacts': False,
     'github_cleanup_dry_run': True,
+    'ignore_ci_artifact_errors': False,
     'biometric_enabled': False,
     'default_recipient': '',
 }
@@ -46,6 +47,8 @@ def load_settings(path: Path | None = None) -> dict:
     result.update({k: v for k,v in obj.items() if k in DEFAULTS})
     if type(result['biometric_enabled']) is not bool:
         raise ValueError('Invalid biometric setting')
+    if type(result['ignore_ci_artifact_errors']) is not bool:
+        raise ValueError('Invalid artifact error policy')
     if result['update_channel'] not in ('stable','early-release'):
         raise ValueError('Invalid update channel')
     if not isinstance(result['enabled_backends'], list) or not all(
@@ -70,6 +73,8 @@ def save_settings(data: dict, path: Path | None = None) -> None:
     if any('token' in k.lower() or 'password' in k.lower() or 'secret' in k.lower() for k in safe):
         raise ValueError('Secrets must not be stored in settings')
     load_settings_check = dict(DEFAULTS, **safe)
+    if type(load_settings_check['ignore_ci_artifact_errors']) is not bool:
+        raise ValueError('Invalid artifact error policy')
     if load_settings_check['update_channel'] not in ('stable','early-release'):
         raise ValueError('Invalid update channel')
     if not isinstance(load_settings_check['github_username'],str) or (

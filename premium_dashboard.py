@@ -17,6 +17,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageTk
 from archive_ops import catalog
 from version import VERSION
+from render_quality import rounded_overlay, glossy_patch, smooth_polyline
 
 NAVY = '#0D1A3D'
 ICE = '#F4F7FF'
@@ -88,16 +89,18 @@ def _glass(image, box, tone=PANEL, radius=19):
     width, height = x2 - x, y2 - y
     if width < 8 or height < 8:
         return
-    patch = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    painter = ImageDraw.Draw(patch, 'RGBA')
-    painter.rounded_rectangle((1, 3, width - 2, height - 1), radius=radius,
-                              fill=(4, 9, 28, 85))
-    painter.rounded_rectangle((0, 0, width - 1, height - 4), radius=radius,
-                              fill=tone, outline=(157, 179, 255, 101), width=1)
-    painter.rounded_rectangle((2, 2, width - 3, min(39, height - 6)),
-                              radius=min(radius - 2, 15), fill=(173, 198, 255, 18))
-    painter.line((radius, 2, width - radius, 2), fill=(230, 235, 255, 59), width=1)
-    image.alpha_composite(patch, (x, y))
+    # Multi-layer supersampled geometry removes staircase corners and keeps
+    # the subtle luminous border and glass reflection faithful to the mock.
+    rounded_overlay(image, (x + 1, y + 3, x2 - 2, y2 - 1),
+                    radius, (4, 9, 28, 85))
+    rounded_overlay(image, (x, y, x2 - 1, y2 - 4),
+                    radius, tone, (157, 179, 255, 101))
+    rounded_overlay(image, (x + 2, y + 2, x2 - 3,
+                            min(y + 39, y2 - 6)),
+                    min(radius - 2, 15), (173, 198, 255, 18))
+    smooth_polyline(image, [(x + radius, y + 2),
+                            (x2 - radius, y + 2)],
+                    (230, 235, 255, 59), 1)
 
 
 def _button_background(image, box, highlighted=False, primary=False):
@@ -105,27 +108,15 @@ def _button_background(image, box, highlighted=False, primary=False):
     width, height = x2 - x, y2 - y
     if width < 10 or height < 10:
         return
-    patch = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    p = ImageDraw.Draw(patch, 'RGBA')
-    p.rounded_rectangle((1, 4, width - 2, height - 1), radius=19, fill=(0, 7, 29, 80))
     top = (168, 117, 253) if primary else (77, 101, 164)
     bottom = (48, 93, 227) if primary else (31, 52, 106)
     if highlighted:
         top = _mix(top, (235, 220, 255), .18)
         bottom = _mix(bottom, (91, 168, 255), .28)
-    for yline in range(2, height - 4):
-        rgb = _mix(top, bottom, yline / max(1, height - 5))
-        p.line((3, yline, width - 4, yline), fill=(*rgb, 255))
-    mask = Image.new('L', (width, height), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((1, 1, width - 2, height - 4), radius=18, fill=255)
-    cropped = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    cropped.paste(patch, (0, 0), mask)
-    p = ImageDraw.Draw(cropped, 'RGBA')
-    p.rounded_rectangle((1, 1, width - 2, height - 4), radius=18,
-                        outline=(187, 205, 255, 200), width=1)
-    p.arc((5, 3, width - 6, height - 9), 195, 345,
-          fill=(245, 250, 255, 150), width=1)
-    image.alpha_composite(cropped, (x, y))
+    patch = glossy_patch(
+        width, height, top=top, bottom=bottom,
+        border=(187, 205, 255, 200), radius=18, focused=False)
+    image.alpha_composite(patch, (x, y))
 
 
 class DashboardView(tk.Canvas):
@@ -217,11 +208,10 @@ class DashboardView(tk.Canvas):
                    12 if width < 150 else 13, weight='bold', anchor='center')
 
     def _tag(self, image, x, y, text, *, enabled=True, width=85):
-        d = ImageDraw.Draw(image, 'RGBA')
-        d.rounded_rectangle((int(x), int(y), int(x + width), int(y + 25)), radius=12,
-                            fill=(16, 137, 96, 210) if enabled else (74, 90, 130, 210),
-                            outline=(113, 241, 192, 185) if enabled else (151, 172, 205, 90),
-                            width=1)
+        rounded_overlay(
+            image, (x, y, x + width, y + 25), 12,
+            (16, 137, 96, 210) if enabled else (74, 90, 130, 210),
+            (113, 241, 192, 185) if enabled else (151, 172, 205, 90))
         self._text(x + width / 2, y + 12, text, 10, weight='bold', anchor='center')
 
     def _paint(self, width, height):
@@ -263,7 +253,7 @@ class DashboardView(tk.Canvas):
                 y = 195 + offset + 38 * math.sin(portion * 6 - 2)
                 coords.append((x, round(y)))
             if len(coords) > 1:
-                d.line(coords, fill=colour, width=4)
+                smooth_polyline(image, coords, colour, 4)
         return image
 
     def _run_backup(self):
@@ -401,20 +391,19 @@ class DashboardView(tk.Canvas):
         self._text(x + 22, y + 56,
                    f"{format_size(disk['used'])} usati su {format_size(disk['total'])}",
                    12, width=width - 36)
-        d = ImageDraw.Draw(image, 'RGBA')
         start_x = int(x + 22)
         bar_y = int(y + 99)
         end_x = int(x + width - 24)
-        d.rounded_rectangle((start_x, bar_y, end_x, bar_y + 23), radius=11,
-                            fill=(14, 25, 55, 255), outline=(123, 157, 226, 180))
+        rounded_overlay(image, (start_x, bar_y, end_x, bar_y + 23), 11,
+                        (14, 25, 55, 255), (123, 157, 226, 180))
         fill_width = max(0, int((end_x - start_x - 5) * used_percent / 100))
         if fill_width >= 4:
-            d.rounded_rectangle((start_x + 3, bar_y + 3,
-                                 start_x + 3 + fill_width, bar_y + 20),
-                                radius=7, fill=(103, 118, 247, 255))
-            d.line((start_x + 7, bar_y + 5,
-                    start_x + 3 + fill_width, bar_y + 5),
-                   fill=(118, 223, 255, 185), width=2)
+            rounded_overlay(image, (start_x + 3, bar_y + 3,
+                                    start_x + 3 + fill_width, bar_y + 20),
+                            7, (103, 118, 247, 255))
+            smooth_polyline(image, [(start_x + 7, bar_y + 5),
+                                    (start_x + 3 + fill_width, bar_y + 5)],
+                            (118, 223, 255, 185), 2)
         self._text(x + width - 25, y + 56, f'{used_percent:.0f}%',
                    12, anchor='ne', colour=CYAN)
 
@@ -432,10 +421,10 @@ class DashboardView(tk.Canvas):
             h = 9 + 59 * count / largest if count else 6
             bx = int(chart_start + segment * index + 5)
             by = int(y + 124 - h)
-            d = ImageDraw.Draw(image, 'RGBA')
-            d.rounded_rectangle((bx, by, bx + max(10, int(segment - 12)), int(y + 124)),
-                                radius=5, fill=(94 + index * 8, 95, 238, 230),
-                                outline=(117, 204, 255, 130))
+            rounded_overlay(
+                image, (bx, by, bx + max(10, int(segment - 12)), int(y + 124)),
+                5, (94 + index * 8, 95, 238, 230),
+                (117, 204, 255, 130))
             self._text(bx + 8, y + 130,
                        ('-6', '-5', '-4', '-3', '-2', '-1', 'Oggi')[index],
                        9, anchor='n', colour=MUTED)

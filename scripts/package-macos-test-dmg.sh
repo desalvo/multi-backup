@@ -26,13 +26,17 @@ cleanup() {
 trap cleanup EXIT
 mkdir "$TMP/root" "$MOUNT" "$TMP/Applications"
 ditto "$APP" "$TMP/root/Multi Backup.app"
-[[ "$(find "$TMP/root" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 1 ]] || exit 1
+# Familiar drag-to-Applications installer layout: only the app and one validated link.
+ln -s /Applications "$TMP/root/Applications"
+[[ -L "$TMP/root/Applications" && "$(readlink "$TMP/root/Applications")" == /Applications ]] || exit 1
+[[ "$(find "$TMP/root" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" == 2 ]] || exit 1
 hdiutil create -volname 'Multi Backup TEST' -srcfolder "$TMP/root" -ov -format UDZO "$DMG"
 hdiutil verify "$DMG"
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT" -quiet
 COUNT="$(find "$MOUNT" -mindepth 1 -maxdepth 1 ! -name '.DS_Store' ! -name '.Trashes' ! -name '.fseventsd' | wc -l | tr -d ' ')"
-[[ "$COUNT" == 1 && -d "$MOUNT/Multi Backup.app" ]] || {
-  echo "TEST image must contain exactly one Multi Backup.app (found $COUNT)" >&2
+[[ "$COUNT" == 2 && -d "$MOUNT/Multi Backup.app" &&
+   -L "$MOUNT/Applications" && "$(readlink "$MOUNT/Applications")" == /Applications ]] || {
+  echo "TEST image must contain Multi Backup.app and an Applications -> /Applications link (found $COUNT)" >&2
   find "$MOUNT" -mindepth 1 -maxdepth 1 >&2
   exit 1
 }
@@ -52,4 +56,4 @@ file "$INSTALLED/Contents/MacOS/Multi Backup" | grep -q "$MAC_ARCH" || {
 "$INSTALLED/Contents/Resources/bin/gh" --version
 "$INSTALLED/Contents/Resources/bin/git-lfs" version
 shasum -a 256 "$DMG" > "checksums-macos-${MAC_ARCH}.txt"
-echo "PASS: ad-hoc signed TEST-ONLY one-app DMG for ${MAC_ARCH}"
+echo "PASS: ad-hoc signed TEST DMG with app + Applications link for ${MAC_ARCH}"

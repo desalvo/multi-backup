@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import io
+import re
 import tempfile
 from pathlib import Path
 from reportlab.lib import colors
@@ -23,6 +24,7 @@ from reportlab.platypus import (BaseDocTemplate,PageTemplate,Frame,Paragraph,Pag
 from reportlab.pdfgen import canvas
 
 ROOT=Path(__file__).resolve().parents[1]
+VERSION=re.search(r"VERSION = '([^']+)'",(ROOT/'version.py').read_text('utf-8')).group(1)
 MEDIA=ROOT/'assets'
 SCREENS=ROOT/'docs/screenshots'
 OUTMAN=ROOT/'docs/manuals';OUTBR=ROOT/'docs/brochures'
@@ -92,10 +94,10 @@ class Book(BaseDocTemplate):
         c.saveState()
         c.setFillColor(NAVY);c.rect(0,H-11*mm,W,11*mm,fill=1,stroke=0)
         c.setFont('DejaVuBold',8);c.setFillColor(colors.white)
-        c.drawString(20*mm,H-7.2*mm,'MULTI BACKUP  /  RC1')
+        c.drawString(20*mm,H-7.2*mm,'MULTI BACKUP  /  '+VERSION)
         c.setStrokeColor(colors.HexColor('#b8d9ed'));c.line(20*mm,15*mm,W-20*mm,15*mm)
         c.setFillColor(colors.HexColor('#4e6885'));c.setFont('DejaVu',7.5)
-        c.drawString(20*mm,10.5*mm,'EUPL-1.2  |  0.1.0-r002-rc1  |  '+('USER MANUAL' if self.kind=='manual' else 'BROCHURE'))
+        c.drawString(20*mm,10.5*mm,'EUPL-1.2  |  '+VERSION+'  |  '+('USER MANUAL' if self.kind=='manual' else 'BROCHURE'))
         c.drawRightString(W-20*mm,10.5*mm,f'{doc.page:02d}')
         c.restoreState()
     def cover(self,c:canvas.Canvas,doc):
@@ -313,6 +315,67 @@ def prepend_cover(document: Book, output: Path) -> None:
         temp.unlink(missing_ok=True)
 
 
+
+def refresh_chapters_for_current_interface():
+    """Correct current operational instructions without removing older detail."""
+    replacements={
+        'EN': {
+            'The workspace and first launch': [
+                'The approved photographic navy, violet and cyan dashboard opens with eight routes: Dashboard, Backup, Archives, Restore, Plugins, Vault and keys, Updates and Settings. The visual cards reflect actual local archive, vault and plugin state; sample scheduled plans are not implemented.',
+                'At first launch, unlock your existing age vault using its password or the previously enrolled Touch ID on supported Macs. The large primary action starts the existing protected backup workflow; archive and restore shortcuts open the corresponding tools.'
+            ],
+            'Installation and platform requirements': [
+                'Download the DMG for your Mac architecture (Apple Silicon or Intel). The mounted disk image contains Multi Backup.app and an Applications shortcut: drag the app onto Applications, then launch it from Applications.',
+                'Early-release Mac packages use ad-hoc signing and are not Apple notarized. On the first launch approve through macOS Privacy & Security if necessary; do not disable Gatekeeper globally. Stable signed and notarized packages remain a separate qualification milestone.'
+            ],
+            'Dashboard tour': [
+                'The premium photographic dashboard contains a landscape hero, rounded luminous actions, recent locally detected archives, vault unlock status, enabled GitHub/Dropbox plugins, actual update check status, disk usage and seven-day local archive activity.',
+                'Disk usage refers to the destination filesystem and never represents an invented cloud quota. Scheduled plans shown in the approved design concept are not yet implemented; only actual saved archives appear.'
+            ],
+            'Backup workflow and progress': [
+                'On Backup, choose destination and provider, then Start / resume backup. When an existing checkpoint is found, the log explicitly shows the resumed cycle identifier, checkpoint count and a repository progress summary. Completed encrypted archives are reused only after integrity checks.',
+                'For GitHub, configure the number of complete CI runs per repository. If an artifact download remains unavailable after retries, Multi Backup attempts older workflow runs to fill the requested number. The optional Ignore CI artifact download errors setting permits omissions, but the log and manifest still identify every missing item.'
+            ],
+            'Resuming, restarting and migration': [
+                'The backup log identifies resumption, verified checkpoints and current completion progress. A failed artifact does not terminate unrelated repositories; the engine retries and uses older CI executions when available. An incomplete cycle retains its checkpoint for another resume.',
+                'When Ignore CI artifact download errors is enabled, the archive can contain an explicit omissions report and completion is flagged with warnings; it must not be treated as a lossless disaster-recovery copy. The option is off by default and can be enabled under Backup Advanced options or with --ignore-ci-artifact-errors.'
+            ],
+        },
+        'IT': {
+            'Panoramica e primo avvio': [
+                'La dashboard fotografica approvata usa card blu, viola e ciano. Nella sidebar sono presenti Dashboard, Backup, Archivi, Ripristina, Plugin, Vault e chiavi, Aggiornamenti e Impostazioni. Gli indicatori mostrano soltanto dati realmente presenti sul disco o nelle impostazioni.',
+                'All’avvio sbloccare il vault age con la password oppure, dopo abilitazione, con Touch ID sui Mac compatibili. Il pulsante principale avvia il flusso di backup già esistente e le scorciatoie rimandano alle rispettive schermate.'
+            ],
+            'Installazione e requisiti': [
+                'Aprire il DMG adatto al Mac (Apple Silicon o Intel): contiene Multi Backup.app e il collegamento alla cartella Applicazioni. Trascinare Multi Backup.app sul collegamento Applicazioni e avviare l’app dalla cartella Applicazioni.',
+                'I DMG early-release sono firmati ad hoc e non notarizzati da Apple. Se necessario autorizzare il primo avvio in Impostazioni di Sistema → Privacy e Sicurezza, senza disabilitare globalmente Gatekeeper. Le versioni stable necessitano ancora della qualificazione di firma e notarizzazione.'
+            ],
+            'Dashboard': [
+                'La dashboard premium comprende fotografia panoramica, pulsanti arrotondati, archivi recenti realmente trovati, stato del vault, plugin GitHub/Dropbox abilitati, aggiornamenti, uso effettivo del disco e andamento locale degli archivi negli ultimi sette giorni.',
+                'La capacità visualizzata riguarda il filesystem di destinazione e non una quota cloud. I piani automatici presenti nel mock concettuale non sono ancora disponibili: non vengono mostrati backup di esempio inventati.'
+            ],
+            'Esecuzione e avanzamento': [
+                'In Backup selezionare il plugin e la destinazione, poi Avvia / riprendi backup. Se esiste un checkpoint compatibile, la finestra di log mostra esplicitamente la ripresa, l’identificativo del ciclo, il numero di checkpoint e l’avanzamento dei repository. I segmenti verificati sono riutilizzati senza sovrascriverli.',
+                'Se fallisce il download di un artifact CI, il programma ritenta e prova esecuzioni CI precedenti per raggiungere il numero configurato di CI complete. L’opzione Ignora errori di download degli artifact CI, disattivata per default, consente omissioni dichiarate nel log e nel manifest.'
+            ],
+            'Ripresa, riavvio e migrazione': [
+                'La ripresa segnala nel log il ciclo esistente, i checkpoint verificati e il progresso. Gli artifact non scaricabili non interrompono gli altri repository: vengono ritentati e, se possibile, sostituiti con altre esecuzioni CI.',
+                'Se le CI complete non raggiungono il numero richiesto, per default il backup viene segnalato come incompleto e rimane riprendibile. Attivando Ignora errori di download degli artifact CI da Opzioni avanzate o con --ignore-ci-artifact-errors si possono accettare omissioni, sempre documentate come tali.'
+            ],
+        },
+    }
+    for language, chapters in (('EN',EN),('IT',IT)):
+        for ix, original in enumerate(chapters):
+            title=original[0]
+            if title not in replacements[language]:
+                continue
+            new_paragraphs=replacements[language][title]
+            chapters[ix]=(title,new_paragraphs,original[2],original[3],original[4],*original[5:])
+
+
+refresh_chapters_for_current_interface()
+
+
 def manual(lang):
     filename=('Multi-Backup-User-Manual-EN.pdf' if lang=='EN' else 'Multi-Backup-Manuale-Utente-IT.pdf')
     output=OUTMAN/filename
@@ -345,22 +408,22 @@ def brochure(lang):
     doc=Book(output,lang,'brochure')
     story=[]
     if lang=='EN':
-        story+=[p('One app. Multiple backup sources.','H1'),p('Multi Backup brings encrypted, resumable and incremental backups together in one modern native workspace.'),
+        story+=[p('One app. Multiple backup sources.','H1'),p('A photographic premium dashboard for encrypted, resilient and resumable backups, with clear vault status, independent plugins and local archive activity.'),
                 Spacer(1,7)]
         headings=[('GITHUB','Complete repository and CI recovery','Git mirrors, release assets, metadata, issues/PRs and optional cleanup of historical CI artifacts.'),
                   ('DROPBOX','Incremental file versions','Opt-in read-only plugin: changed revisions are encrypted once and safely reused in later cycles.'),
                   ('ENCRYPTION','Your keys, your control','Age X25519 encryption, private key generation, separated credentials and atomic output verification.')]
     else:
-        story+=[p('Una sola app. Più sorgenti di backup.','H1'),p('Multi Backup integra backup cifrati, riprendibili e incrementali in un ambiente nativo moderno.'),Spacer(1,7)]
+        story+=[p('Una sola app. Più sorgenti di backup.','H1'),p('Dashboard fotografica premium con backup cifrati e riprendibili, stato del vault, plugin indipendenti e attività reale degli archivi.'),Spacer(1,7)]
         headings=[('GITHUB','Disaster recovery dei repository','Mirror Git, release, metadata, issue/PR e cleanup facoltativo degli artifact CI storici.'),
                   ('DROPBOX','Versioni incrementali dei file','Plugin attivabile e in sola lettura: le revisioni non cambiate vengono cifrate una sola volta.'),
                   ('CIFRATURA','Controllo delle chiavi','Age X25519, generazione delle chiavi, credenziali separate e verifica degli archivi.')]
     for code,title,body in headings:story.append(panel(code+'  /  '+title,esc(body)));story.append(Spacer(1,9))
-    story+=screenshot('dashboard.png',150*mm,('Actual application screen, RC1.' if lang=='EN' else 'Screenshot reale dell’applicazione, RC1.'))
+    story+=screenshot('dashboard.png',150*mm,('Actual premium photographic dashboard, '+VERSION if lang=='EN' else 'Dashboard fotografica premium reale, '+VERSION))
     story.append(PageBreak())
     story.extend([p('Engineered for clarity and control' if lang=='EN' else 'Sicurezza e controllo visibili','H1')])
-    story.extend([p(('The native interface provides clear status, quick actions, plugin choices, and archive exploration. A verified checkpoint makes an interrupted backup restartable without discarding finished encrypted shards.'
-                    if lang=='EN' else 'L’interfaccia nativa mostra attività, stato, plugin e contenuti degli archivi. I checkpoint verificati consentono la ripresa senza perdere gli archivi cifrati già conclusi.'))])
+    story.extend([p(('The photographic interface exposes actual local status, secure actions and archive history. Resume keeps verified encrypted shards; failed CI artifact downloads trigger retries and replacement with older runs where possible.'
+                    if lang=='EN' else 'La nuova interfaccia fotografica mostra stato reale, plugin e archivi. I checkpoint mantengono gli archivi cifrati già verificati; gli artifact CI non scaricabili vengono ritentati e sostituiti, quando possibile, con esecuzioni precedenti.'))])
     story+=screenshot('backup.png',152*mm,'Backup operation and progress' if lang=='EN' else 'Operazioni di backup e avanzamento')
     story.extend([panel('PROTECT & BROWSE' if lang=='EN' else 'PROTEGGI & CONSULTA',
                         'Explore finished archives, inspect metadata, restore a Git working tree and manage the keys you need for recovery.' if lang=='EN'

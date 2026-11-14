@@ -20,6 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from checkpoint import Journal, atomic_json, sha256
+from ci_download import retrieve_artifact, ArtifactDownloadError
 from progress import Progress
 from archive_ops import (ArchiveError, catalog, checkout_git, extract_archive, list_members,
                          mount_archive, read_member, unmount_archive)
@@ -64,6 +65,23 @@ class ResumableBackup:
                        'ci_candidates':0,'errors':0}
         self.cleanup_reports = {}
         self.repository_snapshots = {}
+        self.ci_issues = []  # failed candidate IDs; preserved in the encrypted manifest
+        self.ci_shortfalls = {}  # repository: missing fully archived CI runs
+        if self.journal.resumed:
+            previous=len(self.journal.data.get('steps', {}))
+            self.progress.emit(
+                'resume-start',
+                f'RIPRESA backup esistente: ciclo {self.journal.cycle}; '
+                f'{previous} checkpoint registrati, verifica SHA-256 '
+                'dei segmenti salvati durante la ripresa. '
+                'Nessun archivio verificato verrà sovrascritto.')
+            # A manifest from an older incomplete cycle must be regenerated
+            # after missing CI artifacts have been recovered.
+            if self.journal.data['steps'].pop('manifest', None):
+                atomic_json(self.journal.path, self.journal.data)
+        else:
+            self.progress.emit('cycle-start',
+                               f'Nuovo ciclo di backup {self.journal.cycle}')
 
     def _archive(self, name: str, destination: Path, producer, *, archive_prefix='multi-backup',
                  remove=None):
@@ -205,22 +223,40 @@ class ResumableBackup:
     def _ci_index(self,slug):
         output=self.cycle_dir/'repositories'/slug/'ci'/'runs-index.json'
         key=f'repo:{slug}:ci-index'
-        if self.journal.done(key):
-            return json.loads(output.read_text('utf-8'))
         folder=output.parent
         folder.mkdir(parents=True,exist_ok=True,mode=0o700)
-        runs=self.backup.api(f'/repos/{slug}/actions/runs?per_page=100',
-                             output,collection='workflow_runs',optional=False)
+        previous=None
+        if self.journal.done(key):
+            previous=json.loads(output.read_text('utf-8'))
+        # Do not truncate the candidate list to N *before* downloading: a
+        # missing Actions artifact should be replaced with an older run.
+        candidate_file=folder/'runs-candidates.json'
+        runs=self.backup.api(
+            f'/repos/{slug}/actions/runs?per_page=100',
+            candidate_file,collection='workflow_runs',optional=previous is not None)
         if runs is None:
-            raise RuntimeError('Cannot list workflow runs for '+slug)
+            if previous is None:
+                raise RuntimeError('Cannot list workflow runs for '+slug)
+            self.progress.emit(
+                'ci-warning',f'{slug}: elenco GitHub non aggiornabile; '
+                'uso la lista CI verificata del checkpoint (rimpiazzi limitati)',
+                repository=slug)
+            return previous
         report=self.cleanup_reports.get(slug)
         if report and not report.get('dry_run') and report.get('keep_run_ids') is not None:
             allowed=set(report['keep_run_ids'])
             runs=[r for r in runs if r.get('id') in allowed]
-        # GitHub usually lists newest first, but enforce deterministic newest-N.
-        runs.sort(key=lambda r:(r.get('created_at') or '',r.get('id') or 0),reverse=True)
-        if self.args.max_runs_per_repo:
-            runs=runs[:self.args.max_runs_per_repo]
+        runs.sort(key=lambda r:(r.get('created_at') or '',r.get('id') or 0),
+                  reverse=True)
+        if previous is not None:
+            # Never replace an originally selected run with a newer one simply
+            # because new GitHub CI executions appeared after interruption.
+            original_ids={r.get('id') for r in previous}
+            oldest=min((r.get('created_at') or '' for r in previous),default='')
+            older=[r for r in runs if r.get('id') not in original_ids and
+                   (not oldest or (r.get('created_at') or '') <= oldest)]
+            by_id={r.get('id'):r for r in runs}
+            return [by_id.get(r.get('id'),r) for r in previous]+older
         atomic_json(output,runs)
         self.journal.record(key,output)
         return runs
@@ -231,8 +267,10 @@ class ResumableBackup:
         attempt=int(run.get('run_attempt') or 1)
         dest=self.cycle_dir/'repositories'/slug/'ci'/'runs'/f'{rid}.tar.gz.age'
         key=f'repo:{slug}:ci:{rid}'
+        partial_marker=dest.with_name(dest.name+'.artifact-omissions.json')
         if self.journal.done(key):
-            return 'resumed'
+            self.progress.emit('resume',f'CI {slug}:{rid} già archiviata; SHA-256 verificato',repository=slug)
+            return 'partial' if partial_marker.is_file() else 'resumed'
         # Cache validity is tied to the CURRENT GitHub artifact inventory.
         with tempfile.TemporaryDirectory(dir=self.staging,prefix='.multi-backup-ci-preflight-') as tmp:
             pre=Path(tmp)/'artifacts.json'
@@ -262,6 +300,7 @@ class ResumableBackup:
             self.journal.record(key,dest)
             self.counts['ci_cache_reused']+=1
             return 'cached'
+        omitted=[]
         def producer(root):
             rd=root/'repositories'/slug/'ci'/'runs'/str(rid)
             rd.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -288,29 +327,35 @@ class ResumableBackup:
                     if item.get('expired') is not False: continue
                     aid=item.get('id')
                     if type(aid) is not int: continue
-                    filename=artdir / f'{aid}.zip'
-                    with filename.open('wb') as stream:
-                        response=self.backup.gh(
-                            ['api',f'/repos/{slug}/actions/artifacts/{aid}/zip'],
-                            f'CI artifact {aid}',optional=False,file=stream,timeout=3600)
-                    with filename.open('rb') as stream:
-                        valid = response is not None and filename.stat().st_size > 4 and stream.read(4) == b'PK\x03\x04'
-                    if not valid:
-                        filename.unlink(missing_ok=True)
-                        # Some gh versions do not follow the binary ZIP redirect.
-                        # Fall back to a single artifact by *name*, only when
-                        # that name is unique in this run.
-                        same_name=[a for a in artifacts if a.get('name')==item.get('name') and a.get('expired') is False]
-                        if len(same_name)!=1 or not item.get('name'):
-                            raise RuntimeError(f'Artifact {aid} download failed or name not unique')
-                        extracted=artdir / f'extracted-{aid}'
-                        extracted.mkdir(exist_ok=True)
-                        result=self.backup.gh(
-                            ['run','download',str(rid),'--repo',slug,'--name',item['name'],'--dir',str(extracted)],
-                            f'CI artifact fallback {aid}',optional=False,timeout=3600)
-                        if result is None or not any(extracted.rglob('*')):
-                            raise RuntimeError(f'Artifact {aid} fallback download failed')
+                    try:
+                        retrieve_artifact(
+                            slug, rid, item, artifacts, artdir, self.backup.gh,
+                            on_retry=lambda artifact_id, n, total:
+                                self.progress.emit(
+                                    'ci-retry',
+                                    f'Artifact CI {artifact_id}: retry {n}/{total} '
+                                    'prima di cercare un altra esecuzione CI',
+                                    repository=slug))
+                    except ArtifactDownloadError as exc:
+                        if not self.args.ignore_ci_artifact_errors:
+                            raise
+                        failure={'id':aid,'name':str(item.get('name') or ''),
+                                 'error':str(exc)}
+                        omitted.append(failure)
+                        self.progress.emit(
+                            'ci-warning',
+                            f'Artifact {aid} non disponibile: contenuto omesso '
+                            'esplicitamente; cerco altre CI complete',
+                            repository=slug)
+                if omitted:
+                    # The omission is part of the encrypted archive itself.
+                    atomic_json(rd/'artifact_download_errors.json',omitted)
         self._archive(key,dest,producer)
+        if omitted:
+            atomic_json(partial_marker,{'run_id':rid,'artifacts':omitted,
+                                        'complete':False})
+            self.counts['ci_runs_partially_archived']=self.counts.get('ci_runs_partially_archived',0)+1
+            return 'partial'
         if dest.is_file() and self.args.recipient:
             try: os.link(dest,cached)
             except FileExistsError: pass
@@ -324,22 +369,84 @@ class ResumableBackup:
         if not runs:
             self.progress.emit('ci','No workflow runs for '+slug,repository=slug)
             return
+        limit=self.args.max_runs_per_repo
+        target=min(limit,len(runs)) if limit else len(runs)
         workers=min(self.args.metadata_workers,4)
-        if not self.args.recipient: workers=1
+        if not self.args.recipient:
+            workers=1
+        valid=0
+        examined=0
+        problems=[]
+        # Schedule only as many runs as needed to fill the requested number.
+        # Every failed or partial run frees one slot for the next older run.
+        candidates=iter(runs)
+        pending={}
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-            futuremap={executor.submit(self._ci_run,slug,run):run for run in runs}
-            done=0
-            for future in concurrent.futures.as_completed(futuremap):
-                run=futuremap[future]
-                try: status=future.result()
-                except Exception as exc:
-                    self.counts['errors']+=1
-                    self.progress.emit('error',f"CI {slug}:{run.get('id')}: {exc}",repository=slug)
-                    raise
-                done+=1
-                if done==1 or done % 5==0 or done==len(runs):
-                    self.progress.emit('ci',f'{slug}: {done}/{len(runs)} runs ({status})',
-                                       repository=slug,sub_progress={'completed':done,'total':len(runs)})
+            def fill():
+                while len(pending)<workers and valid+len(pending)<target:
+                    item=next(candidates,None)
+                    if item is None:
+                        break
+                    pending[executor.submit(self._ci_run,slug,item)]=item
+            fill()
+            while pending:
+                finished,_=concurrent.futures.wait(
+                    pending,return_when=concurrent.futures.FIRST_COMPLETED)
+                for future in finished:
+                    run=pending.pop(future)
+                    examined+=1
+                    rid=run.get('id')
+                    try:
+                        status=future.result()
+                    except Exception as exc:
+                        status='incomplete'
+                        problems.append({'run_id':rid,'reason':str(exc)[:800]})
+                        self.progress.emit(
+                            'ci-warning',
+                            f'CI {slug}:{rid} non scaricabile: {exc}; '
+                            'tento la prossima esecuzione più vecchia, '
+                            'senza interrompere gli altri repository.',
+                            repository=slug)
+                    if status=='partial':
+                        problems.append({'run_id':rid,
+                                         'reason':'Artifact omessi su richiesta esplicita'})
+                    elif status in ('new','resumed','cached'):
+                        valid+=1
+                    self.progress.emit(
+                        'ci',
+                        f'{slug}: {valid}/{target} esecuzioni CI complete; '
+                        f'{examined} verificate ({status})',
+                        repository=slug,
+                        sub_progress={'completed':valid,'total':target})
+                fill()
+        self.ci_issues.extend({'repository':slug,**issue} for issue in problems)
+        self.counts['ci_candidates_skipped']=self.counts.get('ci_candidates_skipped',0)+len(problems)
+        if problems:
+            self.progress.emit(
+                'ci-summary',
+                f'{slug}: {valid}/{target} CI complete dopo '
+                f'{examined} tentativi, {len(problems)} problematiche '
+                '(ID e motivazioni nel manifest).',
+                repository=slug)
+        if valid<target:
+            missing=target-valid
+            self.ci_shortfalls[slug]=missing
+            if not self.args.ignore_ci_artifact_errors:
+                self.counts['errors']+=missing
+                self.progress.emit(
+                    'ci-shortfall',
+                    f'{slug}: mancano {missing} esecuzioni CI complete; '
+                    'checkpoint conservato, ripresa consigliata.',
+                    repository=slug)
+            else:
+                self.progress.emit(
+                    'ci-ignored',
+                    f'{slug}: mancano {missing} CI complete; '
+                    'opzione ignora errori attiva. '
+                    'Il backup con omissioni sarà segnalato nei report.',
+                    repository=slug)
+        self.counts['ci_runs_fully_preserved']=self.counts.get(
+            'ci_runs_fully_preserved',0)+valid
 
     def _metadata(self,repos):
         names=list(repos)
@@ -404,6 +511,9 @@ class ResumableBackup:
               'cleanup_reports':self.cleanup_reports,'counts':self.counts,
               'legacy_migrations':[m['source_sha256'] for m in migrations],
               'integrity':'Each output has SHA-256 sidecar; see .state/cycle-*.json',
+              'ci_download_issues':self.ci_issues,
+              'ci_run_shortfalls':self.ci_shortfalls,
+              'ci_artifact_errors_ignored':self.args.ignore_ci_artifact_errors,
               'not_exportable':'GitHub secrets values and external registry contents'}
         self._archive('manifest',self.cycle_dir/'common'/'manifest.tar.gz.age',
                       lambda root:atomic_json(root/'backup_manifest.json',data))
@@ -437,23 +547,46 @@ class ResumableBackup:
             0 if self.args.skip_gists else 1)+2
         self.overall_total=1+len(repos)*5+extras
         self.progress.emit('account','Repository discovery complete',completed=1,total=self.overall_total)
+        if self.journal.resumed:
+            self.progress.emit(
+                'resume-summary',
+                f"RIPRESA: {len(self.journal.data['steps'])} checkpoint registrati; "
+                f"{len(repos)} repository rilevati; verifica e completamento "
+                'delle unità mancanti in corso. La percentuale rappresenta '
+                'le fasi di lavoro, non i byte salvati.',
+                completed=1,total=self.overall_total)
         self.progress.emit('account','Starting repository snapshots',completed=1,total=self.overall_total)
         self._metadata(repos)
         self._common(repos)
         self.counts['errors'] += sum(bool(e.get('critical')) for e in self.backup.errors)
         # Never DELETE remotely before a verified backup of those Actions runs.
-        if self.counts['errors']==0:
+        if self.counts['errors']==0 and not self.ci_issues:
             self._cleanup(repos)
         elif self.args.cleanup_ci_artifacts:
             self.progress.emit('cleanup-skipped','Backup incomplete; refusing CI cleanup')
-        summary=self._manifest(repos,migrations)
         if self.counts['errors']:
-            self.progress.emit('incomplete',f"{self.counts['errors']} errors; preserving checkpoint for resume")
+            atomic_json(self.output/'.state'/'last-incomplete.json',
+                        {'cycle':self.journal.cycle,'counts':self.counts,
+                         'reason':'Some required export items failed; retry the same command'})
+            self.progress.emit(
+                'incomplete',f"{self.counts['errors']} errori: backup parziale, "
+                'checkpoint preservato; riprendere con gli stessi parametri. '
+                'Nessuna pulizia remota non verificata è stata eseguita.')
             return 2
+        self._manifest(repos,migrations)
         self.journal.finish()
+        (self.output/'.state'/'last-incomplete.json').unlink(missing_ok=True)
         self._prune()
-        self.progress.emit('complete',f"Backup cycle {self.journal.cycle} complete",
-                           completed=self.overall_total,total=self.overall_total,summary=self.counts)
+        state='complete-with-warnings' if self.ci_issues else 'complete'
+        label=('Backup con omissioni esplicite' if self.ci_shortfalls else
+               'Backup completato; alcune CI non disponibili sostituite')
+        if state=='complete':
+            label='Backup completo'
+        self.progress.emit(
+            state,f'{label}: ciclo {self.journal.cycle}',
+            completed=self.overall_total,total=self.overall_total,
+            summary={**self.counts,'ci_download_issues':self.ci_issues,
+                     'ci_run_shortfalls':self.ci_shortfalls})
         return 0
 
 
@@ -473,7 +606,8 @@ def build_parser():
     b.add_argument('--include-gh-token',action='store_true')
     b.add_argument('--max-copies-per-repo',type=int,default=5)
     b.add_argument('--max-metadata-backups',type=int,default=5)
-    b.add_argument('--max-runs-per-repo',type=int,default=5,help='Most recent workflow runs backed up per repo (default 5; 0=all)')
+    b.add_argument('--max-runs-per-repo',type=int,default=5,help='Target complete CI runs/repo (default 5, backfill older runs; 0=all)')
+    b.add_argument('--ignore-ci-artifact-errors',action='store_true',help='Opt in to preserving partial CI runs when artifact downloads fail; log omissions and continue')
     b.add_argument('--cleanup-ci-artifacts',action='store_true',help='Opt in to deleting eligible Actions artifacts')
     b.add_argument('--keep-ci-runs',type=int,default=5)
     b.add_argument('--cleanup-ci-dry-run',action='store_true',help='Only simulate Actions deletion; still back up')

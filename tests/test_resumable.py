@@ -67,6 +67,9 @@ class CLIAndArchiveTests(unittest.TestCase):
         self.assertTrue(args.progress)
         self.assertEqual(args.keep_ci_runs,3)
         self.assertEqual(args.metadata_workers,6)
+        self.assertFalse(args.ignore_ci_artifact_errors)
+        opted=build_parser().parse_args(['backup','--ignore-ci-artifact-errors'])
+        self.assertTrue(opted.ignore_ci_artifact_errors)
         self.assertTrue(VERSION.startswith('0.1.0-r'))
 
     def test_malicious_archive_member_rejected(self):

@@ -1,0 +1,10 @@
+[package]
+name = "multi-backup-core"
+version = "0.1.0"
+edition = "2021"
+license = "EUPL-1.2"
+publish = false
+
+[lib]
+name = "multi_backup_core"
+path = "src/lib.rs"

@@ -15,10 +15,11 @@ cleanup() {
 trap cleanup EXIT
 mkdir "$MOUNT" "$TMP/Applications"
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT" -quiet
-# Disallow any extra file visible to the user, including a naked Python or CLI.
+# Exactly two visible items: real application and the standard Applications link.
 COUNT="$(find "$MOUNT" -mindepth 1 -maxdepth 1 ! -name '.DS_Store' ! -name '.Trashes' ! -name '.fseventsd' | wc -l | tr -d ' ')"
-[[ "$COUNT" == 1 && -d "$MOUNT/Multi Backup.app" ]] || {
-  echo "DMG must contain only Multi Backup.app (found $COUNT entries)" >&2
+[[ "$COUNT" == 2 && -d "$MOUNT/Multi Backup.app" &&
+   -L "$MOUNT/Applications" && "$(readlink "$MOUNT/Applications")" == /Applications ]] || {
+  echo "DMG must contain Multi Backup.app and Applications -> /Applications (found $COUNT entries)" >&2
   find "$MOUNT" -mindepth 1 -maxdepth 1 -print >&2
   exit 1
 }

@@ -65,14 +65,16 @@ class Backup:
                             "reason": str(detail)[:1600]})
         print(f"  {'ERRORE' if critical else 'AVVISO'}: {name}", file=sys.stderr, flush=True)
 
-    def gh(self, args, label, *, optional=True, file=None, timeout=None):
+    def gh(self, args, label, *, optional=True, file=None, timeout=None, quiet=False):
         try:
             p = run_cmd(["gh", *args], stdout=file, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as ex:
-            self.problem(label, ex, critical=not optional)
+            if not quiet:
+                self.problem(label, ex, critical=not optional)
             return None
         if p.returncode != 0:
-            self.problem(label, p.stderr.decode("utf-8", "replace"), critical=not optional)
+            if not quiet:
+                self.problem(label, p.stderr.decode("utf-8", "replace"), critical=not optional)
             return None
         return p.stdout if file is None else b""
 
