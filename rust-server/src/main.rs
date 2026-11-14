@@ -5,6 +5,8 @@ mod smtp;
 mod ldap;
 mod oidc;
 mod dav;
+mod security;
+use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
 use ldap::LdapConfig;
@@ -28,6 +30,7 @@ struct AppConfig {
     name: String,
     password_hash: String,
     origin: String,
+    security: SecurityPolicy,
     root: PathBuf,
     identity: Option<PathBuf>,
     exports: PathBuf,
@@ -265,7 +268,10 @@ fn unauthorized()->(StatusCode,Json<Value>) {
 }
 async fn backups(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)> {
-    if session(&headers,&state.0).is_none(){return Err(unauthorized());}
+    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    if !state.0.security.can_browse(&auth.user,&state.0.name) {
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"access_denied"}))));
+    }
     let identity=state.0.identity.as_ref().ok_or_else(||(
         StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_not_configured"}))))?;
     let store=multi_backup_core::chunk_store::Store::open(&state.0.root,identity)
@@ -283,6 +289,12 @@ async fn export(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<Ex
     if !same_origin(&headers,&state.0) ||
        headers.get("x-csrf-token").and_then(|x|x.to_str().ok())!=Some(auth.csrf.as_str()) {
         return Err((StatusCode::FORBIDDEN,Json(json!({"error":"csrf_rejected"}))));
+    }
+    if !state.0.security.can_restore(&auth.user,&state.0.name) ||
+       !state.0.security.recovery_ok(&headers) {
+        audit_actor(&state.0,"recovery_approval_denied",&auth.user);
+        return Err((StatusCode::FORBIDDEN,
+            Json(json!({"error":"recovery_approval_required"}))));
     }
     let identity=state.0.identity.as_ref().ok_or_else(||(
         StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_not_configured"}))))?;
@@ -319,6 +331,22 @@ fn paginate_audit(rows:Vec<Value>,filter:&AuditFilter)->(usize,Vec<Value>){
         .take(filter.limit.unwrap_or(10).clamp(1,100)).collect();
     (count,page)
 }
+async fn security_status(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    if auth.user!=state.0.name {
+        return Err((StatusCode::FORBIDDEN,
+            Json(json!({"error":"admin_required"}))));
+    }
+    // Do not disclose vault paths, network topology, secrets or key material.
+    Ok(Json(json!({"hardened":state.0.security.hardened(),
+        "private_gateway_required":state.0.security.private_gate_enabled(),
+        "recovery_approval_required":state.0.security.approval_enabled(),
+        "vault_storage_write_api":false,
+        "remote_delete_api":false,
+        "keys_or_internal_paths_exposed":false})))
+}
+
 async fn audit_list(State(state):State<AppState>,headers:HeaderMap,
     axum::extract::Query(filter):axum::extract::Query<AuditFilter>)
     ->Result<Json<Value>,(StatusCode,Json<Value>)>{
@@ -443,12 +471,13 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
+    let security=SecurityPolicy::from_env(&origin)?;
     let smtp=SmtpConfig::from_env()?;
     let dav=DavConfig::from_env(&origin)?;
     let ldap=LdapConfig::from_env()?;
     let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,root,exports,identity,audit,smtp,dav,ldap,oidc,
+        name,password_hash:hash,origin,security,root,exports,identity,audit,smtp,dav,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
@@ -466,9 +495,12 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/dav/:id/*path",axum::routing::any(dav::file))
         .route("/api/export",post(export))
         .route("/api/audit",get(audit_list))
+        .route("/api/security/status",get(security_status))
         .route("/api/smtp/status",get(smtp_status))
         .route("/api/smtp/test",post(smtp_test))
         .route("/logout",post(logout))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),security::enforce_gateway))
         .with_state(state);
     let bind=std::env::var("MULTI_BACKUP_BIND").unwrap_or_else(|_|"0.0.0.0:8080".into());
     let listener=tokio::net::TcpListener::bind(bind.parse::<SocketAddr>()?).await?;
