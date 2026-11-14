@@ -128,7 +128,7 @@ impl SecurityPolicy {
 }
 pub async fn enforce_gateway(State(state):State<AppState>,request:Request,next:Next)->Response {
     // Only a liveness endpoint is exempt; ingress MUST NOT publish it.
-    if request.uri().path()=="/healthz" {
+    if request.uri().path()=="/healthz" || request.uri().path()=="/readyz" {
         return next.run(request).await;
     }
     // Agent transport is isolated from browser sessions. The ingress MUST
