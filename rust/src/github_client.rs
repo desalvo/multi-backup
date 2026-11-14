@@ -2,7 +2,6 @@
 //! official gh/git clients without shells or tokens in process arguments.
 //! Remote deletion and organization write APIs are intentionally absent.
 use crate::{archive, archive_management, journal};
-use chrono::Utc;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File}, io::{Read, Write}, path::Path, process::{Command, Stdio}};
@@ -367,7 +366,7 @@ pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
     // Identical fingerprints are reused, never duplicated. Only successful,
     // verified snapshots are eligible for this post-finalization cleanup.
     let mut pruned = 0usize;
-    for repo in &result["repositories"].as_array()
+    for repo in result["repositories"].as_array()
         .ok_or_else(|| err("Missing final repository list"))? {
         let slug = repo["repository"].as_str()
             .ok_or_else(|| err("Missing snapshot repository slug"))?;

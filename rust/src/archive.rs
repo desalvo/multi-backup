@@ -147,7 +147,7 @@ fn with_child<T>(
         let status = child.wait()?;
         if !status.success() {
             let mut stderr = Vec::new();
-            if let Some(mut pipe) = child.stderr.take() {
+            if let Some(pipe) = child.stderr.take() {
                 let _ = pipe.take(4096).read_to_end(&mut stderr);
             }
             return Err(err(format!("age decryption failed: {}",
