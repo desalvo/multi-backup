@@ -710,3 +710,79 @@ impl Store {
         Ok(report)
     }
 }
+
+/// On-demand verified reader, never materializing a plaintext archive file.
+struct LogicalReader<'a>{
+    store:&'a Store,key:&'a Path,chunks:&'a[ChunkRef],
+    index:usize,current:Vec<u8>,offset:usize
+}
+impl std::io::Read for LogicalReader<'_>{
+    fn read(&mut self,dest:&mut[u8])->std::io::Result<usize>{
+        if dest.is_empty(){return Ok(0);}
+        let mut n=0usize;
+        while n<dest.len(){
+            if self.offset>=self.current.len(){
+                if self.index>=self.chunks.len(){break;}
+                self.current=self.store.read_chunk_ref(self.key,&self.chunks[self.index])
+                    .map_err(|e|std::io::Error::new(std::io::ErrorKind::InvalidData,e.to_string()))?;
+                self.offset=0;self.index+=1;
+                if self.current.is_empty(){continue;}
+            }
+            let take=(self.current.len()-self.offset).min(dest.len()-n);
+            dest[n..n+take].copy_from_slice(&self.current[self.offset..self.offset+take]);
+            self.offset+=take;n+=take;
+        }
+        Ok(n)
+    }
+}
+impl Store {
+    /// Reverse conversion v1 -> tar.gz.age for legacy clients. Stream
+    /// chunks directly through tar and gzip into age without plaintext staging.
+    pub fn export_legacy(&self,key:&Path,id:&str,out:&Path)->Res<usize>{
+        if !out.to_string_lossy().ends_with(".tar.gz.age"){
+            return Err("Requires legacy .tar.gz.age destination".into());
+        }
+        if out.exists(){return Err("Refusing overwrite of existing archive".into());}
+        let parent=out.parent().ok_or("Missing output parent")?;
+        if !fs::symlink_metadata(parent)?.file_type().is_dir(){
+            return Err("Output parent is unsafe".into());
+        }
+        if !self.verify(key,id)?.healthy{return Err("Logical backup is not healthy".into());}
+        let snapshot=self.load(key,id)?;
+        let tempfile=tempfile::Builder::new()
+            .prefix(".mb-legacy-").suffix(".tar.gz.age").tempfile_in(parent)?;
+        let ciphertext_out=tempfile.as_file().try_clone()?;
+        let mut child=Command::new("age").arg("-r").arg(&self.cfg.recipient)
+            .stdin(Stdio::piped()).stdout(Stdio::from(ciphertext_out))
+            .stderr(Stdio::null()).spawn()?;
+        let make=(||->Res<()>{
+            let stdin=child.stdin.take().ok_or("Missing age stdin")?;
+            let zip=flate2::write::GzEncoder::new(stdin,flate2::Compression::default());
+            let mut tar=tar::Builder::new(zip);
+            for file in &snapshot.entries{
+                let entry_path=format!("multi-backup/{}",file.path);
+                if !safe_path(&entry_path){return Err("Unsafe virtual archive name".into());}
+                let mut header=tar::Header::new_gnu();
+                header.set_size(file.bytes);
+                header.set_mode(0o600);
+                header.set_mtime(0);
+                header.set_cksum();
+                let source=LogicalReader{store:self,key,chunks:&file.chunks,
+                    index:0,current:Vec::new(),offset:0};
+                tar.append_data(&mut header,entry_path,source)?;
+            }
+            let encoder=tar.into_inner()?;
+            drop(encoder.finish()?);
+            Ok(())
+        })();
+        if let Err(error)=make {
+            let _=child.kill();let _=child.wait();return Err(error);
+        }
+        if !child.wait()?.success(){return Err("Age stream encryption failed".into());}
+        tempfile.as_file().sync_all()?;
+        let files=crate::archive::verify(tempfile.path(),key)?;
+        if files!=snapshot.entries.len(){return Err("Exported file count mismatch".into());}
+        tempfile.persist_noclobber(out).map_err(|e|e.error)?;
+        Ok(files)
+    }
+}

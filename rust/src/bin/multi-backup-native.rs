@@ -15,6 +15,7 @@ fn usage() -> &'static str {
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
        multi-backup-native storage migrate-legacy --root DIR --identity IDENTITY --label NAME --archives-json SOURCES.json\n\
+       multi-backup-native storage export-legacy --root DIR --identity IDENTITY --id HASH --destination NEW.tar.gz.age\n\
        multi-backup-native storage export-zip --root DIR --identity IDENTITY --id HASH --destination NEW_DIR [--volume-mib 2048]\n\
        multi-backup-native storage import-zip --root NEW_DIR --identity IDENTITY --bundle PORTABLE_DIR\n\
        multi-backup-native storage relocate --root SOURCE --identity IDENTITY --destination NEW_DIR [--dry-run]\n\
@@ -153,6 +154,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let dry=flags.contains_key("--dry-run");
                 let report=chunk_store::Store::open(root,key)?.relocate(key,dest,dry)?;
                 println!("{}",serde_json::to_string_pretty(&report)?);
+            }
+            "export-legacy" => {
+                accepted(&flags,&["--root","--identity","--id","--destination"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let count=chunk_store::Store::open(root,key)?.export_legacy(
+                    key,required(&flags,"--id")?,
+                    Path::new(required(&flags,"--destination")?))?;
+                println!("Stream-exported {count} verified legacy tar.gz.age members");
             }
             "migrate-legacy" => {
                 accepted(&flags,&["--root","--identity","--label","--archives-json"])?;

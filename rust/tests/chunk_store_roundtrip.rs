@@ -192,3 +192,31 @@ fn encrypted_store_relocation_is_atomic_and_nondestructive(){
         b"content-addressed relocation data");
     assert!(store.relocate(&key,&dest,false).is_err());
 }
+
+#[test]
+fn streaming_v1_to_legacy_and_back(){
+    let temp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(temp.path()) else{return};
+    let root=temp.path().join("store");let input=temp.path().join("input");
+    fs::create_dir(&input).unwrap();
+    fs::write(input.join("source.txt"),b"verified export data").unwrap();
+    Store::init(&root,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&root,&key).unwrap();
+    let snapshot=store.backup(&key,"unified",&[
+        Source{namespace:"github".into(),directory:input}]).unwrap();
+    let exported=temp.path().join("converted.tar.gz.age");
+    assert_eq!(store.export_legacy(&key,&snapshot.id,&exported).unwrap(),1);
+    assert_eq!(multi_backup_core::archive::verify(&exported,&key).unwrap(),1);
+    assert!(store.export_legacy(&key,&snapshot.id,&exported).is_err());
+    let newroot=temp.path().join("imported");
+    Store::init(&newroot,&recipient,DEFAULT_CHUNK).unwrap();
+    let newstore=Store::open(&newroot,&key).unwrap();
+    let migrated=newstore.import_legacy(&key,"roundtrip",&[
+        multi_backup_core::chunk_store::LegacySource{
+            namespace:"legacy".into(),archive:exported
+        }]).unwrap();
+    let recovered=temp.path().join("recovery");
+    newstore.restore(&key,&migrated.id,None,&recovered).unwrap();
+    assert_eq!(fs::read(recovered.join("legacy/multi-backup/github/source.txt")).unwrap(),
+        b"verified export data");
+}
