@@ -39,7 +39,8 @@ pub(crate) fn safe_object(path:&str)->bool {
     let s:Vec<_>=path.split('/').collect();
     match s.as_slice(){
         ["config.json.age"]=>true,
-        ["manifests",n]|["stripes",n]=>n.strip_suffix(".json.age").is_some_and(safe_hash),
+        ["manifests",n]|["stripes",n]|["protected",n]=>
+            n.strip_suffix(".json.age").is_some_and(safe_hash),
         ["chunks",a,b,n]=>{
             n.strip_suffix(".age").is_some_and(|id|
                 safe_hash(id)&&*a==&id[..2]&&*b==&id[2..4])

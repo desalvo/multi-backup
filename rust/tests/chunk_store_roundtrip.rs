@@ -220,3 +220,63 @@ fn streaming_v1_to_legacy_and_back(){
     assert_eq!(fs::read(recovered.join("legacy/multi-backup/github/source.txt")).unwrap(),
         b"verified export data");
 }
+
+
+#[test]
+fn user_protected_backup_blocks_delete_and_survives_portable_roundtrip(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(tmp.path()) else{return};
+    let root=tmp.path().join("protected-store");
+    let data=tmp.path().join("data");
+    fs::create_dir(&data).unwrap();
+    fs::write(data.join("safe.txt"),b"protected and shared").unwrap();
+    Store::init(&root,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&root,&key).unwrap();
+    let sources=[Source{namespace:"secure/data".into(),directory:data}];
+    // Legacy namespace support is single component; this test uses the
+    // current explicitly supported short logical source name.
+    let sources=[Source{namespace:"secure".into(),directory:sources[0].directory.clone()}];
+    let protected=store.backup(&key,"hold", &sources).unwrap();
+    let shared=store.backup(&key,"other", &sources).unwrap();
+    assert_eq!(protected.entries[0].chunks[0].id,shared.entries[0].chunks[0].id);
+    assert!(store.protect_backup(&key,&protected.id).unwrap());
+    assert!(!store.protect_backup(&key,&protected.id).unwrap());
+    assert!(store.is_backup_protected(&key,&protected.id).unwrap());
+    assert!(store.list(&key).unwrap().iter().find(|v|v.id==protected.id).unwrap().protected);
+    assert!(store.delete_backup(&key,&protected.id,&protected.id).is_err());
+    assert!(store.unprotect_backup(&key,&protected.id,&shared.id).is_err());
+    assert!(store.is_backup_protected(&key,&protected.id).unwrap());
+    let bundle=tmp.path().join("bundle");
+    multi_backup_core::portable::export(&store,&key,&protected.id,&bundle,2).unwrap();
+    let target=tmp.path().join("imported");
+    let imported=multi_backup_core::portable::import(&bundle,&key,&target).unwrap();
+    let copy=Store::open(&target,&key).unwrap();
+    assert_eq!(imported,protected.id);
+    assert!(copy.is_backup_protected(&key,&imported).unwrap());
+    assert!(copy.delete_backup(&key,&imported,&imported).is_err());
+    assert!(store.unprotect_backup(&key,&protected.id,&protected.id).unwrap());
+    assert!(!store.is_backup_protected(&key,&protected.id).unwrap());
+    store.delete_backup(&key,&protected.id,&protected.id).unwrap();
+    assert!(store.load(&key,&protected.id).is_err());
+    assert!(store.verify(&key,&shared.id).unwrap().healthy);
+    let destination=tmp.path().join("restored");
+    assert_eq!(store.restore(&key,&shared.id,None,&destination).unwrap(),1);
+}
+#[test]
+fn protected_marker_corruption_or_missing_confirmation_fails_closed(){
+    let tmp=tempdir().unwrap();
+    let Some((recipient,key))=credentials(tmp.path()) else{return};
+    let root=tmp.path().join("teststore");
+    let data=tmp.path().join("input");
+    fs::create_dir(&data).unwrap();fs::write(data.join("a"),b"1").unwrap();
+    Store::init(&root,&recipient,DEFAULT_CHUNK).unwrap();
+    let store=Store::open(&root,&key).unwrap();
+    let backup=store.backup(&key,"test",&[Source{namespace:"test".into(),directory:data}]).unwrap();
+    assert!(store.protect_backup(&key,&backup.id).unwrap());
+    let marker=root.join(".multi-backup-v1/protected")
+        .join(format!("{}.json.age",backup.id));
+    fs::write(marker,b"invalid encrypted marker").unwrap();
+    assert!(store.is_backup_protected(&key,&backup.id).is_err());
+    assert!(store.delete_backup(&key,&backup.id,&backup.id).is_err());
+    assert!(store.load(&key,&backup.id).is_err());
+}

@@ -19,11 +19,17 @@ pub struct Entry { pub path: String, pub bytes: u64, pub chunks: Vec<ChunkRef> }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogicalBackup {
     pub version: u32, pub id: String, pub label: String, pub entries: Vec<Entry>,
+    /// A live status flag loaded from a separate encrypted marker; never
+    /// trust the stored manifest itself to authorize deletion.
+    #[serde(default, skip_serializing)]
+    pub protected: bool,
 }
 #[derive(Serialize, Deserialize)]
 struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: String }
 pub struct Source { pub namespace: String, pub directory: PathBuf }
 pub struct Store { root: PathBuf, cfg: Config, key: [u8;32] }
+#[derive(Serialize,Deserialize)]
+struct BackupHold { schema: u8, id: String, protected: bool }
 fn sha(data: &[u8]) -> String { hex::encode(Sha256::digest(data)) }
 pub(crate) fn safe_hash(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|v| v.is_ascii_hexdigit() && !v.is_ascii_uppercase())
@@ -88,6 +94,10 @@ impl Store {
     fn manifest_path(&self, id: &str) -> Res<PathBuf> {
         if !safe_hash(id) { return Err("Unsafe manifest ID".into()); }
         Ok(self.root.join("manifests").join(format!("{id}.json.age")))
+    }
+    fn hold_path(&self, id: &str) -> Res<PathBuf> {
+        if !safe_hash(id) { return Err("Unsafe protected backup ID".into()); }
+        Ok(self.root.join("protected").join(format!("{id}.json.age")))
     }
     fn chunk_path(&self, id: &str) -> Res<PathBuf> {
         if !safe_hash(id) { return Err("Unsafe chunk ID".into()); }
@@ -218,7 +228,7 @@ impl Store {
         let mut random = [0u8;32];
         rand::rngs::OsRng.fill_bytes(&mut random);
         let snapshot = LogicalBackup {version: 1, id: hex::encode(random),
-            label: label.to_owned(), entries};
+            label: label.to_owned(), entries, protected:false};
         let encrypted = age(&serde_json::to_vec(&snapshot)?, Some(&self.cfg.recipient), None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
@@ -233,8 +243,9 @@ impl Store {
             return Err("Unsafe manifest".into());
         }
         let data = age(&fs::read(path)?, None, Some(identity))?;
-        let value: LogicalBackup = serde_json::from_slice(&data)?;
+        let mut value: LogicalBackup = serde_json::from_slice(&data)?;
         if value.version != 1 || value.id != id { return Err("Manifest identity mismatch".into()); }
+        value.protected = self.is_backup_protected(identity,id)?;
         let mut names = HashSet::new();
         for item in &value.entries {
             if !safe_path(&item.path) || !names.insert(&item.path) { return Err("Unsafe manifest path".into()); }
@@ -558,6 +569,9 @@ impl Store {
         let mut objects=std::collections::BTreeMap::new();
         objects.insert("config.json.age".to_string(),self.root.join("config.json.age"));
         objects.insert(format!("manifests/{id}.json.age"),self.manifest_path(id)?);
+        if backup.protected {
+            objects.insert(format!("protected/{id}.json.age"),self.hold_path(id)?);
+        }
         for group in self.read_protection(key)? {
             if !group.members.iter().any(|m|referenced.contains(&m.id)){continue;}
             for member in &group.members {referenced.insert(member.id.clone());}
@@ -618,7 +632,7 @@ impl Store {
         entries.sort_by(|a,b|a.path.cmp(&b.path));
         let mut nonce=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut nonce);
         let snapshot=LogicalBackup{version:1,id:hex::encode(nonce),
-            label:label.to_string(),entries};
+            label:label.to_string(),entries,protected:false};
         let encrypted=age(&serde_json::to_vec(&snapshot)?,
             Some(&self.cfg.recipient),None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)? {
@@ -784,5 +798,90 @@ impl Store {
         if files!=snapshot.entries.len(){return Err("Exported file count mismatch".into());}
         tempfile.persist_noclobber(out).map_err(|e|e.error)?;
         Ok(files)
+    }
+}
+
+
+/// User-requested logical backup protection. Unlike Store::protect (8+2
+/// parity), this holds the MANIFEST and all of its referenced chunks against
+/// application-level manual deletion, retention and garbage collection.
+///
+/// This is NOT an immutable WORM/Object Lock boundary: a privileged OS/storage
+/// operator can still modify underlying files. Real ransomware resistance
+/// requires an independently permissioned append-only vault.
+impl Store {
+    fn app_lock(&self) -> Res<File> {
+        let lock=self.root.join(".lock");
+        match fs::symlink_metadata(&lock) {
+            Ok(meta) if !meta.file_type().is_file() => return Err("Unsafe store lock".into()),
+            Err(error) if error.kind()!=std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => (),
+        }
+        let handle=OpenOptions::new().create(true).write(true).open(&lock)?;
+        if !handle.metadata()?.is_file(){return Err("Unsafe store lock".into());}
+        fs2::FileExt::lock_exclusive(&handle)?;
+        Ok(handle)
+    }
+    pub fn is_backup_protected(&self,identity:&Path,id:&str)->Res<bool>{
+        let path=self.hold_path(id)?;
+        match fs::symlink_metadata(&path){
+            Err(error) if error.kind()==std::io::ErrorKind::NotFound=>return Ok(false),
+            Err(error)=>return Err(error.into()),
+            Ok(meta) if !meta.file_type().is_file()||meta.len()>65536=>
+                return Err("Unsafe protected backup marker".into()),
+            Ok(_)=>{},
+        }
+        let raw=age(&fs::read(&path)?,None,Some(identity))?;
+        let hold:BackupHold=serde_json::from_slice(&raw)?;
+        if hold.schema!=1||hold.id!=id||!hold.protected{
+            return Err("Invalid protected backup marker".into());
+        }
+        Ok(true)
+    }
+    pub fn protect_backup(&self,identity:&Path,id:&str)->Res<bool>{
+        let lock=self.app_lock()?;
+        self.load(identity,id)?; // require an existing, authenticated manifest
+        if self.is_backup_protected(identity,id)?{return Ok(false);}
+        let hold=BackupHold{schema:1,id:id.into(),protected:true};
+        let encrypted=age(&serde_json::to_vec(&hold)?,Some(&self.cfg.recipient),None)?;
+        if !write_new(&self.hold_path(id)?,&encrypted)?{
+            return Err("Concurrent protected marker conflict".into());
+        }
+        fs2::FileExt::unlock(&lock)?;
+        Ok(true)
+    }
+    /// Removing user protection ALWAYS requires explicit exact-ID confirmation.
+    /// The caller must authorize unlocking; it cannot be implicitly invoked
+    /// by expiry, schedule, cleanup or a restore operation.
+    pub fn unprotect_backup(&self,identity:&Path,id:&str,confirm_id:&str)->Res<bool>{
+        if id!=confirm_id||!safe_hash(id) {
+            return Err("Confirm the complete backup ID to remove protection".into());
+        }
+        let lock=self.app_lock()?;
+        self.load(identity,id)?;
+        if !self.is_backup_protected(identity,id)?{return Ok(false);}
+        fs::remove_file(self.hold_path(id)?)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(true)
+    }
+    /// Logical manifest deletion ONLY. Never remove shared chunks or stripes
+    /// here; future GC must recheck all live manifests and protected holds
+    /// with the SAME store lock, parity dependencies and a grace period.
+    pub fn delete_backup(&self,identity:&Path,id:&str,confirm_id:&str)->Res<()>{
+        if id!=confirm_id||!safe_hash(id) {
+            return Err("Confirm the complete backup ID before deletion".into());
+        }
+        let lock=self.app_lock()?;
+        let backup=self.load(identity,id)?;
+        if backup.protected {
+            return Err("Backup is PROTECTED. Explicitly remove protection first".into());
+        }
+        let manifest=self.manifest_path(id)?;
+        if !fs::symlink_metadata(&manifest)?.file_type().is_file(){
+            return Err("Unsafe manifest deletion".into());
+        }
+        fs::remove_file(manifest)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(())
     }
 }
