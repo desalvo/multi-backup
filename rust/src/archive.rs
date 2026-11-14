@@ -104,12 +104,37 @@ fn start_decrypt(archive: &Path, identity: &Path) -> ArchiveResult<Child> {
     Ok(child)
 }
 
-fn with_reader<T>(
-    path: &Path,
-    identity: &Path,
+/// Accept an age private identity through a pipe, never a plaintext file.
+/// age -i - reads stdin while decrypting the separately named archive.
+fn start_decrypt_from_memory(path: &Path, identity: &[u8]) -> ArchiveResult<Child> {
+    ensure_archive(path)?;
+    verify_sidecar(path)?;
+    if identity.is_empty() || identity.len() > 16_384 {
+        return Err(err("Invalid in-memory private identity length"));
+    }
+    let mut child = Command::new("age").arg("--decrypt").arg("-i")
+        .arg("-").arg(path)
+        .stdin(Stdio::piped()).stdout(Stdio::piped())
+        .stderr(Stdio::piped()).spawn()?;
+    let written = (|| -> io::Result<()> {
+        let mut pipe = child.stdin.take().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "Missing age identity pipe")
+        })?;
+        pipe.write_all(identity)?;
+        Ok(())
+    })();
+    if let Err(error) = written {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(Box::new(error));
+    }
+    Ok(child)
+}
+
+fn with_child<T>(
+    mut child: Child,
     visitor: impl FnOnce(&mut Archive<GzDecoder<std::process::ChildStdout>>) -> ArchiveResult<T>,
 ) -> ArchiveResult<T> {
-    let mut child = start_decrypt(path, identity)?;
     let result = (|| -> ArchiveResult<T> {
         let stdout = child.stdout.take().ok_or_else(|| err("Missing age output stream"))?;
         let mut archive = Archive::new(GzDecoder::new(stdout));
@@ -168,8 +193,8 @@ fn scan<R: Read>(
     Ok(all)
 }
 
-pub fn list(path: &Path, identity: &Path) -> ArchiveResult<Vec<Member>> {
-    with_reader(path, identity, |archive| scan(archive, |entry, member, _| {
+fn list_from_child(child: Child) -> ArchiveResult<Vec<Member>> {
+    with_child(child, |archive| scan(archive, |entry, member, _| {
         if !member.directory {
             let actual = io::copy(entry, &mut io::sink())?;
             if actual != member.bytes { return Err(err("Short archive member")); }
@@ -178,8 +203,17 @@ pub fn list(path: &Path, identity: &Path) -> ArchiveResult<Vec<Member>> {
     }))
 }
 
+pub fn list(path: &Path, identity: &Path) -> ArchiveResult<Vec<Member>> {
+    list_from_child(start_decrypt(path, identity)?)
+}
+pub fn list_from_memory(path: &Path, identity: &[u8]) -> ArchiveResult<Vec<Member>> {
+    list_from_child(start_decrypt_from_memory(path, identity)?)
+}
 pub fn verify(path: &Path, identity: &Path) -> ArchiveResult<usize> {
     Ok(list(path, identity)?.len())
+}
+pub fn verify_from_memory(path: &Path, identity: &[u8]) -> ArchiveResult<usize> {
+    Ok(list_from_memory(path, identity)?.len())
 }
 
 fn assert_safe_parent(root: &Path, path: &Path) -> ArchiveResult<()> {
@@ -198,7 +232,7 @@ fn assert_safe_parent(root: &Path, path: &Path) -> ArchiveResult<()> {
     Ok(())
 }
 
-pub fn extract(archive: &Path, identity: &Path, destination: &Path) -> ArchiveResult<Vec<Member>> {
+fn extract_from_child(child: Child, destination: &Path) -> ArchiveResult<Vec<Member>> {
     // Never touch an existing restore destination, even an empty directory.
     if fs::symlink_metadata(destination).is_ok() {
         return Err(err("Restore destination already exists"));
@@ -217,7 +251,7 @@ pub fn extract(archive: &Path, identity: &Path, destination: &Path) -> ArchiveRe
     }
     let staging = TempBuilder::new().prefix(".multi-backup-rust-restore-")
         .tempdir_in(&canonical_parent)?;
-    let result = with_reader(archive, identity, |archive| {
+    let result = with_child(child, |archive| {
         scan(archive, |entry, member, relative| {
             let dest = staging.path().join(relative);
             let parent = dest.parent().ok_or_else(|| err("Invalid archive member parent"))?;
@@ -250,6 +284,14 @@ pub fn extract(archive: &Path, identity: &Path, destination: &Path) -> ArchiveRe
     fs::rename(staging.path(), &final_path)?;
     std::mem::forget(staging);
     Ok(result)
+}
+pub fn extract(archive: &Path, identity: &Path, destination: &Path) -> ArchiveResult<Vec<Member>> {
+    extract_from_child(start_decrypt(archive, identity)?, destination)
+}
+pub fn extract_from_memory(archive: &Path, identity: &[u8], destination: &Path)
+    -> ArchiveResult<Vec<Member>>
+{
+    extract_from_child(start_decrypt_from_memory(archive, identity)?, destination)
 }
 
 fn checked_sources(source: &Path) -> ArchiveResult<Vec<(PathBuf, PathBuf, bool, u64)>> {
