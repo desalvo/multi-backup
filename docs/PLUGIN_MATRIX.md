@@ -35,20 +35,23 @@ implemented and tested before the reverse operation is enabled.
 | ovirt | Planned | — | oVirt/RHV VM, disks and engine config |
 | mysql | Planned | — | MySQL/MariaDB consistency + binlog/PITR |
 | postgresql | Planned | — | pg_basebackup/WAL or logical export and PITR |
+| oracle | Planned | — | Oracle RMAN online with ARCHIVELOG, redo/SCN and SPFILE/controlfile recovery |
 | ssh | Planned | Planned | SSH/SCP/SFTP host verification, remote metadata |
 | sshfs | Planned | Planned | Pre-mounted SSHFS/FUSE SFTP filesystem, pinned host key, encrypted-only output |
 | anti-ransomware-vault | — | Planned | WORM/Object Lock, independent append-only ingest and recovery plane, offline credentials |
 
-**Counts (expanded scope r034):** 31 plugin IDs. **30 backup input** and
-**22 backup output** roles, mirrored by 22 restore inputs/30 restore outputs.
-There are **52 declared backup roles** and 52 reverse restore roles (104
-directional declarations). Possible pairings: 30 × 22 = **660** backup pairs,
-660 inverse restore pairs. None certified for generic execution.
+**Counts (expanded scope r036):** 32 plugin IDs. **31 backup input**
+and **22 backup output** roles, mirrored by 22 restore inputs/31 restore
+outputs. There are **53 declared backup roles** and 53 inverse restore
+roles (106 directional capability declarations). The possible pairing
+space is 31 × 22 = **682** backup combinations and 682 reverse restore
+combinations. No generic pair is certified for execution.
 
-**Progress:** 52/52 declared role definitions; 0/52 generic adapters
-certified; 0/660 generic backup combinations certified. These measures
-are not comparable to the earlier overall-RC 57.5% estimate. Dedicated
-GitHub/Dropbox/POSIX native preview commands remain separate.
+**Progress:** 53/53 requested backup role definitions represented (100%
+catalog coverage), 0/53 unified adapters qualified, and 0/682 generic
+backup combinations certified. These are declaration/qualification
+metrics, NOT the overall product completion percentage. Existing direct
+GitHub/Dropbox/POSIX preview commands remain separate.
 
 ### LVM over iSCSI and Fibre Channel
 

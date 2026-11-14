@@ -229,3 +229,25 @@ credentials, and does not certify a generic adapter.
   corrupt holds, wrong-ID rejection and protected legacy archive deletion.
 - No claim of immutable hardware WORM protection or completed remote plugin
   enforcement; independent vault and provider certification remain pending.
+
+## r036 — Oracle live RMAN and user-protected backup semantics
+
+The source catalog adds `oracle` as a **planned backup input** and inverse
+restore destination. The driver must invoke the *operator's locally
+licensed* Oracle RMAN online backup for an ARCHIVELOG database; capture
+a recoverable SCN, archived redo, datafile/backup pieces and controlfile/
+SPFILE while the service stays available. No copying live Oracle files
+as a substitute for an application-consistent operation, and no
+redistribution of Oracle binaries. Extra-cost RMAN compression,
+encryption or standby options must remain disabled without the required
+entitlements; Multi Backup uses its own encryption layer.
+
+**Every output adapter must implement explicit backup protection
+independently of retention:** a user-protected logical backup is not
+deletable, even after 30 days, until the authenticated user explicitly
+removes the hold. Generic output adapters must read that state before
+manual deletion, policy sweep, retention shortening, or chunk GC.
+The local chunk-store and legacy archive path now have protection
+enforcement; remote providers still need their own tested enforcement.
+WORM/Object Lock on an independent vault is a separate and stronger
+safety property. See `docs/BACKUP_PROTECTION.md`.

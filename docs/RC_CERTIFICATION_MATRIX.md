@@ -226,3 +226,16 @@ deletion/truncation/shortened retention despite stolen ingestion credentials.
   corrupt holds, wrong-ID rejection and protected legacy archive deletion.
 - No claim of immutable hardware WORM protection or completed remote plugin
   enforcement; independent vault and provider certification remain pending.
+
+## r036 corrected inventory — Oracle and explicit protection
+
+- `oracle` is registered as a planned consistent-online RMAN input,
+  taking the plugin inventory to 32 plugin IDs, 31 backup input roles and
+  22 backup output roles; restore is the exact reverse (22 / 31).
+  **53** backup role definitions are present, and **682** possible pairs
+  are not yet certified as generic integrated jobs.
+- New user-requested protection is separate from 8+2 parity and WORM:
+  encrypted per-backup hold survives portable transport/relocation,
+  blocks manual logical delete and retention preview. Legacy local
+  archives have their own guarded protection sidecars. The runtime
+  scheduler and safe chunk GC are not yet certified or activated.
