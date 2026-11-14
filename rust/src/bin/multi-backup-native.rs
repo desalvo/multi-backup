@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -15,7 +15,10 @@ fn usage() -> &'static str {
        multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins restore --input posix --output posix --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
-       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--top-namespace PATH]\n\
+       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--mode full|incremental] [--parent BACKUP_ID] [--top-namespace PATH]\n\
+       multi-backup-native storage info --root DIR --identity IDENTITY --id HASH [--json]\n\
+       multi-backup-native storage verify-chain --root DIR --identity IDENTITY --id HASH [--no-chain] [--json]\n\
+       multi-backup-native storage delete-backup --root DIR --identity IDENTITY --id HASH --confirm-id HASH [--rebase-dependents]\n\
        multi-backup-native storage retention-preview --root DIR --identity IDENTITY [--days 30] [--keep-last 1] [--json]\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
@@ -71,7 +74,7 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
-        if args[pos] == "--dry-run" || args[pos] == "--source-snapshot-attested" {
+        if ["--dry-run","--source-snapshot-attested","--no-chain","--rebase-dependents"].contains(&args[pos].as_str()) {
             let flag=args[pos].as_str();
             if parsed.insert(flag,"true").is_some() {
                 return Err(format!("Duplicate {flag} flag"));
@@ -185,8 +188,11 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "backup" => {
                 accepted(&flags, &["--input","--output","--source","--root",
                                     "--identity","--label","--namespace","--top-namespace",
-                                    "--source-snapshot-attested","--input-gpfs-access"])?;
-                let snapshot = plugin_executor::backup(
+                                    "--source-snapshot-attested","--input-gpfs-access",
+                                    "--mode","--parent"])?;
+                let kind=chunk_store::BackupKind::parse(
+                    flags.get("--mode").copied().unwrap_or("full"))?;
+                let snapshot = plugin_executor::backup_with_mode(
                     required(&flags,"--input")?,required(&flags,"--output")?,
                     Path::new(required(&flags,"--source")?),
                     Path::new(required(&flags,"--root")?),
@@ -195,7 +201,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     flags.get("--namespace").copied().unwrap_or("files"),
                     flags.get("--top-namespace").copied().unwrap_or(""),
                     flags.contains_key("--source-snapshot-attested"),
-                    flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?)?;
+                    flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?,
+                    kind,flags.get("--parent").copied())?;
                 if json { println!("{}",serde_json::to_string_pretty(&snapshot)?); }
                 else {println!("Verified encrypted plugin backup {} ({} files)",
                               snapshot.id,snapshot.entries.len());}
@@ -229,7 +236,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("Initialized immutable age/Zstandard storage; legacy archives untouched");
             }
             "backup" => {
-                accepted(&flags, &["--root","--identity","--label","--sources-json","--top-namespace"])?;
+                accepted(&flags, &["--root","--identity","--label","--sources-json",
+                                    "--top-namespace","--mode","--parent"])?;
                 let identity = Path::new(required(&flags, "--identity")?);
                 let store = chunk_store::Store::open(root, identity)?;
                 let sources_file = std::fs::File::open(required(&flags, "--sources-json")?)?;
@@ -242,8 +250,11 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         namespace: namespace.to_owned(), directory: path.into(),
                     })
                 }).collect::<Result<_,_>>()?;
-                let snapshot = store.backup_in_namespace(identity, required(&flags,"--label")?,
-                    flags.get("--top-namespace").copied().unwrap_or(""), &sources)?;
+                let kind=chunk_store::BackupKind::parse(
+                    flags.get("--mode").copied().unwrap_or("full"))?;
+                let snapshot = store.backup_in_namespace_mode(identity, required(&flags,"--label")?,
+                    flags.get("--top-namespace").copied().unwrap_or(""), &sources,
+                    kind,flags.get("--parent").copied())?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             }
             "list" => {
@@ -263,7 +274,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     for backup in &snapshots {
                         println!("{} {} {} ({} logical files)",
                             if backup.protected {"[PROTECTED]"}else{"[UNPROTECTED]"},
-                            backup.id,backup.label,backup.entries.len());
+                            backup.id,format!("{} [{:?}]",backup.label,backup.kind),backup.entries.len());
                     }
                 }
             }
@@ -297,12 +308,34 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("Backup {id}: {}",if changed {"protection removed"}else{"not protected"});
             }
             "delete-backup" => {
-                accepted(&flags,&["--root","--identity","--id","--confirm-id"])?;
+                accepted(&flags,&["--root","--identity","--id","--confirm-id",
+                                  "--rebase-dependents"])?;
                 let key=Path::new(required(&flags,"--identity")?);
                 let id=required(&flags,"--id")?;
-                chunk_store::Store::open(root,key)?.delete_backup(
-                    key,id,required(&flags,"--confirm-id")?)?;
-                println!("Deleted logical manifest {id}; shared ciphertext chunks preserved for safe GC");
+                let store=chunk_store::Store::open(root,key)?;
+                if flags.contains_key("--rebase-dependents") {
+                    let count=store.delete_backup_rebase(key,id,required(&flags,"--confirm-id")?)?;
+                    println!("Rebased {count} direct descendants; deleted {id}; all shared ciphertext preserved");
+                } else {
+                    store.delete_backup(key,id,required(&flags,"--confirm-id")?)?;
+                    println!("Deleted logical manifest {id}; shared ciphertext preserved");
+                }
+            }
+            "info" => {
+                accepted(&flags,&["--root","--identity","--id"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let store=chunk_store::Store::open(root,key)?;
+                let info=backup_chain::details(&store,key,required(&flags,"--id")?)?;
+                println!("{}",serde_json::to_string_pretty(&info)?);
+            }
+            "verify-chain" => {
+                accepted(&flags,&["--root","--identity","--id","--no-chain"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let store=chunk_store::Store::open(root,key)?;
+                let full=!flags.contains_key("--no-chain");
+                let result=backup_chain::verify_chain(&store,key,required(&flags,"--id")?,full)?;
+                println!("{}",serde_json::to_string_pretty(&result)?);
+                if !result.healthy{return Err("Incremental chain integrity check failed".into());}
             }
             "relocate" => {
                 accepted(&flags,&["--root","--identity","--destination","--dry-run"])?;
