@@ -224,6 +224,33 @@ fn request(config:&Config,method:&str,route:&str,body:Option<&Path>,
     }else{r.call()}.map_err(err)?;
     response.into_json::<Value>().map_err(err)
 }
+/// Process-wide, crash-released slot permits. Each configured agent enforces
+/// concurrent jobs across multiple CLI commands/processes, not only across
+/// threads created by its own poll loop. Slots are files inside the private
+/// agent spool directory, held open for the full backup+upload lifecycle.
+struct SlotGuard(File);
+impl Drop for SlotGuard {
+    fn drop(&mut self){let _=fs2::FileExt::unlock(&self.0);}
+}
+fn acquire_slot(config:&Config,limits:&ExecutionLimits)->Res<SlotGuard>{
+    limits.validate()?;
+    let root=fs::canonicalize(&config.spool_dir).map_err(err)?;
+    if !fs::symlink_metadata(&root).map_err(err)?.file_type().is_dir(){
+        return Err("Unsafe agent concurrency directory".into());
+    }
+    for index in 0..limits.max_concurrent_jobs{
+        let filename=root.join(format!(".backup-slot-{index:03}.lock"));
+        let lock=OpenOptions::new().read(true).write(true).create(true)
+            .open(&filename).map_err(err)?;
+        if !fs::symlink_metadata(&filename).map_err(err)?.file_type().is_file(){
+            return Err("Unsafe non-regular agent worker slot".into());
+        }
+        if fs2::FileExt::try_lock_exclusive(&lock).is_ok(){
+            return Ok(SlotGuard(lock));
+        }
+    }
+    Err("Agent concurrent job ceiling reached: no free worker slot".into())
+}
 fn age_encrypt_to_spool(config:&Config,p:&AgentProfile,limits:&ExecutionLimits)->Res<PathBuf>{
     limits.validate()?;limits.check_host()?;
     fs::create_dir_all(&config.spool_dir).map_err(err)?;
@@ -273,6 +300,7 @@ fn push(config:&Config,profile_id:&str,force:bool,limits:&ExecutionLimits,
         ).map_err(err)?;
         ExecutionLimits::strictest(&server,&config.limits)?
     };
+    let _worker_slot=acquire_slot(config,&effective)?;
     let encrypted=age_encrypt_to_spool(config,&p,&effective)?;
     let id=hex::encode(rand::random::<[u8;32]>());
     // The server approves the exact bytes of this locally installed profile,
@@ -389,6 +417,7 @@ fn run()->Res<()>{
         }
         "run"=>{
             let cfg=load(&opts)?;let p=profile(&cfg,required(&opts,"--profile")?)?;
+            let _worker_slot=acquire_slot(&cfg,&cfg.limits)?;
             let outfile=age_encrypt_to_spool(&cfg,&p,&cfg.limits)?;
             println!("Encrypted standalone AFS volume dump: {}",outfile.display());Ok(())
         }
