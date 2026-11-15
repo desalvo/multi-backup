@@ -1,0 +1,60 @@
+name: Multi Backup - real PostgreSQL and MariaDB encrypted restore
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - '.github/workflows/database-live-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-database-restore:
+    name: Real PostgreSQL 16 and MariaDB 11.4 full backup/restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test_pg_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test_maria_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actual database client programs and age
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age postgresql-client mariadb-client
+          command -v pg_dump
+          command -v pg_restore
+          command -v createdb
+          command -v mariadb
+          command -v mariadb-dump
+          command -v age-keygen
+      - name: Run compiled Rust CLI against live PostgreSQL and MariaDB servers
+        env:
+          MULTI_BACKUP_LIVE_DATABASE_CI: '1'
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml --test database_live_roundtrip -- --nocapture
+      - name: Ensure no plaintext dump files were put in checkout
+        if: always()
+        run: |
+          ! find rust -type f \( -name '*.pgcustom' -o -name '*.sql' \) | grep .
