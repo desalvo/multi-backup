@@ -422,6 +422,30 @@ mod tests {
         assert!(safe_hash(&"a".repeat(64)));
     }
     #[test]
+    fn distributed_guard_aborts_before_any_new_manifest_or_chunk(){
+        let root=tempfile::tempdir().unwrap();
+        let store=Store{
+            root:root.path().join(".multi-backup-v1"),
+            cfg:Config{version:1,recipient:"age1dummy".into(),
+                chunk_bytes:DEFAULT_CHUNK,secret:String::new()},
+            key:[7u8;32]
+        };
+        let source=Source{namespace:"files".into(),
+            directory:root.path().join("nonexistent")};
+        let mut checks=0;
+        let failure=store.backup_in_namespace_mode_guard(
+            Path::new("/missing-identity"),"test","",&[source],
+            BackupKind::Full,None,&|finalize|{
+                assert!(!finalize,"A dead lease must be denied before commit");
+                Err("lost lease".into())
+            });
+        checks+=1;
+        assert!(failure.is_err());
+        assert_eq!(checks,1);
+        assert!(!store.root.join("manifests").exists());
+        assert!(!store.root.join("chunks").exists());
+    }
+    #[test]
     fn keyed_name_does_not_disclose_content_sha256() {
         let st = Store {root: PathBuf::new(),
             cfg: Config {version:1, recipient: "age1notused".into(),
