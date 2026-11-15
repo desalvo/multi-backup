@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -11,6 +11,8 @@ fn usage() -> &'static str {
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins database-backup --profile-json DB.json --root STORE --identity AGE_KEY --label NAME [--json]\n\
+       multi-backup-native plugins database-restore-new --profile-json NEW_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target ENGINE:HOST:PORT:NAME [--json]\n\
        multi-backup-native plugins afs-backup --job-json APPROVED_VOLUME_JOB.json --root STORE --identity AGE_KEY --label NAME [--max-transfer-bps RATE] [--json]\n\
        multi-backup-native plugins afs-restore-plan --target-json NEW_VOLUME_TARGET.json [--json]\n\
        multi-backup-native plugins afs-restore-new --target-json NEW_VOLUME_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target CELL:SERVER:/vicepXX:NEWNAME [--max-transfer-bps RATE] [--json]\n\
@@ -178,6 +180,46 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     for check in &item.required_preflight {
                         println!("preflight: {check}");
                     }
+                }
+            },
+            "database-backup" | "database-restore-new" => {
+                let backup=command=="database-backup";
+                if backup {
+                    accepted(&flags,&["--profile-json","--root","--identity",
+                                     "--label","--max-transfer-bps"])?;
+                }else{
+                    accepted(&flags,&["--profile-json","--root","--identity",
+                                     "--id","--confirm-target","--max-transfer-bps"])?;
+                }
+                let path=Path::new(required(&flags,"--profile-json")?);
+                let md=std::fs::symlink_metadata(path)?;
+                if !md.file_type().is_file()||md.len()>65536 {
+                    return Err("Database profile must be an ordinary small file".into());
+                }
+                let profile:database::Profile=serde_json::from_reader(
+                    std::fs::File::open(path)?)?;
+                let mut limits=ExecutionLimits::default();
+                if let Some(rate)=flags.get("--max-transfer-bps"){
+                    limits.max_transfer_bytes_per_sec=Some(rate.parse()?);
+                }
+                limits.validate()?;
+                let root=Path::new(required(&flags,"--root")?);
+                let key=Path::new(required(&flags,"--identity")?);
+                if backup{
+                    let snap=database::backup(&profile,root,key,
+                        required(&flags,"--label")?,&limits)?;
+                    if json {println!("{}",serde_json::to_string_pretty(&snap)?);}
+                    else {println!("Verified encrypted database backup: {}",snap.id);}
+                }else{
+                    let n=database::restore_new(&profile,root,key,
+                        required(&flags,"--id")?,
+                        required(&flags,"--confirm-target")?,&limits)?;
+                    if json {println!("{}",serde_json::json!({
+                        "new_database":profile.database,
+                        "streamed_bytes":n,
+                        "overwrote_existing":false
+                    }));}
+                    else {println!("Restored {n} bytes into NEW database {}",profile.database);}
                 }
             },
             "afs-backup" => {

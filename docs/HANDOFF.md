@@ -592,3 +592,7 @@ Confirm CI on the exact new commit SHA; keep PR #11 draft.
 - Simulated `vos` full/incremental and fresh-volume restore locally (131082 + 1500 bytes), including rejection of existing target and partial dump. The standalone fake command passed six checks.
 - Added integration test `afs_virtual_cell_refuses_overwrite_and_partial_dump` that runs compiled Rust CLI, real age/zstd encrypted backup and verify, ordered chain restore, no-overwrite and partial-producer rejection. Exact-head CI must confirm the Rust test.
 - GitHub run 43668284081 previously failed three test fixtures because `tempdir()` did not enforce 0700; fixed fixtures without weakening runtime security. Real OpenAFS cell/Kerberos/ACL/SSH acceptance remains required.
+
+## r039 database adapters handoff
+
+New Rust `database.rs` plus `plugins database-backup|database-restore-new` CLI. Full dump via pg_dump custom and mariadb-dump transactional; restore to NEW database via pg_restore/mariadb. Use a separate GitHub Actions job with real DB service containers and negative cases, and do not certify until exact-sha green. Missing: incremental WAL/binlog PITR, physical hot backup, DDL races, agent dispatch, vendor compatibility.

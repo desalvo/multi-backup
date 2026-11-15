@@ -687,3 +687,7 @@ Native Rust RestoreNewJob now optionally accepts Execution::SshAgentless with pi
 - Simulated `vos` full/incremental and fresh-volume restore locally (131082 + 1500 bytes), including rejection of existing target and partial dump. The standalone fake command passed six checks.
 - Added integration test `afs_virtual_cell_refuses_overwrite_and_partial_dump` that runs compiled Rust CLI, real age/zstd encrypted backup and verify, ordered chain restore, no-overwrite and partial-producer rejection. Exact-head CI must confirm the Rust test.
 - GitHub run 43668284081 previously failed three test fixtures because `tempdir()` did not enforce 0700; fixed fixtures without weakening runtime security. Real OpenAFS cell/Kerberos/ACL/SSH acceptance remains required.
+
+## r039 native database logical adapters
+
+Added native Rust PostgreSQL and MariaDB full logical dump and restore-new stream adapters. Dump stdout is stored directly in encrypted age/zstd chunks; restore writes to a newly created target database, never drops existing data. Files holding credentials require 0600. Remote targets require private TLS CA files. **CI and E2E checks are not yet complete**. WAL/binlog PITR and physical incremental backups remain separate work.
