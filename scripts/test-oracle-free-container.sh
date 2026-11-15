@@ -51,7 +51,95 @@ set heading off feedback off pagesize 0 echo off verify off
 select name || ':' || replace(open_mode, ' ', '') from v$pdbs where name = 'FREEPDB1';
 exit
 SQL
-grep -Eq '^FREEPDB1:READWRITE$' "$WORK/pdb.log" || { echo "FAIL: expected isolated writable PDB missing" >&2; exit 1; }
+grep -Eq '^FREEPDB1:READWRITE
+docker exec -u oracle "$NAME" mkdir -p /tmp/mb-oracle-ci
+cat > "$WORK/backup.rman" <<'RMAN'
+BACKUP AS BACKUPSET PLUGGABLE DATABASE FREEPDB1 FORMAT '/tmp/mb-oracle-ci/pdb_%U.bkp' TAG 'MB_CI_PDB';
+EXIT;
+RMAN
+if ! docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/rman" target / nocatalog' < "$WORK/backup.rman" > "$WORK/backup.log" 2>&1; then
+  echo "FAIL: real RMAN PDB backup command failed" >&2; grep -E '^(RMAN-|ORA-)' "$WORK/backup.log" | head -10 >&2 || true; exit 1
+fi
+if grep -Eq '^RMAN-[0-9]+:|^ORA-[0-9]+:' "$WORK/backup.log" || ! grep -qi 'Finished backup at' "$WORK/backup.log"; then
+  echo "FAIL: real RMAN backup did not finish cleanly" >&2; exit 1
+fi
+mkdir -p "$WORK/pieces"
+docker cp "$NAME:/tmp/mb-oracle-ci/." "$WORK/pieces/" >/dev/null
+find "$WORK/pieces" -type f -name 'pdb_*.bkp' -size +0c | grep -q . || { echo "FAIL: no real RMAN backup piece created" >&2; exit 1; }
+age-keygen -o "$WORK/identity" >/dev/null 2>&1
+RECIPIENT=$(sed -n 's/^# public key: //p' "$WORK/identity" | head -1)
+"$CLI" storage init --root "$WORK/encrypted-store" --recipient "$RECIPIENT" >/dev/null
+"$CLI" plugins backup --input posix --output posix --source "$WORK/pieces" \
+  --root "$WORK/encrypted-store" --identity "$WORK/identity" --label oracle-free-real-rman-pieces \
+  --namespace rman --top-namespace oracle --json > "$WORK/snapshot.json"
+SNAP=$(jq -er .id "$WORK/snapshot.json")
+"$CLI" storage verify --root "$WORK/encrypted-store" --identity "$WORK/identity" --id "$SNAP" >/dev/null
+"$CLI" plugins restore --input posix --output posix --root "$WORK/encrypted-store" \
+  --identity "$WORK/identity" --id "$SNAP" --destination "$WORK/recovered" --json >/dev/null
+for file in "$WORK/pieces/"*.bkp; do
+  test -f "$file"
+  cmp "$file" "$WORK/recovered/oracle/rman/$(basename "$file")"
+done
+# Make RMAN read *only* files recovered from our encrypted Rust archive,
+# not the original backup pieces (same catalogued paths).
+docker exec -u oracle "$NAME" sh -c 'rm -f /tmp/mb-oracle-ci/pdb_*.bkp'
+docker cp "$WORK/recovered/oracle/rman/." "$NAME:/tmp/mb-oracle-ci/" >/dev/null
+docker exec -u root "$NAME" sh -c 'chown -R oracle:oinstall /tmp/mb-oracle-ci && chmod 0700 /tmp/mb-oracle-ci && chmod 0600 /tmp/mb-oracle-ci/*.bkp'
+cat > "$WORK/restore-validate.rman" <<'RMAN'
+RESTORE PLUGGABLE DATABASE FREEPDB1 VALIDATE;
+EXIT;
+RMAN
+if ! docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/rman" target / nocatalog' < "$WORK/restore-validate.rman" > "$WORK/restore.log" 2>&1; then
+  echo "FAIL: real RMAN restore validation against encrypted-store-recovered pieces failed" >&2; grep -E '^(RMAN-|ORA-)' "$WORK/restore.log" | head -10 >&2 || true; exit 1
+fi
+if grep -Eq '^RMAN-[0-9]+:|^ORA-[0-9]+:' "$WORK/restore.log" || ! grep -qi 'Finished restore at' "$WORK/restore.log"; then
+  echo "FAIL: RMAN did not validate recovered PDB backup pieces" >&2; exit 1
+fi
+echo "PASS real Oracle Free PDB RMAN backup -> Rust age-encrypted store -> Rust restore -> RMAN restore VALIDATE"
+echo "Scope: genuine RMAN PDB backup-piece backup and recovery validation, NOT live database physical restore, full-CDB/PITR or a dedicated Oracle Rust adapter."
+ "$WORK/pdb.log" || { echo "FAIL: expected isolated writable PDB missing" >&2; exit 1; }
+# Oracle Free initializes in NOARCHIVELOG mode by default. Online RMAN
+# BACKUP PLUGGABLE DATABASE correctly refuses that mode (RMAN-06817).
+# Enable ARCHIVELOG ONLY on this disposable new container, never on a
+# connected customer/production instance; the container is discarded.
+if ! docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' > "$WORK/archivelog.log" 2>&1 <<'SQL'
+whenever sqlerror exit failure
+shutdown immediate;
+startup mount;
+alter database archivelog;
+alter database open;
+exit
+SQL
+then
+  echo "FAIL: cannot enable ARCHIVELOG on isolated Oracle Free lab" >&2
+  grep -E 'ORA-|SP2-|ERROR' "$WORK/archivelog.log" | head -15 >&2 || true
+  exit 1
+fi
+# PDB auto-open state differs between Oracle image versions after CDB restart.
+if ! docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' > "$WORK/reopened.log" 2>&1 <<'SQL'
+whenever sqlerror exit failure
+set heading off feedback off pagesize 0 echo off verify off
+select log_mode from v$database;
+select name || ':' || replace(open_mode, ' ', '') from v$pdbs where name='FREEPDB1';
+exit
+SQL
+then
+  echo "FAIL: Oracle CDB/PDB did not reopen after ARCHIVELOG switch" >&2; exit 1
+fi
+grep -q 'ARCHIVELOG' "$WORK/reopened.log" || { echo "FAIL: ARCHIVELOG mode still disabled" >&2; exit 1; }
+if ! grep -q 'FREEPDB1:READWRITE' "$WORK/reopened.log"; then
+  if ! docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' > "$WORK/open-pdb.log" 2>&1 <<'SQL'
+whenever sqlerror exit failure
+alter pluggable database FREEPDB1 open;
+exit
+SQL
+  then
+    echo "FAIL: cannot reopen isolated FREEPDB1 after ARCHIVELOG switch" >&2
+    grep -E 'ORA-|SP2-|ERROR' "$WORK/open-pdb.log" | head -15 >&2 || true
+    exit 1
+  fi
+fi
+echo "Oracle Free disposable CDB ARCHIVELOG verified; proceeding with real PDB RMAN backup"
 docker exec -u oracle "$NAME" mkdir -p /tmp/mb-oracle-ci
 cat > "$WORK/backup.rman" <<'RMAN'
 BACKUP AS BACKUPSET PLUGGABLE DATABASE FREEPDB1 FORMAT '/tmp/mb-oracle-ci/pdb_%U.bkp' TAG 'MB_CI_PDB';
