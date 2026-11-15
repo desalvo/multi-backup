@@ -127,6 +127,46 @@ fn ident(value:&str)->bool{
     !value.is_empty()&&value.len()<=128&&
     value.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-".contains(&b))
 }
+/// postgres 0.19 accepts sslmode=require but does not expose the libpq
+/// verify-full enum. We require the ADMINISTRATOR to spell verify-full in
+/// the URI, parse it structurally (no substring spoofing), then normalize
+/// ONLY the wire transport mode to "require". The native-tls connector
+/// below independently validates the server certificate AND DNS hostname.
+fn strict_tls_dsn(input:&str)->Result<String,BoxError>{
+    let mut uri=url::Url::parse(input)?;
+    if !matches!(uri.scheme(),"postgresql"|"postgres")||
+       uri.host_str().is_none()||uri.fragment().is_some()||
+       uri.username().is_empty(){
+        return Err(error("Cluster database requires explicit PostgreSQL TLS URI and host"));
+    }
+    let mut parameters=Vec::<(String,String)>::new();
+    let mut count=0;
+    for (key,value) in uri.query_pairs(){
+        if key=="sslmode" {
+            count+=1;
+            if value!="verify-full"{
+                return Err(error("Cluster requires sslmode=verify-full (no downgrade)"));
+            }
+        }else{
+            // postgres-native-tls uses its OWN CA chain; libpq-style sslrootcert
+            // is not passed through as a misleading or ignored parameter.
+            if matches!(key.as_ref(),"host"|"hostaddr"|"sslrootcert"|"sslcert"|"sslkey"){
+                return Err(error("Use URI hostname and MULTI_BACKUP_CLUSTER_TLS_CA_FILE for CA trust"));
+            }
+            parameters.push((key.into_owned(),value.into_owned()));
+        }
+    }
+    if count!=1{return Err(error("Exactly one sslmode=verify-full is required"));}
+    parameters.push(("sslmode".into(),"require".into()));
+    uri.query_pairs_mut().clear().extend_pairs(
+        parameters.iter().map(|(key,value)|(key.as_str(),value.as_str())));
+    let sanitized=uri.to_string();
+    let postgres:postgres::Config=sanitized.parse()?;
+    if postgres.get_ssl_mode()!=postgres::config::SslMode::Require{
+        return Err(error("PostgreSQL must require verified TLS"));
+    }
+    Ok(sanitized)
+}
 #[derive(Clone)]
 pub struct Database {dsn:String}
 impl Database {
@@ -134,20 +174,30 @@ impl Database {
         let Some(dsn)=env::var("MULTI_BACKUP_CLUSTER_DATABASE_URL").ok() else {
             return Ok(None)
         };
-        // Certificate and hostname verification MUST NOT be optional in the
-        // multi-node database: no NoTls and no sslmode=prefer fallback.
-        if !(dsn.contains("sslmode=verify-full") ||
-             dsn.contains("sslmode%3Dverify-full")){
-            return Err(error("Cluster PostgreSQL requires sslmode=verify-full"));
-        }
-        let db=Self{dsn};
+        // Parse before connecting: a URL containing sslmode=disable plus
+        // another query value that merely mentions verify-full is rejected.
+        // Native TLS verifies certificate chain and hostname, and the
+        // underlying postgres 0.19 transport gets sslmode=require.
+        let db=Self{dsn:strict_tls_dsn(&dsn)?};
         let mut client=db.connect()?;
         client.batch_execute(SCHEMA)?;
         Ok(Some(db))
     }
     pub(crate) fn connect(&self)->Result<Client,BoxError>{
-        let tls=native_tls::TlsConnector::builder().build()?;
-        let connector=postgres_native_tls::MakeTlsConnector::new(tls);
+        let mut builder=native_tls::TlsConnector::builder();
+        builder.danger_accept_invalid_certs(false)
+            .danger_accept_invalid_hostnames(false)
+            .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
+        if let Some(ca)=env::var_os("MULTI_BACKUP_CLUSTER_TLS_CA_FILE"){
+            let path=std::path::PathBuf::from(ca);
+            let info=std::fs::symlink_metadata(&path)?;
+            if !info.file_type().is_file()||info.len()>1_048_576{
+                return Err(error("Invalid trusted PostgreSQL CA file"));
+            }
+            let cert=native_tls::Certificate::from_pem(&std::fs::read(path)?)?;
+            builder.add_root_certificate(cert);
+        }
+        let connector=postgres_native_tls::MakeTlsConnector::new(builder.build()?);
         Ok(Client::connect(&self.dsn,connector)?)
     }
     pub fn put_session(&self,token:&str,user:&str,csrf:&str)
@@ -417,6 +467,17 @@ pub struct Lease {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]fn postgresql_tls_mode_is_structurally_enforced(){
+        let good="postgresql://backup@db.example.org:5432/multi_backup?sslmode=verify-full";
+        let verified=strict_tls_dsn(good).unwrap();
+        assert!(verified.contains("sslmode=require"));
+        assert!(!verified.contains("sslmode=verify-full"));
+        assert!(strict_tls_dsn("postgresql://backup@db.example/multi_backup?sslmode=disable&application_name=sslmode%3Dverify-full").is_err());
+        assert!(strict_tls_dsn("postgresql://backup@db.example/multi_backup?sslmode=verify-full&sslmode=disable").is_err());
+        assert!(strict_tls_dsn("postgresql://backup@db.example/multi_backup?sslmode=prefer").is_err());
+        assert!(strict_tls_dsn("postgresql://backup@db.example/multi_backup").is_err());
+        assert!(strict_tls_dsn("postgresql:///multi_backup?sslmode=verify-full").is_err());
+    }
     #[test]fn cluster_schema_has_fencing_and_storage_affinity(){
         assert!(SCHEMA.contains("lease_token"));
         assert!(SCHEMA.contains("owner_replica"));
