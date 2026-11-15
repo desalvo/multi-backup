@@ -58,7 +58,7 @@ pub fn approve_profile(db:&Database,profile:&ProfileApproval)->Res<bool>{
 pub struct PullJob{
     pub agent_id:String,pub profile_id:String,pub profile_sha256:String
 }
-#[derive(Debug,serde::Deserialize)]
+#[derive(Debug,Clone,serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UploadManifest{
     pub backup_id:String,pub profile_id:String,pub profile_sha256:String,
@@ -144,6 +144,7 @@ pub fn enqueue_pull(db:&Database,job:&PullJob)->Res<String>{
     if n==0{return Err(fail("Agent is unapproved, unknown or revoked"));}
     Ok(id)
 }
+#[derive(Clone)]
 pub struct Verified {pub agent_id:String,pub owner_user:String,pub proof:AgentProof,
                      pub metadata:Vec<u8>,pub limits:ExecutionLimits}
 pub fn authenticate(db:&Database,headers:&HeaderMap,method:&str,path:&str)
