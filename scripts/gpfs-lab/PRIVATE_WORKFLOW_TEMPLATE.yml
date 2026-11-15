@@ -35,7 +35,8 @@ jobs:
   gpfs-ces:
     needs: approved-public-sha
     runs-on: [self-hosted, gpfs-ci]
-    environment: gpfs-field-lab
+    # GitHub Free private repositories cannot use Environment required reviewers.
+    # Exact SHA is approved out-of-band by root on the dedicated runner VM.
     timeout-minutes: 75
     strategy:
       fail-fast: false
@@ -53,6 +54,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" != desalvo/multi-backup
+          MARKER=/etc/multi-backup-ci/approved-public-main-sha
+          test -f "$MARKER" && test ! -L "$MARKER"
+          test "$(stat -c %u "$MARKER")" = 0
+          test "$(cat "$MARKER")" = "$SOURCE_SHA"
           git clone -q --depth 1 --branch main https://github.com/desalvo/multi-backup.git source
           test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
       - name: Build independent native Rust CLI, never install IBM binaries in CI
@@ -65,6 +70,7 @@ jobs:
           RUNNER_ENVIRONMENT: self-hosted
           MB_PRIVATE_LAB_REPOSITORY: ${{ github.repository }}
           MB_FIELD_APPROVAL: ${{ inputs.approval }}
+          MB_APPROVED_PUBLIC_SHA: ${{ inputs.public_main_sha }}
           MB_FIELD_RO_MOUNT: ${{ vars[matrix.source_var] }}
           MB_FIELD_RW_MOUNT: ${{ vars.MB_GPFS_SCRATCH_RW_MOUNT }}
           MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_GPFS_SNAPSHOT_ID }}

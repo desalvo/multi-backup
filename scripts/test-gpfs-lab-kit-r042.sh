@@ -8,6 +8,8 @@ test -s docs/GPFS_DEVELOPER_LAB_R042_IT.md
 grep -F '12 TB' docs/GPFS_DEVELOPER_LAB_R042_IT.md >/dev/null
 grep -F 'runs-on: ubuntu-24.04' .github/workflows/cephfs-gpfs-real-field-r042.yml >/dev/null
 grep -F 'runs-on: [self-hosted, gpfs-ci]' scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml >/dev/null
+grep -F 'approved-public-main-sha' scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml >/dev/null
+grep -F 'GitHub Free' scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml >/dev/null
 if grep -q 'runs-on:.*self-hosted' .github/workflows/cephfs-gpfs-real-field-r042.yml; then echo 'FAIL public self-hosted job' >&2; exit 1; fi
 grep -F 'workflow_dispatch:' .github/workflows/cephfs-gpfs-real-field-r042.yml >/dev/null
 # Public PR validation is permitted ONLY for GitHub-hosted lint.

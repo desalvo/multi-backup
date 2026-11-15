@@ -834,3 +834,14 @@ The kind acceptance test now authenticates with the known public CI-only Argon2i
 - Security correction: public GitHub repositories must NOT own self-hosted GPFS/Ceph runners; official GitHub docs warn public PRs can compromise them. Public r042 workflow now lint ONLY on hosted runners; vendor CI runs manually from a distinct private coordinator, with restricted environment reviewer, pinned current public main SHA, root-owned host approval and CES evidence. A reviewed private workflow template lives at scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml. Real GPFS and CephFS field CI PENDING dedicated environment; no fake provider PASS.
 - Native Rust GUI smoke (Xvfb) and cross-platform package compilation, agent packaging, Rust server and genuine kind multi-node K8s verified in the earlier r041 Production CI. Remaining release blockers: actual installed GUI interactions and signing/notarization, agent push/pull disconnect/abuse and hard quotas, multi-pod physical fencing and writer crash safety, GPFS/CephFS consistency/metadata + create-only recovery, external GitHub/Dropbox providers, large-data durability, backup catalog metadata, and independent security/release approval.
 - r042 remains draft and is not the released RC. No plugin is marked production Ready merely because a server run or mount probe passes; do not publish native installers, stable containers, tag or merge the 4 stacked Rust PRs without resolving the r038/main conflict and required gates.
+
+## Stato r042 — quadro numerico di implementazione (non certificazione produzione)
+
+Denominatori dal catalogo Rust corrente: 32 plugin, 31 sorgenti backup, 22 destinazioni backup (ruoli invertiti nel restore).
+- Input backup: 13/31 (42%) in Stage::Preview, ma solo 8/31 (26%) sorgenti implementate nel dispatcher generico; gli altri usano comandi tipizzati oppure richiedono completamento.
+- Output backup: 2/22 (9%) in Stage::Preview; generico solo POSIX store 1/22 (5%).
+- Input restore: 2/22 (9%) in Stage::Preview; generico solo POSIX encrypted store 1/22 (5%).
+- Output restore: 13/31 (42%) in Stage::Preview (sintassi catalogo riflessa); dispatcher generico: 7/31 (23%) create-only output [posix,nfs,smb,sshfs,cephfs,glusterfs,lustre], r042 Samba SMB3 reale PASS run 43771120662.
+- Stime non misurate: Rust port complessivo circa 72%, engine 85%, GUI 70%, agenti 70%, server HA 70%; queste sono *stime di pianificazione*, NON valore CI né percentuale release certificata.
+- GitHub Free: repo privato senza Environment required reviewers. Opt-in root-owned per approved-public-main-sha su runner; mai self-hosted sul repo pubblico.
+- RHEL Developer Subscription for Individuals è no-cost, per uso individuale fino a 16 sistemi: i tre server IBM possono essere VM RHEL gratuite. IBM Developer Edition license rimane distinta; RHEL minor release/kernel deve essere supportato.

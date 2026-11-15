@@ -34,3 +34,14 @@
 No public self-hosted GPFS runner: private coordinator sample scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml. Developer edition IBM software and credentials never appear in repo or public artifacts. Full docs: docs/GPFS_DEVELOPER_LAB_R042_IT.md.
 
 No automatic stable tag, Docker release, broad provider Ready promotion, or merge of unfinished Rust code.
+
+## Percentuali di stato
+
+| Ruolo | Preview nel catalogo | Generic Rust eseguibile | Blocco principale |
+| --- | --- | --- | --- |
+| Backup input | 13/31 = 42% | 8/31 = 26% | Consistenza snapshot, metadati, provider specializzati |
+| Backup output | 2/22 = 9% | 1/22 = 5% | S3, WORM, cloud, NFS/SMB e altri output |
+| Restore input | 2/22 = 9% | 1/22 = 5% | Lettura verificata da store remoti non implementata |
+| Restore output | 13/31 = 42% | 7/31 = 23% | Native provider restore, GPFS CES RW, ACL e failover |
+
+Le percentuali sono un inventario del codice, non una certificazione produttiva. Alcuni adapter tipizzati (GitHub, Dropbox, OpenAFS e DB) non passano dal dispatcher generico.

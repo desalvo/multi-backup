@@ -10,6 +10,11 @@ test "$RUNNER_ENVIRONMENT" = self-hosted
 test -n "${MB_PRIVATE_LAB_REPOSITORY:-}"
 test "${GITHUB_REPOSITORY:-}" = "$MB_PRIVATE_LAB_REPOSITORY"
 test "$MB_PRIVATE_LAB_REPOSITORY" != desalvo/multi-backup
+test -n "${MB_APPROVED_PUBLIC_SHA:-}"
+APPROVAL=/etc/multi-backup-ci/approved-public-main-sha
+test -f "$APPROVAL" && test ! -L "$APPROVAL"
+test "$(stat -c %u "$APPROVAL")" = 0
+test "$(cat "$APPROVAL")" = "$MB_APPROVED_PUBLIC_SHA"
 test "$MB_FIELD_APPROVAL" = APPROVED-DISPOSABLE-FILESYSTEM-LAB
 MARKER=/etc/multi-backup-ci/allow-disposable-filesystem-field
 test -f "$MARKER" && test ! -L "$MARKER"
