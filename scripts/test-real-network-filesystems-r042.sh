@@ -92,11 +92,25 @@ glusterfs)
   sudo mkdir -p "$WORK/brick"
   GLUSTER_HOST=$(hostname -f)
   test -n "$GLUSTER_HOST"
+  GLUSTER_ADDR=$(getent ahostsv4 "$GLUSTER_HOST" | awk '$1 !~ /^127\\./ {print $1;exit}')
+  if [ -z "$GLUSTER_ADDR" ]; then GLUSTER_ADDR=$(hostname -I | awk '{print $1}'); fi
+  test -n "$GLUSTER_ADDR"
   sudo gluster --mode=script volume create "$VOL" "$GLUSTER_HOST:$WORK/brick" force
   sudo gluster --mode=script volume start "$VOL"
   sudo gluster volume status "$VOL"
-  mount_ro() { sudo mount -t glusterfs -o ro "$GLUSTER_HOST:/$VOL" "$RO"; }
-  mount_rw() { sudo mount -t glusterfs -o rw "$GLUSTER_HOST:/$VOL" "$RW"; }
+  # Use an actual non-loopback address: cloud-hosted FQDN resolution varies.
+  # Retry only while the newly started brick/volfile server initializes.
+  gluster_mount() {
+    local opts="$1" target="$2"
+    for attempt in $(seq 1 12); do
+      if sudo mount -t glusterfs -o "$opts" "$GLUSTER_ADDR:/$VOL" "$target"; then return 0; fi
+      sleep 2
+    done
+    echo "FAIL: genuine GlusterFS $opts mount could not be established" >&2
+    return 1
+  }
+  mount_ro() { gluster_mount ro "$RO"; }
+  mount_rw() { gluster_mount rw "$RW"; }
   expected=fuse.glusterfs
   mount_rw
   sudo cp -a "$ROOT/." "$RW/"
