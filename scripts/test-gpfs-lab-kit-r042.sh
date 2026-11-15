@@ -10,8 +10,10 @@ grep -F 'runs-on: ubuntu-24.04' .github/workflows/cephfs-gpfs-real-field-r042.ym
 grep -F 'runs-on: [self-hosted, gpfs-ci]' scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml >/dev/null
 if grep -q 'runs-on:.*self-hosted' .github/workflows/cephfs-gpfs-real-field-r042.yml; then echo 'FAIL public self-hosted job' >&2; exit 1; fi
 grep -F 'workflow_dispatch:' .github/workflows/cephfs-gpfs-real-field-r042.yml >/dev/null
-if grep -q '^  pull_request:' .github/workflows/cephfs-gpfs-real-field-r042.yml; then
-  echo 'FAIL: third-party PR must not run on vendor-lab runner' >&2; exit 1
+# Public PR validation is permitted ONLY for GitHub-hosted lint.
+# Private physical lab access must not be selectable in any public workflow.
+if grep -q 'runs-on:.*self-hosted' .github/workflows/cephfs-gpfs-real-field-r042.yml; then
+  echo 'FAIL: public workflow exposes a physical lab runner' >&2; exit 1
 fi
 if grep -q 'curl.*ibm.*rpm' scripts/gpfs-lab/*.sh; then
   echo 'FAIL: vendor binary redistribution/downloader in public kit' >&2; exit 1
