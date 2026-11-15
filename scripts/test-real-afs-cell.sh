@@ -66,13 +66,13 @@ test -d "$SOURCE_PARENT" || {
 test "$CELL" = example.com
 test "$SOURCE_PARENT" = /afs/.example.com
 echo 'AFS RW parent ACL before lab-only administrator repair:'
-fs listacl -dir "$SOURCE_PARENT"
+fs listacl -path "$SOURCE_PARENT"
 echo 'AFS caller rights before repair:'
 fs getcalleraccess -path "$SOURCE_PARENT"
 fs setacl -dir "$SOURCE_PARENT" -acl system:administrators all
 echo 'AFS caller rights after lab-only administrator repair:'
 fs getcalleraccess -path "$SOURCE_PARENT"
-fs listacl -dir "$SOURCE_PARENT"
+fs listacl -path "$SOURCE_PARENT"
 SOURCE_MOUNT="$SOURCE_PARENT/mb-source-$RUN_SUFFIX-$ATTEMPT"
 if [ -e "$SOURCE_MOUNT" ]; then
   echo "Refusing to reuse existing AFS mountpoint $SOURCE_MOUNT" >&2
