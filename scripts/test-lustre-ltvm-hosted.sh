@@ -13,7 +13,7 @@ cleanup() {
   if test -d "$WORK/lustre-test-vms"; then
     (cd "$WORK/lustre-test-vms" && sg ltvm -c './ltvm destroy co1-single --force --yes' >/dev/null 2>&1) || true
   fi
-  rm -rf -- "$WORK"
+  sudo rm -rf -- "$WORK"
 }
 trap cleanup EXIT
 # The exact source version is pinned to avoid running moving upstream root
@@ -25,6 +25,11 @@ cd "$WORK/lustre-test-vms"
 export LTVM_NO_UPDATE=1
 # Allowed only because this is an ephemeral GitHub-managed VM with sudo.
 sudo env LTVM_NO_UPDATE=1 ./ltvm install
+# Installing the 'kvm' group updates /etc/group but cannot update the already
+# running CI job's supplementary groups. Grant only the ephemeral runner user
+# temporary ACL access to the KVM device; the hosted VM is discarded afterward.
+sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+test -r /dev/kvm && test -w /dev/kvm
 sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm doctor'
 sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm target fetch rocky9'
 sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm create co1-single --vcpus 2 --mem 4096 --mdt-disks 1 --ost-disks 3'
