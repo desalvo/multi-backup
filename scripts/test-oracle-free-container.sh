@@ -23,8 +23,9 @@ docker run -d --name "$NAME" --shm-size 1g \
 unset PASSWORD
 READY=false
 for attempt in $(seq 1 70); do
-  if docker exec -u oracle -i "$NAME" sh -c 'echo "select 1 from dual; exit;" | "$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' > "$WORK/health.log" 2>&1 &&
-    grep -Eq '^[[:space:]]*1[[:space:]]*$' "$WORK/health.log"; then
+  # Use the image's authoritative FREEPDB1 readiness check rather than
+  # parsing SQL*Plus prompt/output formatting.
+  if docker exec "$NAME" healthcheck.sh FREEPDB1 > "$WORK/health.log" 2>&1; then
     READY=true
     break
   fi
@@ -37,7 +38,12 @@ for attempt in $(seq 1 70); do
   fi
   sleep 10
 done
-test "$READY" = true || { echo "FAIL: Oracle did not become ready" >&2; exit 1; }
+if [[ "$READY" != true ]]; then
+  echo "FAIL: Oracle Free failed its own FREEPDB1 healthcheck after bounded startup" >&2
+  docker inspect -f 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$NAME" >&2 || true
+  docker logs "$NAME" 2>&1 | grep -Ei '(error|failed|fatal|ORA-|TNS-|memory|database is ready|database creation|initializ)' | tail -30 >&2 || true
+  exit 1
+fi
 docker exec -u oracle "$NAME" sh -c 'test -x "$ORACLE_HOME/bin/rman" && test -x "$ORACLE_HOME/bin/sqlplus"'
 docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' > "$WORK/pdb.log" <<'SQL'
 whenever sqlerror exit failure
