@@ -377,3 +377,8 @@ or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
 ### r039 — Galera 4 three-member recovery acceptance
 - **PASS** GitHub Actions run 43673606744 source SHA 37e5de39: real MariaDB 11.4 / Galera 4, Primary/Synced 3 members, one-node kill/quorum2/rejoin3, 40-row age/zstd FULL, 20 replayed cross-node write-sets from node2's binlog, target at position 60/1830 (exclude ID 999). Refuse a 3-node-required backup at 2 members and refuse overwrite during restore.
 - **Coverage only** controlled CI isolated containers + typed Rust CLI. Not production-certified: physical multi-host partitions/SST auth, multi-binlog/GTID failover, continuous zero-plaintext binlog archiving, scheduler/agent PITR automation, ACL and concurrency parity.
+
+### r039 actual POSIX, SSH and OpenAFS qualification (new)
+- POSIX Rust full/incremental, 10MiB mixed-sized chunks, selective restore, wrong key, symlink/FIFO and corrupted ciphertext parity repair **PASS** at run 43678452447. No ACL/xattr, mtime/uid/gid snapshot fidelity certification.
+- Real SSH/SCP/SFTP protocol and FUSE SSHFS CI source scripts added; these are *in progress* until individual job PASS. SSH catalog direct provider still Planned, no claim of native SSH plugin implementation.
+- OpenAFS authentic KDC/VLDB/fileserver/restore field workflow now manual on a disposable self-hosted `openafs-ci` runner, with exact SHA, sentinel and verified OpenAFS DKMS, to avoid unsupported Azure kernel; no PASS evidence yet, mandatory field gate stays open.
