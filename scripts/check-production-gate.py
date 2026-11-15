@@ -74,6 +74,18 @@ def validate():
                      'Protocol::Tlsv12','MULTI_BACKUP_CLUSTER_TLS_CA_FILE'):
         assert required in pg_source, 'PG verified TLS protection missing: '+required
 
+    gate_steps=str(jobs['production-gate'].get('steps',[]))
+    for cmd in ("--test afs_stream_roundtrip",
+                "--test plugin_dispatch_roundtrip"):
+        assert cmd in gate_steps, 'Compiled native provider acceptance missing: '+cmd
+    for doc in ("docs/PLUGIN_EXECUTORS_R039_IT.md",
+                "docs/PLUGIN_EXECUTORS_R039_EN.md"):
+        assert (ROOT/doc).is_file(), 'Missing bilingual native provider guide: '+doc
+    for marker in ("backup_volume_to_store","restore_new_chain_from_store",
+                   '"cephfs"','"glusterfs"','"lustre"'):
+        source=(ROOT/'rust/src/afs_volume.rs').read_text('utf-8')+(
+            ROOT/'rust/src/plugin_executor.rs').read_text('utf-8')
+        assert marker in source, 'Missing compiled AFS/mount adapter: '+marker
     for source in ('rust/src/bin/multi-backup-agent.rs',
                    'rust/src/afs_volume.rs',
                    'rust/src/agent_protocol.rs',
