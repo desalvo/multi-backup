@@ -16,7 +16,29 @@ on:
 permissions:
   contents: read
 jobs:
+  validate-dispatch:
+    name: Validate immutable reviewed SHA before scheduling the sacrificial VM
+    if: github.actor == 'desalvo'
+    runs-on: ubuntu-24.04
+    env:
+      PINNED_SHA: 35f940946ed1376ba223c652916bc66e5b3d9de4
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      LAB_CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Reject wrong approval inputs WITHOUT consuming ephemeral runner
+        run: |
+          set -euo pipefail
+          if [ "$LAB_CONFIRMATION" != DISPOSABLE-AFS-APPROVED ]; then
+            echo "::error::Wrong disposable-lab confirmation"
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$PINNED_SHA" ]; then
+            echo "::error::Wrong reviewed source SHA. Current pinned source: $PINNED_SHA"
+            exit 1
+          fi
+          echo "PASS: approved reviewed SHA and explicit disposable-lab confirmation"
   authentic-openafs:
+    needs: validate-dispatch
     name: Real Kerberos, VLDB, volserver, encrypted Rust FULL+incremental restore
     if: github.actor == 'desalvo'
     runs-on: [self-hosted, linux, x64, openafs-ci]
