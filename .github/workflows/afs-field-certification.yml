@@ -21,7 +21,7 @@ jobs:
     if: github.actor == 'desalvo'
     runs-on: ubuntu-24.04
     env:
-      PINNED_SHA: 253d4a156cab27bc8c058c191f1f03245cd98f16
+      PINNED_SHA: 2e4f78ffa1647acc0c5faae8c553a829fc70b1cc
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       LAB_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -44,7 +44,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, openafs-ci]
     timeout-minutes: 120
     env:
-      PINNED_SHA: 253d4a156cab27bc8c058c191f1f03245cd98f16
+      PINNED_SHA: 2e4f78ffa1647acc0c5faae8c553a829fc70b1cc
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       LAB_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -85,7 +85,7 @@ jobs:
           printf 'OpenAFS VM checked: %s\n' "$(uname -r)"
       - uses: actions/checkout@v4
         with:
-          ref: 253d4a156cab27bc8c058c191f1f03245cd98f16
+          ref: 2e4f78ffa1647acc0c5faae8c553a829fc70b1cc
           persist-credentials: false
       - name: Verify immutable checked-out PR source and Rust toolchain
         run: |
@@ -146,6 +146,11 @@ jobs:
               print('No installed local OpenAFS facts yet; first-run Ansible module workaround will apply')
           PY
           fi
+      - name: Permit ONLY the non-root AFS runner group to read authentic Ansible installation facts
+        run: |
+          set -euo pipefail
+          python3 scripts/patch-openafs-ansible-local-facts-access.py \
+            "$HOME/.ansible/collections/ansible_collections/openafs_contrib/openafs/playbooks/local_install.yaml"
       - name: Deploy genuine isolated KDC and OpenAFS local test cell
         run: |
           set -euo pipefail
