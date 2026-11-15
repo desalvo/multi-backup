@@ -33,6 +33,34 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
+      # Copy root-owned Kubernetes Secret projections into owner-only files.
+      # The Rust server intentionally refuses group/world-readable credential
+      # files; direct Secret mounts (0400, owned by root) cannot be read by the
+      # unprivileged UID 10001. Do not weaken Rust's permission checks.
+      initContainers:
+        - name: prepare-private-secrets
+          image: alpine:3.20
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              umask 077
+              cp /in-admin/admin-hash /out/admin-hash
+              cp /in-agent/agent-proxy /out/agent-proxy
+              cp /in-age/age-identity /out/age-identity
+              chown 10001:10001 /out/*
+              chmod 0600 /out/*
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"], add: ["CHOWN"]}
+          volumeMounts:
+            - {name: private-secrets, mountPath: /out}
+            - {name: admin-secret, mountPath: /in-admin, readOnly: true}
+            - {name: agent-proxy-secret, mountPath: /in-agent, readOnly: true}
+            - {name: age-secret, mountPath: /in-age, readOnly: true}
       containers:
         - name: server
           image: REPLACE_WITH_CI_VERIFIED_R039_SERVER_IMAGE
@@ -63,20 +91,8 @@ spec:
             - {name: MULTI_BACKUP_AUDIT_LOG, value: "/data/audit/events.jsonl"}
           volumeMounts:
             - {name: shared-data, mountPath: /data}
-            # Kubernetes Secret files as subPath are regular bind mounts, not
-            # projected symlinks, matching Rust symlink rejection rules.
-            - name: admin-secret
-              mountPath: /run/secrets/admin-hash
-              subPath: admin-hash
-              readOnly: true
-            - name: agent-proxy-secret
-              mountPath: /run/secrets/agent-proxy
-              subPath: agent-proxy
-              readOnly: true
-            - name: age-secret
-              mountPath: /run/secrets/age-identity
-              subPath: age-identity
-              readOnly: true
+            - {name: private-secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
           livenessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 20
@@ -91,6 +107,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: ["ALL"]}
       volumes:
+        - name: private-secrets
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+        - name: scratch
+          emptyDir: {sizeLimit: 1Gi}
         - name: shared-data
           persistentVolumeClaim: {claimName: multi-backup-rwx}
         - name: admin-secret
@@ -113,3 +133,38 @@ spec:
     requests: {storage: 1Ti}
   # Set a verified shared CephFS/NFS/etc StorageClass before applying.
   storageClassName: REPLACE_WITH_VERIFIED_RWX_STORAGECLASS
+
+---
+# Scale the shared-control-plane API horizontally. Pod names remain unique
+# replica IDs. Queue-based autoscaling and exact write fencing still need
+# independent live verification before enabling cluster backup execution.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: multi-backup
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: multi-backup}
