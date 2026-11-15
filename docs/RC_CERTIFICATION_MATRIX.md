@@ -342,3 +342,9 @@ Exact URI parsing for sslmode=verify-full was added, matching postgres 0.19's Re
 
 Added PostgreSQL-backed OIDC PKCE pending challenge store with atomic one-time cross-pod consumption, strict ten-minute expiry and fail-closed DB failure. Previously the pending challenge existed only in one pod and required sticky ingress sessions. Still release-blocking: real IdP two-pod callback/replay/issuer mismatch tests, credential-at-rest DB handling, session revocation and actual load balancer end-to-end.
 
+
+## r039+ AFS and mounted filesystem provider gates (OPEN)
+
+Executable preview: 8 generic input sources posix/nfs/smb/sshfs/gpfs/cephfs/glusterfs/lustre to an encrypted POSIX store; 6 restore outputs to new directories on posix/nfs/sshfs/cephfs/glusterfs/lustre. Explicit Linux exact RO/RW mount evidence, no-overwrite and source attestation are code gates; a real snapshot and ACL/xattr/stripe correctness are NOT thereby proven. AFS is a separate volume-stream provider with a completion-gated encrypted full/incremental vos dump, verified full chain, and new volume restore using overwrite abort then ordered increments.
+
+Rust native fake-vos full-chain test plus age encryption does NOT satisfy real OpenAFS acceptance. Required: real cell, server, VLDB, time-continuity, ACLs/mountpoints, keytab, localauth privilege and controlled NEW volume restore; real mounted remote filesystem sources/destinations and consistency test; OAuth/cloud/DB/block/VM adapters; proper distinct destination-account credentials; error recovery, offline/agent AFS restore, distributed writer fencing, signed packages and Kubernetes HA failover. Exactly **0/682** generic theoretical pairs have full production qualification at this stage.
