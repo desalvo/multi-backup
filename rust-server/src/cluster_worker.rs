@@ -36,7 +36,7 @@ fn run(lease:&Lease,live:&dyn Fn(bool)->Result<(),String>)->Res<Value>{
     if lease.source_transport!="server_local"{
         return Err("Replica direct executor supports server_local only; remote dispatch requires approved transport integration".into());
     }
-    if !matches!(lease.plugin_id.as_str(),"posix"|"nfs"|"smb"|"sshfs"|"gpfs"){
+    if !matches!(lease.plugin_id.as_str(),"posix"|"nfs"|"smb"|"sshfs"|"gpfs"|"cephfs"|"glusterfs"|"lustre"){
         return Err("Input plugin is not supported by Rust filesystem executor".into());
     }
     let limits:ExecutionLimits=serde_json::from_value(lease.limits.clone())?;
