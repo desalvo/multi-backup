@@ -52,6 +52,7 @@ if [[ $RMAN_RC -ne 0 ]] || grep -Eq '^(RMAN-00569:|RMAN-0300[0-9]:|ORA-[0-9]{5}:
   grep -E '^(RMAN-00569:|RMAN-0300[0-9]:|ORA-[0-9]{5}:)' "$WORK/rman.log" | head -15 >&2 || true
   exit 1
 fi
-grep -qi 'validation complete\|finished validate' "$WORK/rman.log" || { echo "FAIL: RMAN validation completion evidence missing" >&2; exit 1; }
+grep -Eqi 'finished backup at|finished validate at' "$WORK/rman.log" || { echo "FAIL: RMAN source validation completion evidence missing" >&2; exit 1; }
+grep -Eqi 'finished restore at' "$WORK/rman.log" || { echo "FAIL: RMAN existing-backup restore-validation completion evidence missing" >&2; exit 1; }
 echo "PASS Oracle licensed lab RMAN source and existing-backup validation (no bytes backed up/restored by Multi Backup)"
 echo "Oracle Multi Backup adapter and isolated new-target recovery are still NOT certified."
