@@ -109,6 +109,45 @@ esac
     let status:Value=serde_json::from_slice(&completed.stdout).unwrap();
     assert_eq!(status["restored_dumps"],2);
     assert_eq!(fs::read(&restored).unwrap(),b"full-AFS-payloadincremental-AFS-payload");
+
+    // Agentless SSH restore: no real network is used, but the transport must
+    // execute only the fixed quote-escaped vos command and require pinned key.
+    let ssh=fakedir.join("ssh");
+    fs::write(&ssh,r#"#!/bin/sh
+set -eu
+case " $* " in
+  *" -F none "*" StrictHostKeyChecking=yes "*" ProxyCommand=none "*) : ;;
+  *) exit 51 ;;
+esac
+for arg in "$@"; do remote="$arg"; done
+exec /bin/sh -c "$remote"
+"#).unwrap();
+    fs::set_permissions(&ssh,fs::Permissions::from_mode(0o700)).unwrap();
+    let sshkey=root.join("ssh-key");
+    let known=root.join("known-hosts");
+    fs::write(&sshkey,b"fake-public-key-for-test-only").unwrap();
+    fs::write(&known,b"fake-pinned-host-for-test-only").unwrap();
+    let remote_target=root.join("remote-target.json");
+    fs::write(&remote_target,serde_json::to_vec(&json!({
+        "cell":"example.org","volume":"new.remote",
+        "server":"afs.example.org","partition":"/vicepa",
+        "auth":{"type":"existing_token"},
+        "execution":{"type":"ssh_agentless","host":"pinned.example.org",
+           "user":"afsrestore","identity":sshkey,
+           "known_hosts":known,"afs_server":false}
+    })).unwrap()).unwrap();
+    let remote_plan=cli(&["plugins","afs-restore-plan","--target-json",
+        string(&remote_target),"--json"],&fakedir,&root.join("remote-restored"),true);
+    let p:Value=serde_json::from_slice(&remote_plan.stdout).unwrap();
+    assert_eq!(p["transport"],"ssh-agentless");
+    let output=root.join("remote-restored");
+    cli(&["plugins","afs-restore-new","--target-json",string(&remote_target),
+        "--root",string(&storepath),"--identity",string(&key),
+        "--id",current,"--confirm-target",
+        "example.org:afs.example.org:/vicepa:new.remote","--json"],
+        &fakedir,&output,true);
+    assert_eq!(fs::read(&output).unwrap(),
+        b"full-AFS-payloadincremental-AFS-payload");
 }
 #[test]
 fn failed_stream_producer_never_commits_a_backup(){
