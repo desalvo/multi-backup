@@ -1,94 +1,25 @@
-name: Multi Backup - controlled IBM GPFS CES and CephFS real field certification
-# Runs ONLY after manual approval and merge to main, never on PR events.
+name: Multi Backup - public-only GPFS and CephFS safety lint
+# Private IBM/Ceph lab runners MUST NOT register in this public repository.
+# The real hardware workflow template lives under scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml
 on:
+  pull_request:
+    paths:
+      - 'scripts/gpfs-lab/**'
+      - 'scripts/test-real-cephfs-gpfs-ces-field-r042.sh'
+      - 'scripts/test-gpfs-lab-kit-r042.sh'
+      - '.github/workflows/cephfs-gpfs-real-field-r042.yml'
+      - 'docs/GPFS_DEVELOPER_LAB_R042_IT.md'
   workflow_dispatch:
-    inputs:
-      reviewed_sha:
-        description: Full 40-hex SHA of current reviewed main HEAD
-        required: true
-        type: string
-      confirm:
-        description: Type APPROVED-DISPOSABLE-FILESYSTEM-LAB
-        required: true
-        type: string
 permissions:
   contents: read
 jobs:
-  preflight:
+  provider-field-guards:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - name: Require default branch, exact current SHA and explicit approval
-        shell: bash
-        env:
-          REF: ${{ github.ref }}
-          SHA: ${{ github.sha }}
-          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
-          CONFIRM: ${{ inputs.confirm }}
+      - uses: actions/checkout@v4
+      - name: Inspect field lab scripts and reject dangerous runner dispatch
         run: |
           set -euo pipefail
-          test "$REF" = refs/heads/main
-          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$REVIEWED_SHA" = "$SHA"
-          test "$CONFIRM" = APPROVED-DISPOSABLE-FILESYSTEM-LAB
-  gpfs-ces-field:
-    name: Authentic Storage Scale ${{ matrix.protocol }} encrypted Rust recovery
-    needs: preflight
-    runs-on: [self-hosted, gpfs-ci]
-    environment: gpfs-field-lab
-    timeout-minutes: 70
-    strategy:
-      fail-fast: false
-      matrix:
-        protocol: [gpfs-ces-nfs, gpfs-ces-smb]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.reviewed_sha }}
-          persist-credentials: false
-      - name: Exact source and safe script
-        env:
-          SHA: ${{ inputs.reviewed_sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$SHA"
-          bash -n scripts/test-real-cephfs-gpfs-ces-field-r042.sh
-      - name: Compile reviewed Rust binary
-        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
-      - name: Real IBM CES snapshot, authenticated encryption and recovered files
-        env:
-          MB_FIELD_APPROVAL: ${{ inputs.confirm }}
-          MB_FIELD_RO_MOUNT: ${{ matrix.protocol == 'gpfs-ces-nfs' && vars.MB_GPFS_NFS_RO_MOUNT || vars.MB_GPFS_SMB_RO_MOUNT }}
-          MB_FIELD_RW_MOUNT: ${{ vars.MB_GPFS_SCRATCH_RW_MOUNT }}
-          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_GPFS_SNAPSHOT_ID }}
-          MB_FIELD_SNAPSHOT_ATTESTATION: COHERENT_READONLY_SNAPSHOT_R042
-          MB_GPFS_CES_BACKEND_ATTESTED: IBM_STORAGE_SCALE_CES_LAB
-        run: bash scripts/test-real-cephfs-gpfs-ces-field-r042.sh "${{ matrix.protocol }}"
-      - name: Scope-limited lab evidence
-        if: success()
-        run: |
-          echo 'PASS real IBM GPFS CES export, Rust age backup and byte-identical local restore' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Not certified: native GPFS client, GPFS direct writer, ACL/ILM metadata or HA failover' >> "$GITHUB_STEP_SUMMARY"
-  cephfs-field:
-    name: Real CephFS snapshot Rust backup and isolated recovery
-    needs: preflight
-    runs-on: [self-hosted, cephfs-ci]
-    environment: cephfs-field-lab
-    timeout-minutes: 70
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.reviewed_sha }}
-          persist-credentials: false
-      - name: Exact source and compile Rust
-        env:
-          SHA: ${{ inputs.reviewed_sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$SHA"
-          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
-      - name: Real CephFS client encrypted backup and recovery
-        env:
-          MB_FIELD_APPROVAL: ${{ inputs.confirm }}
-          MB_FIELD_RO_MOUNT: ${{ vars.MB_CEPHFS_RO_MOUNT }}
-          MB_FIELD_RW_MOUNT: ${{ vars.MB_CEPHFS_RW_MOUNT }}
-          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_CEPHFS_SNAPSHOT_ID }}
-          MB_FIELD_SNAPSHOT_ATTESTATION: COHERENT_READONLY_SNAPSHOT_R042
-        run: bash scripts/test-real-cephfs-gpfs-ces-field-r042.sh cephfs
+          bash scripts/test-gpfs-lab-kit-r042.sh
+          echo 'Real GPFS CES/CephFS E2E is only permitted in an isolated PRIVATE repository workflow.' >> "$GITHUB_STEP_SUMMARY"
