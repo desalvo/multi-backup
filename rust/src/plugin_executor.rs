@@ -54,7 +54,7 @@ pub fn backup_with_mode(input: &str, output: &str, source: &Path, root: &Path,
               parent_id:Option<&str>) -> Result<LogicalBackup> {
     backup_with_mode_guard(input,output,source,root,identity,label,
         namespace,top_namespace,snapshot_attested,gpfs_access,
-        kind,parent_id,&||Ok(()))
+        kind,parent_id,&|_|Ok(()))
 }
 /// Distributed workers supply a lease guard. All source adapters that run
 /// under the cluster must honor it; never fall back to an unguarded writer.
@@ -62,9 +62,9 @@ pub fn backup_with_mode_guard(input: &str, output: &str, source: &Path,
               root: &Path, identity: &Path, label: &str, namespace: &str,
               top_namespace: &str, snapshot_attested: bool,
               gpfs_access: Option<GpfsAccess>,kind:BackupKind,
-              parent_id:Option<&str>,live:&dyn Fn()->Result<(),String>)
+              parent_id:Option<&str>,live:&dyn Fn(bool)->Result<(),String>)
               -> Result<LogicalBackup> {
-    live()?;
+    live(false)?;
     supported_pair(Mode::Backup, input, output)?;
     let source = regular_directory(source)?;
     if input == "posix" {
