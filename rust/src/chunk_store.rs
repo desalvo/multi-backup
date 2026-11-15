@@ -321,6 +321,82 @@ impl Store {
         fs2::FileExt::unlock(&lock)?;
         Ok(snapshot)
     }
+    /// Stream one provider-owned logical object directly into immutable,
+    /// age-encrypted and parity-protected chunks. No raw plaintext dump is
+    /// staged on disk. The producer's finalizer MUST prove successful
+    /// completion before an authenticated manifest can be published.
+    /// On interrupted reads or nonzero producer exit, orphan encrypted
+    /// chunks may remain for later guarded GC, but no successful backup.
+    pub fn backup_stream<R:Read,F:FnOnce()->Result<(),String>>(
+        &self,identity:&Path,label:&str,top_namespace:&str,
+        logical_path:&str,source:&mut R,kind:BackupKind,
+        parent_id:Option<&str>,finish:F)->Res<LogicalBackup>{
+        if label.trim().is_empty()||label.len()>256||
+           !safe_path(logical_path)||
+           (!top_namespace.is_empty()&&
+             !crate::backup_policy::safe_namespace(top_namespace)){
+            return Err("Invalid streamed backup label or namespace".into());
+        }
+        let full_path=if top_namespace.is_empty(){
+            logical_path.to_owned()
+        }else{format!("{top_namespace}/{logical_path}")};
+        if !safe_path(&full_path){return Err("Invalid streamed virtual path".into());}
+        let lock=OpenOptions::new().create(true).write(true)
+            .open(self.root.join(".lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
+        match (kind,parent_id){
+            (BackupKind::Full,None)=>{},
+            (BackupKind::Incremental,Some(parent))=>{
+                if !safe_hash(parent){return Err("Invalid stream parent".into());}
+                let previous=self.load(identity,parent)?;
+                if previous.top_namespace!=top_namespace||
+                    previous.entries.len()!=1||
+                    previous.entries[0].path!=full_path {
+                    return Err("Stream increment must match the same source object and namespace".into());
+                }
+                crate::backup_chain::ancestors(self,identity,parent)?;
+            }
+            _=>return Err("Incremental stream needs a parent; full stream must not have one".into())
+        }
+        let mut chunks=Vec::new();
+        let mut total=0u64;
+        loop{
+            // take() retries interrupted/short pipe reads internally up to the
+            // exact chunk boundary without needing seek or plaintext staging.
+            let mut data=Vec::new();
+            (&mut *source).take(self.cfg.chunk_bytes as u64)
+                .read_to_end(&mut data)?;
+            if data.is_empty(){break;}
+            total=total.checked_add(data.len() as u64)
+                .ok_or("Stream size overflow")?;
+            chunks.push(self.save_chunk(identity,&data)?);
+        }
+        // A short or interrupted command must not create an apparently
+        // complete backup. Verification happens BEFORE the manifest write.
+        finish().map_err(|e|format!("Source stream did not finish successfully: {e}"))?;
+        if total==0{return Err("Refusing an empty provider dump".into());}
+        let mut nonce=[0u8;32];
+        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        let snapshot=LogicalBackup{
+            version:1,id:hex::encode(nonce),label:label.to_owned(),
+            entries:vec![Entry{path:full_path,bytes:total,chunks}],
+            protected:false,
+            created_unix:std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0,|x|x.as_secs()),
+            top_namespace:top_namespace.to_owned(),kind,
+            parent_id:parent_id.map(str::to_owned)
+        };
+        let encrypted=age(&serde_json::to_vec(&snapshot)?,
+            Some(&self.cfg.recipient),None)?;
+        if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)?{
+            return Err("Stream manifest collision".into());
+        }
+        self.protect(identity,&snapshot.id)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(snapshot)
+    }
+
     pub fn load(&self, identity: &Path, id: &str) -> Res<LogicalBackup> {
         let path = self.manifest_path(id)?;
         if !fs::symlink_metadata(&path)?.file_type().is_file() {
