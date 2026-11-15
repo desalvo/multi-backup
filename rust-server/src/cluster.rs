@@ -238,10 +238,19 @@ impl Database {
         // Locals may ONLY run on their exact owner replica.
         // Idle capacity is accounted for in the same DB transaction.
         let row=db.query_opt(r#"
-            WITH candidate AS (
+            WITH node AS MATERIALIZED (
+              -- Serialize capacity admission for the SAME replica. SKIP LOCKED
+              -- alone does not prevent multiple concurrent claims exceeding
+              -- max_jobs when both observe the previous count.
+              SELECT replica_id,max_jobs,storage_ids,last_seen
+              FROM mb_cluster_replicas
+              WHERE replica_id=$1 AND last_seen>now()-interval '90 seconds'
+              FOR UPDATE
+            ),
+            candidate AS (
               SELECT j.job_id FROM mb_cluster_jobs j
               JOIN mb_cluster_storage s ON s.storage_id=j.storage_id
-              JOIN mb_cluster_replicas n ON n.replica_id=$1
+              JOIN node n ON n.replica_id=$1
               WHERE n.last_seen>now()-interval '90 seconds'
                 AND n.storage_ids ? j.storage_id
                 AND (s.visibility='shared' OR s.owner_replica=$1)
@@ -274,6 +283,22 @@ impl Database {
     /// Without a durable manifest write fence, retrying a still-running
     /// worker could publish a second backup or race with garbage collection.
     /// Recover only after verified worker shutdown and storage reconciliation.
+    /// Re-check a distributed lease using the PostgreSQL clock. A worker
+    /// must call this before publishing a logical manifest, regardless of
+    /// whether its local heartbeat thread has observed a network failure.
+    pub fn is_current(&self,replica:&str,job:&str,token:&str)
+        ->Result<bool,BoxError>{
+        if !ident(replica)||!ident(job)||token.len()<32||token.len()>128{
+            return Err(error("Invalid distributed lease identity"));
+        }
+        let mut conn=self.connect()?;
+        let row=conn.query_one("SELECT EXISTS(
+            SELECT 1 FROM mb_cluster_jobs
+            WHERE job_id=$1 AND replica_id=$2 AND lease_token=$3
+              AND status='running' AND lease_until>now())",
+            &[&job,&replica,&token])?;
+        Ok(row.get(0))
+    }
     pub fn quarantine_expired(&self)->Result<u64,BoxError>{
         let mut db=self.connect()?;
         Ok(db.execute("UPDATE mb_cluster_jobs
