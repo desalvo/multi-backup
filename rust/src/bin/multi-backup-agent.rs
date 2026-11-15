@@ -370,10 +370,22 @@ fn run()->Res<()>{
             })).map_err(err)?);Ok(())
         }
         "preview"=>{
-            let cfg=load(&opts)?;let p=profile(&cfg,required(&opts,"--profile")?)?;
+            let cfg=load(&opts)?;
+            let profile_id=required(&opts,"--profile")?;
+            let p=profile(&cfg,profile_id)?;
             let mut job=p.job;
             job.execution=Execution::Local;
-            println!("{}",serde_json::to_string_pretty(&afs_volume::plan(&job)?).map_err(err)?);Ok(())
+            let command=afs_volume::plan(&job)?;
+            let profile_sha256=wire::hex_sha(
+                &fs::read(cfg.profiles_dir.join(format!("{profile_id}.json"))).map_err(err)?);
+            println!("{}",serde_json::to_string_pretty(&json!({
+                "agent_id":cfg.agent_id,
+                "profile_id":profile_id,
+                "profile_sha256":profile_sha256,
+                "requires_admin_approval":true,
+                "command_plan":command
+            })).map_err(err)?);
+            Ok(())
         }
         "run"=>{
             let cfg=load(&opts)?;let p=profile(&cfg,required(&opts,"--profile")?)?;
