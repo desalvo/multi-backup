@@ -370,6 +370,19 @@ pub fn plan_restore_new(target:&RestoreNewJob)->Result<RestorePlan,String>{
 /// -overwrite incremental ONLY after that fresh full operation succeeded.
 /// In case of any failure the partial NEW target is left for manual review;
 /// this method never deletes or retries over an existing AFS volume.
+/// Redirect child progress to stderr, reserving the CLI's stdout for JSON.
+/// The worker runs concurrently with stdin streaming, so even a verbose vos
+/// or SSH process cannot deadlock on a filled stdout pipe.
+fn forward_child_stdout_to_stderr(
+    child:&mut std::process::Child,
+)->Result<std::thread::JoinHandle<io::Result<u64>>,String>{
+    let mut output=child.stdout.take().ok_or("vos restore stdout pipe absent")?;
+    Ok(std::thread::spawn(move||{
+        let stderr=io::stderr();
+        let mut diagnostics=stderr.lock();
+        io::copy(&mut output,&mut diagnostics)
+    }))
+}
 pub fn restore_new_chain_from_store(
     root:&Path,identity:&Path,backup_id:&str,target:&RestoreNewJob,
     confirmation:&str,limits:&crate::execution_policy::ExecutionLimits
@@ -423,8 +436,13 @@ pub fn restore_new_chain_from_store(
         if !matches!(&target.execution,Some(Execution::SshAgentless{..})){
             cmd.args(&args);
         }
-        let mut child=cmd.stdin(Stdio::piped()).stdout(Stdio::inherit())
+        // Preserve a strict machine-readable stdout for the parent CLI's
+        // --json mode. Both local vos and remote SSH may print progress to
+        // stdout. Drain it CONCURRENTLY to stderr, without buffering the
+        // full diagnostic stream or risking a blocking child pipe.
+        let mut child=cmd.stdin(Stdio::piped()).stdout(Stdio::piped())
             .stderr(Stdio::inherit()).spawn().map_err(|e|e.to_string())?;
+        let diagnostics=forward_child_stdout_to_stderr(&mut child)?;
         let mut input=child.stdin.take().ok_or("vos restore stdin absent")?;
         let mut output=crate::execution_policy::ThrottledWriter::new(
             &mut input,limits)?;
@@ -443,9 +461,14 @@ pub fn restore_new_chain_from_store(
         drop(output);drop(input);
         if let Err(error)=writing{
             let _=child.kill();let _=child.wait();
+            let _=diagnostics.join();
             return Err(format!("AFS restore stream failed; review partial new volume manually: {error}"));
         }
         let status=child.wait().map_err(|e|e.to_string())?;
+        let diagnostic_result=diagnostics.join()
+            .map_err(|_|"vos restore diagnostics reader panicked".to_string())?
+            .map_err(|e|format!("vos restore diagnostics reader error: {e}"))?;
+        let _=diagnostic_result;
         if !status.success(){
             return Err("AFS restore failed; inspect newly created partial volume, never automatically overwrite or remove it".into());
         }
@@ -459,6 +482,20 @@ mod tests{
         volume:"user.test".into(),auth:Authentication::ExistingToken,
         execution:Execution::Local,mode:DumpMode::Full,
         server:None,partition:None,command_profile:None}}
+    #[cfg(unix)]
+    #[test]fn restore_child_stdout_is_drained_without_polluting_machine_stdout(){
+        // A local stand-in verifies only process stream plumbing; the field
+        // CI still requires real vos, KDC, VLDB and byte-identical restore.
+        let mut child=Command::new("sh")
+            .args(["-c","printf 'vos progress message\\n'"])
+            .stdin(Stdio::null()).stdout(Stdio::piped())
+            .stderr(Stdio::null()).spawn().unwrap();
+        let reader=forward_child_stdout_to_stderr(&mut child).unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(reader.join().unwrap().unwrap(),21);
+        let machine_result=serde_json::json!({"restored_dumps":2});
+        assert_eq!(machine_result["restored_dumps"],2);
+    }
     #[test]fn restore_only_creates_explicit_new_volume_with_no_overwrite(){
         let mut target=RestoreNewJob{
             cell:"example.org".into(),volume:"new.restored".into(),

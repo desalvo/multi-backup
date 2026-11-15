@@ -7,6 +7,7 @@ on:
       - 'scripts/patch-openafs-ansible-debian-facts.py'
       - 'scripts/patch-openafs-ansible-local-facts-access.py'
       - 'scripts/test-real-afs-cell.sh'
+      - 'rust/src/afs_volume.rs'
       - 'docs/AFS_RUNNER_R039_IT.md'
       - '.github/workflows/afs-runner-lint.yml'
   workflow_dispatch:
@@ -23,6 +24,13 @@ jobs:
           bash -n scripts/bootstrap-openafs-runner-vm.sh
           bash -n scripts/register-openafs-runner-once.sh
           bash -n scripts/test-real-afs-cell.sh
+          # Keep --json stdout uncontaminated by real vos/SSH diagnostics.
+          grep -q 'forward_child_stdout_to_stderr' rust/src/afs_volume.rs
+          grep -q 'let diagnostics=forward_child_stdout_to_stderr(&mut child)' rust/src/afs_volume.rs
+          if grep -Fq 'cmd.stdin(Stdio::piped()).stdout(Stdio::inherit())' rust/src/afs_volume.rs; then
+            echo "::error::vos restore progress must not leak into CLI JSON stdout"; exit 1
+          fi
+          cargo test --manifest-path rust/Cargo.toml --lib restore_child_stdout_is_drained_without_polluting_machine_stdout
           grep -q 'SOURCE_PARENT="/afs/.' scripts/test-real-afs-cell.sh
           grep -q 'fs setacl -dir "$SOURCE_PARENT" -acl system:administrators all' scripts/test-real-afs-cell.sh
           grep -q 'fs getcalleraccess -path "$SOURCE_PARENT"' scripts/test-real-afs-cell.sh
