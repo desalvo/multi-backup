@@ -435,3 +435,33 @@ fn run()->Res<()>{
     }
 }
 fn main(){if let Err(error)=run(){eprintln!("Agent error: {error}");std::process::exit(1)}}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn file_slots_enforce_concurrent_process_ceiling_and_release_on_drop(){
+        let root=tempfile::tempdir().unwrap();
+        let cfg=Config{
+            agent_id:"test-one".into(),user:"operator".into(),
+            server_url:"https://backup.example.org/".into(),
+            signing_key:root.path().join("key"),
+            token_file:root.path().join("token"),
+            sequence_file:root.path().join("seq"),
+            profiles_dir:root.path().join("profiles"),
+            spool_dir:root.path().to_path_buf(),
+            limits:ExecutionLimits{max_concurrent_jobs:1,
+                ..ExecutionLimits::default()},
+        };
+        let first=acquire_slot(&cfg,&cfg.limits).unwrap();
+        assert!(acquire_slot(&cfg,&cfg.limits).is_err());
+        drop(first);
+        assert!(acquire_slot(&cfg,&cfg.limits).is_ok());
+    }
+    #[test]
+    fn cannot_create_agent_without_https_or_pinned_device_id(){
+        assert!(!wire::valid_tls_endpoint("http://untrusted.example.org"));
+        assert!(!wire::valid_id("../../../backup"));
+    }
+}
