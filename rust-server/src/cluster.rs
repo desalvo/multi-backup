@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS mb_cluster_jobs (
   job_spec JSONB NOT NULL,
   execution_limits JSONB NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued'
-    CHECK (status IN ('queued','running','success','failed','cancelled')),
+    CHECK (status IN ('queued','running','success','failed','cancelled','needs_reconciliation')),
   priority INTEGER NOT NULL DEFAULT 0,
   replica_id TEXT,
   lease_token TEXT,
@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS mb_cluster_jobs (
   result JSONB,
   CHECK (priority BETWEEN -100 AND 100)
 );
+-- Migrations are forward-compatible with an existing r039 preview DB.
+-- A crashed writer may continue running after losing PG connectivity: never
+-- recycle its lease before proving the old process is stopped.
+ALTER TABLE mb_cluster_jobs DROP CONSTRAINT IF EXISTS mb_cluster_jobs_status_check;
+ALTER TABLE mb_cluster_jobs ADD CONSTRAINT mb_cluster_jobs_status_check
+  CHECK (status IN ('queued','running','success','failed','cancelled','needs_reconciliation'));
 CREATE INDEX IF NOT EXISTS mb_cluster_jobs_pending
  ON mb_cluster_jobs(status,priority DESC,created_at);
 CREATE INDEX IF NOT EXISTS mb_cluster_jobs_lease
@@ -239,8 +245,7 @@ impl Database {
               WHERE n.last_seen>now()-interval '90 seconds'
                 AND n.storage_ids ? j.storage_id
                 AND (s.visibility='shared' OR s.owner_replica=$1)
-                AND (j.status='queued'
-                     OR (j.status='running' AND j.lease_until<now()))
+                AND j.status='queued'
                 AND (
                   SELECT count(*) FROM mb_cluster_jobs running
                   WHERE running.replica_id=$1 AND running.status='running'
@@ -264,6 +269,27 @@ impl Database {
                 spec:r.get(4),limits:r.get(5),token:r.get(6),
                 attempts:r.get(7)})
         }).transpose()
+    }
+    /// Expired or abandoned claimed jobs are quarantined, NOT reassigned.
+    /// Without a durable manifest write fence, retrying a still-running
+    /// worker could publish a second backup or race with garbage collection.
+    /// Recover only after verified worker shutdown and storage reconciliation.
+    pub fn quarantine_expired(&self)->Result<u64,BoxError>{
+        let mut db=self.connect()?;
+        Ok(db.execute("UPDATE mb_cluster_jobs
+            SET status='needs_reconciliation',
+                result=jsonb_build_object(
+                    'reason','lost_lease_requires_writer_fencing',
+                    'previous_replica',replica_id,
+                    'previous_attempts',attempts
+                )
+            WHERE status='running' AND lease_until<now()", &[])?)
+    }
+    pub fn requires_reconciliation(&self)->Result<i64,BoxError>{
+        let mut db=self.connect()?;
+        let row=db.query_one("SELECT COUNT(*) FROM mb_cluster_jobs
+            WHERE status='needs_reconciliation'",&[])?;
+        Ok(row.get::<_,i64>(0))
     }
     pub fn renew(&self,replica:&str,job:&str,token:&str,seconds:i32)
         ->Result<bool,BoxError>{
