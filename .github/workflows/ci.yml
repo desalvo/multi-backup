@@ -77,6 +77,7 @@ jobs:
           # Legacy Python archive interoperability is optional, not an RC blocker.
           # Native functional recovery is mandatory instead.
           cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test afs_stream_roundtrip
           cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
           cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
           cargo test --manifest-path rust/Cargo.toml --lib execution_policy
