@@ -58,6 +58,21 @@ test -d "$SOURCE_PARENT" || {
   echo "Missing root.cell read-write mount: $SOURCE_PARENT" >&2
   exit 1
 }
+# The test cell is TEST-ONLY. The upstream playbook grants broad read ACLs
+# on root.cell; even an authenticated AFS admin then lacks the i (insert)
+# right required by fs mkmount. OpenAFS requires BOTH i and a on the parent.
+# Grant those rights solely to the lab's system:administrators group. This is
+# additive, idempotent, and restricted to the isolated example.com cell.
+test "$CELL" = example.com
+test "$SOURCE_PARENT" = /afs/.example.com
+echo 'AFS RW parent ACL before lab-only administrator repair:'
+fs listacl -dir "$SOURCE_PARENT"
+echo 'AFS caller rights before repair:'
+fs getcalleraccess -path "$SOURCE_PARENT"
+fs setacl -dir "$SOURCE_PARENT" -acl system:administrators all
+echo 'AFS caller rights after lab-only administrator repair:'
+fs getcalleraccess -path "$SOURCE_PARENT"
+fs listacl -dir "$SOURCE_PARENT"
 SOURCE_MOUNT="$SOURCE_PARENT/mb-source-$RUN_SUFFIX-$ATTEMPT"
 if [ -e "$SOURCE_MOUNT" ]; then
   echo "Refusing to reuse existing AFS mountpoint $SOURCE_MOUNT" >&2

@@ -24,6 +24,9 @@ jobs:
           bash -n scripts/register-openafs-runner-once.sh
           bash -n scripts/test-real-afs-cell.sh
           grep -q 'SOURCE_PARENT="/afs/.' scripts/test-real-afs-cell.sh
+          grep -q 'fs setacl -dir "$SOURCE_PARENT" -acl system:administrators all' scripts/test-real-afs-cell.sh
+          grep -q 'fs getcalleraccess -path "$SOURCE_PARENT"' scripts/test-real-afs-cell.sh
+          grep -q 'test "$SOURCE_PARENT" = /afs/.example.com' scripts/test-real-afs-cell.sh
           grep -q 'fs mkmount -dir "$SOURCE_MOUNT" -vol "$VOLUME" -cell "$CELL" -rw' scripts/test-real-afs-cell.sh
           grep -q 'fs mkmount -dir "$RESTORE_MOUNT" -vol "$NEW_VOLUME" -cell "$CELL" -rw' scripts/test-real-afs-cell.sh
           grep -q 'fs rmmount -dir "$SOURCE_MOUNT"' scripts/test-real-afs-cell.sh
