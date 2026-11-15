@@ -217,7 +217,13 @@ async fn oidc_start(State(state):State<AppState>)->Response{
         audit(&state.0,"oidc_start_failed");
         return secure_headers(StatusCode::BAD_GATEWAY);
     };
-    {
+    if let Some(db)=&state.0.cluster{
+        // All replicas must recognize the SAME outstanding PKCE challenge.
+        // Failure to commit is fatal; never fall back to replica-local state.
+        if db.put_oidc_pending(&csrf,&pending.verifier,&pending.nonce).is_err(){
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }else{
         let Ok(mut entries)=state.0.pending_oidc.lock() else {
             return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
         };
@@ -247,7 +253,17 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     let Some(code)=params.code.filter(|s|!s.is_empty()&&s.len()<=8192) else {
         return secure_headers(StatusCode::UNAUTHORIZED);
     };
-    let pending={
+    let pending=if let Some(db)=&state.0.cluster{
+        // Atomic DELETE..RETURNING enforces one-time consumption even when
+        // callbacks race through different pods behind the load balancer.
+        match db.take_oidc_pending(&state_param){
+            Ok(Some((verifier,nonce)))=>Some(Pending{
+                verifier,nonce,created:Instant::now()
+            }),
+            Ok(None)=>None,
+            Err(_)=>return secure_headers(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }else{
         let Ok(mut entries)=state.0.pending_oidc.lock() else {
             return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
         };
