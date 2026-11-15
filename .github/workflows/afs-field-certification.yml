@@ -21,7 +21,7 @@ jobs:
     if: github.actor == 'desalvo'
     runs-on: ubuntu-24.04
     env:
-      PINNED_SHA: 35f940946ed1376ba223c652916bc66e5b3d9de4
+      PINNED_SHA: 253d4a156cab27bc8c058c191f1f03245cd98f16
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       LAB_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -44,7 +44,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, openafs-ci]
     timeout-minutes: 120
     env:
-      PINNED_SHA: 35f940946ed1376ba223c652916bc66e5b3d9de4
+      PINNED_SHA: 253d4a156cab27bc8c058c191f1f03245cd98f16
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       LAB_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -72,18 +72,20 @@ jobs:
           esac
           sudo -n true
           test "$(sudo -n cat /etc/multi-backup-ci/allow-disposable-afs)" = DEDICATED_DISPOSABLE_OPENAFS_CELL_VM
-          if sudo -n test -e /var/lib/multi-backup-ci/afs-run-used; then
-            echo "::error::VM has previously executed an AFS job; destroy and re-create"; exit 1
+          if sudo -n test -e /var/lib/multi-backup-ci/afs-active; then
+            echo "::error::Lab already has an active/stale lease; inspect runner and previous job before admin recovery"
+            exit 1
           fi
           sudo -n install -d -m 0700 /var/lib/multi-backup-ci
-          sudo -n touch /var/lib/multi-backup-ci/afs-run-used
+          printf '%s:%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" | sudo -n tee /var/lib/multi-backup-ci/afs-active >/dev/null
+          sudo -n chmod 0600 /var/lib/multi-backup-ci/afs-active
           test -d "/lib/modules/$(uname -r)/build"
           sudo -n modprobe openafs
           grep -q '^openafs ' /proc/modules
           printf 'OpenAFS VM checked: %s\n' "$(uname -r)"
       - uses: actions/checkout@v4
         with:
-          ref: 35f940946ed1376ba223c652916bc66e5b3d9de4
+          ref: 253d4a156cab27bc8c058c191f1f03245cd98f16
           persist-credentials: false
       - name: Verify immutable checked-out PR source and Rust toolchain
         run: |
@@ -101,6 +103,13 @@ jobs:
           "$RUNNER_TEMP/mb-afs-ansible/bin/pip" install 'ansible-core>=2.17,<2.18'
           "$RUNNER_TEMP/mb-afs-ansible/bin/ansible-galaxy" collection install \
             git+https://github.com/openafs-contrib/ansible-openafs.git,11fa2a5bbb27d4b44d297c5105f7dd9bc6347190
+      - name: Fix Debian 12 OpenAFS real cacheinfo fact detection in SHA-pinned upstream collection
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          if [ "$ID:$VERSION_ID" = debian:12 ]; then
+            python3 scripts/patch-openafs-ansible-debian-facts.py "$HOME/.ansible/collections/ansible_collections/openafs_contrib/openafs/plugins/modules/openafs_get_install_paths.py"
+          fi
       - name: Deploy genuine isolated KDC and OpenAFS local test cell
         run: |
           set -euo pipefail
@@ -118,4 +127,19 @@ jobs:
         run: |
           echo "PASS real Kerberos KDC/AFS token/VLDB/volserver + encrypted FULL/incremental and new-volume byte-identical restore" >> "$GITHUB_STEP_SUMMARY"
           echo "Immutable reviewed source SHA: $PINNED_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "Sacrificial self-hosted VM must now be destroyed; ephemeral runner does NOT wipe keytabs." >> "$GITHUB_STEP_SUMMARY"
+          echo "Proxmox lab VM retained; only the ephemeral GitHub runner session is removed after this job." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release the isolated lab job lease, including failed runs
+        if: always()
+        run: |
+          set -euo pipefail
+          if sudo -n test -e /var/lib/multi-backup-ci/afs-active; then
+            HELD=$(sudo -n cat /var/lib/multi-backup-ci/afs-active)
+            EXPECTED="$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT"
+            if [ "$HELD" != "$EXPECTED" ]; then
+              echo "::error::Lease does not belong to this job. Manual inspection required; not deleting it."
+              exit 1
+            fi
+            sudo -n rm -f /var/lib/multi-backup-ci/afs-active
+            echo "PASS: lab lease released for reusable isolated Proxmox VM"
+          fi
