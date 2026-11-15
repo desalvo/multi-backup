@@ -31,7 +31,10 @@ sudo env LTVM_NO_UPDATE=1 ./ltvm install
 sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 test -r /dev/kvm && test -w /dev/kvm
 sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm doctor'
-sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm target fetch rocky9'
+# Podman rootless newuidmap requires the current primary group to equal
+# the account's passwd group. 'sg ltvm' changes the primary GID and breaks
+# rootless container image import; fetching does not need the ltvm VM group.
+LTVM_NO_UPDATE=1 ./ltvm target fetch rocky9
 sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm create co1-single --vcpus 2 --mem 4096 --mdt-disks 1 --ost-disks 3'
 sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm llmount co1-single'
 # No unreviewed shell code from a network source is passed to the guest.
