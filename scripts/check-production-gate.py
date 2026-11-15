@@ -62,10 +62,17 @@ def validate():
                 'MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE',
                 'MULTI_BACKUP_RECOVERY_SECRET_FILE',
                 'MULTI_BACKUP_CLUSTER_DATABASE_URL',
+                'MULTI_BACKUP_CLUSTER_TLS_CA_FILE',
                 'MULTI_BACKUP_AGENT_PROXY_SECRET_FILE',
                 'MULTI_BACKUP_REPLICA_ID'):
         assert key in env, 'Missing hardened cluster setting: '+key
     assert env['MULTI_BACKUP_HARDENED_MODE'].get('value')=='true'
+    pg_source=(ROOT/'rust-server/src/cluster.rs').read_text('utf-8')
+    for required in ('fn strict_tls_dsn', 'postgres.get_ssl_mode()',
+                     'danger_accept_invalid_certs(false)',
+                     'danger_accept_invalid_hostnames(false)',
+                     'Protocol::Tlsv12','MULTI_BACKUP_CLUSTER_TLS_CA_FILE'):
+        assert required in pg_source, 'PG verified TLS protection missing: '+required
 
     for source in ('rust/src/bin/multi-backup-agent.rs',
                    'rust/src/afs_volume.rs',
