@@ -723,3 +723,12 @@ Native database plugin IDs are now Preview for backup input and restore output o
 ## r039 dedicated AFS runner Debian 12 platform update (15 Nov 2026)
 - Debian 12 Bookworm x86_64 with stock Linux 6.1.x-amd64 is now the **preferred** disposable lab VM. Retained Ubuntu 22.04 GA 5.15.x-generic compatibility. The bootstrap checks exact OS/kernel, selects libicu72 on Debian vs libicu70 Ubuntu, tests matching headers, installs distro OpenAFS DKMS, and requires actual modprobe before allowing an ephemeral GitHub runner. No unsupported kernel or production data allowed.
 - Added policy-gate lint for Debian 12; see docs/AFS_RUNNER_R039_IT.md and main-only approved exact-SHA dispatcher. **Still not field certified** until true Kerberos/VLDB/volserver/new volume restoration succeeds on user's isolated VM. Other agent/HA/installers remain separate gates.
+
+
+## CI 43730251286 and reusable Proxmox lab — 15 November 2026
+
+The real Debian 12 job completed Kerberos and the OpenAFS server/client mount, then Ansible failed creating root.afs/root.cell/test with 'Unable to locate viceetcdir directory'. Cause: upstream SHA-pinned collection infers viceetcdir from the cacheinfo manual page, missing in Debian 12 facts. New scripts/patch-openafs-ansible-debian-facts.py adds /etc/openafs only when a REAL /etc/openafs/cacheinfo exists. All volume and vos operations remain real, not simulated.
+
+Keep Debian 12 VM, OpenAFS, Kerberos and Rust on the ISOLATED Proxmox network. GitHub runner remains per-job ephemeral; register fresh each time with a NEW short-lived GitHub token. The registration script reuses verified official runner archive after checking SHA256, uses exclusive flock, creates and removes each runner session/workspace, preserving the VM. The trusted workflow uses a per-job active lease and cleanup; after an abrupt termination inspect the VM and logs before manual lease recovery. Do not grant it production network or administrative credentials.
+
+Previous afs-run-used marker is retired; current job guard uses afs-active. Restore volume name uses GitHub run ID/attempt to avoid overwriting old test volumes. To retry from mb-afs-runner after verifying no runner process is active, git pull --ff-only in ~/multi-backup and run bash scripts/register-openafs-runner-once.sh. New VM bootstrap is NOT required. Still not AFS-certified until real full/incremental/new volume byte comparison is green.

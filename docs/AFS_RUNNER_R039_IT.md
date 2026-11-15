@@ -40,3 +40,12 @@ Il dispatcher principale su main accetta l'OS Debian 12 kernel 6.1-amd64 (oltre 
 **Nota pratica Proxmox:** selezionare ISO Debian 12 amd64; non installare headers di un kernel diverso da quello riportato da uname -r; OpenAFS su Debian 12 usa il pacchetto ufficiale openafs-modules-dkms 1.8.9-1+deb12u1, e l'effettiva compilazione è il gate di ingresso. VM sacrificabile, fuori dalla rete di produzione. 
      
 Non equiparare questa prova a certificazione globale della PR #11: agenti reali, fencing HA, ACL/xattr POSIX e pacchetti firmati sono ancora gate distinti.
+
+
+## CI 43730251286 and reusable Proxmox lab — 15 November 2026
+
+The real Debian 12 job completed Kerberos and the OpenAFS server/client mount, then Ansible failed creating root.afs/root.cell/test with 'Unable to locate viceetcdir directory'. Cause: upstream SHA-pinned collection infers viceetcdir from the cacheinfo manual page, missing in Debian 12 facts. New scripts/patch-openafs-ansible-debian-facts.py adds /etc/openafs only when a REAL /etc/openafs/cacheinfo exists. All volume and vos operations remain real, not simulated.
+
+Keep Debian 12 VM, OpenAFS, Kerberos and Rust on the ISOLATED Proxmox network. GitHub runner remains per-job ephemeral; register fresh each time with a NEW short-lived GitHub token. The registration script reuses verified official runner archive after checking SHA256, uses exclusive flock, creates and removes each runner session/workspace, preserving the VM. The trusted workflow uses a per-job active lease and cleanup; after an abrupt termination inspect the VM and logs before manual lease recovery. Do not grant it production network or administrative credentials.
+
+Previous afs-run-used marker is retired; current job guard uses afs-active. Restore volume name uses GitHub run ID/attempt to avoid overwriting old test volumes. To retry from mb-afs-runner after verifying no runner process is active, git pull --ff-only in ~/multi-backup and run bash scripts/register-openafs-runner-once.sh. New VM bootstrap is NOT required. Still not AFS-certified until real full/incremental/new volume byte comparison is green.

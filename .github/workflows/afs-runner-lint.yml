@@ -4,6 +4,8 @@ on:
     paths:
       - 'scripts/bootstrap-openafs-runner-vm.sh'
       - 'scripts/register-openafs-runner-once.sh'
+      - 'scripts/patch-openafs-ansible-debian-facts.py'
+      - 'scripts/test-real-afs-cell.sh'
       - 'docs/AFS_RUNNER_R039_IT.md'
       - '.github/workflows/afs-runner-lint.yml'
   workflow_dispatch:
@@ -19,6 +21,11 @@ jobs:
           set -euo pipefail
           bash -n scripts/bootstrap-openafs-runner-vm.sh
           bash -n scripts/register-openafs-runner-once.sh
+          bash -n scripts/test-real-afs-cell.sh
+          python3 -m py_compile scripts/patch-openafs-ansible-debian-facts.py
+          grep -q 'afs-active' scripts/register-openafs-runner-once.sh
+          grep -q 'viceetcdir' scripts/patch-openafs-ansible-debian-facts.py
+          grep -q 'RUN_SUFFIX' scripts/test-real-afs-cell.sh
           grep -q -- 'DISPOSABLE-OPENAFS-VM' scripts/bootstrap-openafs-runner-vm.sh
           grep -q -- 'debian:12' scripts/bootstrap-openafs-runner-vm.sh
           grep -q -- '6.1.*-amd64' scripts/bootstrap-openafs-runner-vm.sh
