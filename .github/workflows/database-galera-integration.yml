@@ -1,0 +1,30 @@
+name: Multi Backup - real MariaDB Galera cluster and PITR acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'ci/galera/**'
+      - 'scripts/test-mariadb-galera-pitr.sh'
+      - '.github/workflows/database-galera-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  galera-three-node-recovery:
+    name: MariaDB 11.4 three-node Galera, quorum failover and encrypted PITR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install real MariaDB clients and age
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq mariadb-client
+          command -v mariadb-binlog
+          command -v age-keygen
+          docker version
+      - name: Build Multi Backup Rust CLI
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Test real multi-node Galera failure and cross-node PITR
+        run: bash scripts/test-mariadb-galera-pitr.sh
