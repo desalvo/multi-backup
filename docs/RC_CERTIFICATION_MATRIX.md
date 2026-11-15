@@ -382,3 +382,16 @@ or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
 - POSIX Rust full/incremental, 10MiB mixed-sized chunks, selective restore, wrong key, symlink/FIFO and corrupted ciphertext parity repair **PASS** at run 43678452447. No ACL/xattr, mtime/uid/gid snapshot fidelity certification.
 - Real SSH/SCP/SFTP protocol and FUSE SSHFS CI source scripts added; these are *in progress* until individual job PASS. SSH catalog direct provider still Planned, no claim of native SSH plugin implementation.
 - OpenAFS authentic KDC/VLDB/fileserver/restore field workflow now manual on a disposable self-hosted `openafs-ci` runner, with exact SHA, sentinel and verified OpenAFS DKMS, to avoid unsupported Azure kernel; no PASS evidence yet, mandatory field gate stays open.
+
+## r041 — Lustre and Oracle acceptance (2026-11-15)
+
+| Gate | Evidence needed | Status |
+|---|---|---|
+| Lustre mounted backend guard | Hosted CI rejects local directories as Lustre backup or restore mounts using compiled Rust CLI | Prepared; new CI result pending |
+| Lustre real full+incremental | Dedicated genuine RO MDT/OST snapshots, encrypted Rust backup/verify-chain, create-only independent Lustre RW restore, byte equality and deletion propagation | **NOT TESTED ON REAL LUSTRE**; self-hosted lab required |
+| Lustre metadata fidelity | Numeric UID/GID, file mode, mtime, ACL, user xattr and `lfs getstripe` from genuine Lustre snapshots and recovered files | **BLOCKED**: generic archive metadata/striping not yet proven |
+| Oracle generic executor safety | Oracle profile rejected by MySQL/PostgreSQL adapter, and Oracle backup/restore plugin plans remain non-executable | Prepared; hosted CI result pending |
+| Oracle genuine RMAN preflight | Approved licensed isolated database, authenticated RMAN `BACKUP VALIDATE CHECK LOGICAL DATABASE` and `RESTORE DATABASE VALIDATE` | **NOT EXECUTED**; approval/instance/backup pieces required |
+| Oracle Multi Backup backup/restore | Actual Oracle RMAN full/incremental encrypted backup, controlfile/SPFILE/archivelogs and restore/recovery on NEW isolated DB | **NOT IMPLEMENTED / NOT CERTIFIED**; RMAN validation alone cannot pass |
+
+See [r041 field acceptance and safety specification](LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md). These are separate from r040 Kubernetes pod/PG TLS readiness and cannot unblock stable publication by themselves.
