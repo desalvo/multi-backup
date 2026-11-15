@@ -7,6 +7,8 @@ mod oidc;
 mod dav;
 mod security;
 mod cluster;
+#[cfg(test)]
+mod live_pg_acceptance;
 mod agent_registry;
 mod agent_api;
 mod cluster_worker;

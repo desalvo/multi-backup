@@ -534,3 +534,17 @@ mod tests {
         assert!(bad.validate().is_err());
     }
 }
+
+/// Test-only, isolated PostgreSQL service fixture. Production never uses
+/// this constructor: Database::configured requires TLS verify-full.
+#[cfg(test)]
+pub(crate) fn live_pg_ci_fixture()->Database {
+    let dsn=env::var("MULTI_BACKUP_TEST_PG_DSN")
+        .expect("Real PG acceptance requires the disposable CI fixture");
+    assert!(dsn.contains("@127.0.0.1:5432/") &&
+            dsn.contains("sslmode=disable"),
+            "CI fixture may only point to isolated loopback PostgreSQL");
+    let db=Database{dsn};
+    db.connect().unwrap().batch_execute(SCHEMA).unwrap();
+    db
+}
