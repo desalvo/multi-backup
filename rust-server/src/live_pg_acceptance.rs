@@ -212,6 +212,7 @@ fn real_pg_parallel_claims_and_signed_nonce_single_winner(){
         })
     }).collect::<Vec<_>>();
     barrier.wait();
-    let accepted=workers.into_iter().filter(|h|h.join().unwrap()).count();
+    let accepted=workers.into_iter().map(|h|h.join().unwrap())
+        .filter(|accepted|*accepted).count();
     assert_eq!(accepted,1,"Concurrent requests must never reuse a signed nonce");
 }
