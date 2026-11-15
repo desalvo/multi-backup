@@ -121,3 +121,5 @@ i dati di rete e le credenziali non vanno mai pubblicati nel repository.
 Il PDF viene generato/cifrato localmente con AES-256 e password scelta
 dall'operatore; GitHub conserva al massimo il PDF cifrato, dopo un controllo
 di crittografia. L'originale e il generatore privato restano offline.
+
+**AFS SSH agentless restore (anteprima):** la destinazione AFS può essere un host SSH remoto autenticato con chiave pinned e token AFS già autorizzato, mantenendo il controllo del nuovo volume e -overwrite abort. Vedi [manuale plugin](docs/PLUGIN_EXECUTORS_R039_IT.md). Richiesti test reali prima della RC.
