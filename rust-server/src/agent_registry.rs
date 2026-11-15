@@ -250,6 +250,29 @@ pub fn validate_upload(meta:&[u8])->Res<UploadManifest>{
     }
     Ok(form)
 }
+/// Check the exact approved profile before reading a potentially huge
+/// ciphertext request body. The commit path repeats the check transactionally
+/// so a revocation during an upload also fails closed.
+pub fn preflight_upload(db:&Database,identity:&Verified,
+                        form:&UploadManifest)->Res<bool>{
+    let mut conn=db.connect()?;
+    let row=conn.query_one("SELECT EXISTS(
+        SELECT 1 FROM mb_agent_registry a
+        JOIN mb_agent_profiles p ON p.agent_id=a.agent_id
+        WHERE a.agent_id=$1 AND a.approved AND NOT a.revoked
+          AND p.profile_id=$2 AND p.profile_sha256=$3
+          AND p.provider=$4 AND p.approved
+          AND ($5::text IS NULL OR EXISTS (
+            SELECT 1 FROM mb_agent_pull_jobs j
+            WHERE j.agent_id=a.agent_id AND j.job_id=$5
+              AND j.profile_id=p.profile_id
+              AND j.profile_sha256=p.profile_sha256
+              AND j.state='leased' AND j.lease_until>now()
+          ))
+    )",&[&identity.agent_id,&form.profile_id,&form.profile_sha256,
+        &form.provider,&form.pull_job_id])?;
+    Ok(row.get(0))
+}
 pub fn commit_upload(db:&Database,identity:&Verified,form:&UploadManifest,
                      path:&str,digest:&str,bytes:u64)->Res<()>{
     if bytes!=form.encrypted_bytes||digest!=identity.proof.body_sha256{
