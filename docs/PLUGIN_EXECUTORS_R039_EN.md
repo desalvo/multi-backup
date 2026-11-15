@@ -64,3 +64,7 @@ CI runs rust/tests/afs_stream_roundtrip.rs with real age encryption, the compile
 S3/RGW, Google Drive, OneDrive, WebDAV, ownCloud, Nextcloud, Alfresco, HDFS, RBD and SAN block endpoints, hypervisors, Kubernetes/OpenShift, PostgreSQL/MySQL/Oracle, plus full provider-to-provider transfers. Every actual adapter must validate distinct source and target credentials, no-overwrite recovery, provider metadata, cryptographic integrity, idempotency, and real failure-mode acceptance. No catalog-only plugin silently executes as generic POSIX.
 
 See PLUGIN_MATRIX.md, PLUGIN_API.md, AGENTS_AFS_R039_EN.md, RC_CERTIFICATION_MATRIX.md and HANDOFF.md.
+
+## Update: AFS recovery through pinned SSH agentless (15 November 2026)
+
+The target JSON may include an optional execution object with type=ssh_agentless, host, user, absolute identity key path, pinned known_hosts and afs_server=false. Full+incremental NEW volume restoration may run locally with an existing AFS token, or across a dedicated SSH connection where the remote account independently already has an authorized AFS token. SSH uses strict host-key enforcement, public-key-only auth, -F none, disabled ProxyCommand/ProxyJump, no forwarding, no prompts or password fallback. Verified decrypted vos dump bytes stream over encrypted SSH stdin and are not staged on local plaintext disk. Full uses overwrite abort; subsequent increments occur only after full success in the same invocation. CI uses fake ssh+vos; live SSH, remote keytab and agent-managed restore are still NOT certified.
