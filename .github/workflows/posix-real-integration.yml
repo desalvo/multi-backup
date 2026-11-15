@@ -1,0 +1,25 @@
+name: Multi Backup - real POSIX native filesystem acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/test-posix-real-roundtrip.sh'
+      - '.github/workflows/posix-real-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-posix-full-incremental:
+    name: POSIX full/incremental encrypted E2E and fault injection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install real age, jq and coreutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq
+      - name: Compile real Rust plugin
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Real POSIX filesystem encrypted full/incremental restore
+        run: bash scripts/test-posix-real-roundtrip.sh
