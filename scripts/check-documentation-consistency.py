@@ -140,6 +140,34 @@ def main() -> None:
                    "packaging/linux/multi-backup-agent.spec",
                    "packaging/windows/rust-agent-preview.iss"):
         read(source)
+    # r039+ actual executors must be documented, compiled and covered by
+    # the Production Gate: do not equate the catalog with working adapters.
+    for manual in ("docs/PLUGIN_EXECUTORS_R039_IT.md",
+                   "docs/PLUGIN_EXECUTORS_R039_EN.md"):
+        body=read(manual)
+        require(body,"AFS","CephFS","GlusterFS","Lustre",
+                "afs-backup","afs-restore-new")
+        if body.count("~~~")%2:
+            raise AssertionError("Unclosed code fence in "+manual)
+    require(read("rust/src/chunk_store.rs"),
+            "pub fn backup_stream","finish()","self.protect")
+    require(read("rust/src/afs_volume.rs"),
+            "backup_volume_to_store","restore_new_chain_from_store",
+            '"-overwrite".into(),"abort".into()')
+    require(read("rust/src/mount_probe.rs"),
+            '"cephfs"','"glusterfs"','"lustre"',
+            '"fuse.glusterfs"')
+    require(read("rust/src/plugin_executor.rs"),
+            '"cephfs"','"glusterfs"','"lustre"',
+            "exact read-write mount")
+    require(read("rust/src/bin/multi-backup-native.rs"),
+            '"afs-backup"','"afs-restore-new"','"afs-restore-plan"')
+    require(read(".github/workflows/ci.yml"),
+            "cargo test --manifest-path rust/Cargo.toml --test afs_stream_roundtrip")
+    require(read("rust/tests/afs_stream_roundtrip.rs"),
+            "fakebin","age-keygen","afs-restore-new","afs-backup")
+    print("Rust mounted plugin and OpenAFS volume source/restore contract: PASS")
+
     print("Rust r039 agent, AFS and cluster documentation contract: PASS")
 
     print("Rust r038 documentation contract: PASS")
