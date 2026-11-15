@@ -139,7 +139,7 @@ test -n "$RECIPIENT"
 printf '[client]\npassword=galera_ci_password\n' > "$WORK/credentials.cnf"
 chmod 600 "$WORK/credentials.cnf"
 jq -n --arg creds "$WORK/credentials.cnf" \
-    '{engine:"mysql",host:"127.0.0.1",port:13317,user:"root",database:"mb_galera_live",credentials_file:$creds}' \
+    '{engine:"mysql",host:"127.0.0.1",port:13317,user:"root",database:"mb_galera_live",credentials_file:$creds,galera_expected_nodes:3}' \
     > "$WORK/source.json"
 "$CLI" plugins database-backup --profile-json "$WORK/source.json" \
     --root "$WORK/store" --identity "$WORK/identity" --label galera-full \
@@ -147,6 +147,21 @@ jq -n --arg creds "$WORK/credentials.cnf" \
 BASE_ID=$(jq -r '.id' "$WORK/base.json")
 test "$BASE_ID" != null && test -n "$BASE_ID"
 "$CLI" storage verify --root "$WORK/store" --identity "$WORK/identity" --id "$BASE_ID"
+# A healthy two-node Primary must fail the explicit 3-node backup policy.
+docker kill "$N3" >/dev/null
+ready 13316 2
+ready 13317 2
+if "$CLI" plugins database-backup --profile-json "$WORK/source.json" \
+    --root "$WORK/store" --identity "$WORK/identity" --label rejected-degraded \
+    --json > "$WORK/degraded.json" 2> "$WORK/degraded.log"; then
+    echo "SECURITY FAILURE: degraded 2-node cluster bypassed backup policy" >&2
+    exit 1
+fi
+grep -F 'Galera backup refused' "$WORK/degraded.log"
+test "$("$CLI" storage list --root "$WORK/store" --identity "$WORK/identity" --json | jq length)" = 1
+docker start "$N3" >/dev/null
+for port in 13316 13317 13318; do ready "$port" 3; done
+wait_rows 40
 # Stable start position after Rust full dump (no concurrent writes).
 mysql 13317 'FLUSH BINARY LOGS'
 STATUS=$(mysql 13317 'SHOW MASTER STATUS')
