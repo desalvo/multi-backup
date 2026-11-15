@@ -93,6 +93,8 @@ jobs:
           bash -n scripts/test-oracle-rman-lab.sh
           bash -n scripts/test-lustre-oracle-guards.sh
           bash scripts/test-lustre-oracle-guards.sh
+      - name: Guarded IBM GPFS CES Developer lab scripts and anti-fake-mount controls
+        run: bash scripts/test-gpfs-lab-kit-r042.sh
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
