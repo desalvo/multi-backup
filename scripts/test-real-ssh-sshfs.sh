@@ -5,7 +5,9 @@ set -euo pipefail
 umask 077
 MODE="$1"
 test "$MODE" = protocol || test "$MODE" = sshfs
-WORK=$(mktemp -d)
+# OpenSSH StrictModes rejects authorized_keys below world-writable /tmp.
+# Keep the disposable key hierarchy under the actual user's trusted home.
+WORK=$(mktemp -d "$HOME/.mb-ssh-ci.XXXXXX")
 NAME=$(id -un)
 PORT=22223
 PID=""
