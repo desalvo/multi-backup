@@ -142,6 +142,15 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
 mod tests {
     use super::*;
     #[test]
+    fn cluster_worker_denies_expired_lease_before_scanning() {
+        let fail=backup_with_mode_guard("posix","posix",
+            Path::new("/source"),Path::new("/storage"),
+            Path::new("/identity"),"label","files","",false,
+            None,BackupKind::Full,None,&|_|Err("expired_lease".into()));
+        assert!(fail.is_err());
+        assert!(fail.unwrap_err().to_string().contains("expired_lease"));
+    }
+    #[test]
     fn unimplemented_providers_refuse_execution() {
         assert!(supported_pair(Mode::Backup, "github", "posix").is_err());
         assert!(supported_pair(Mode::Backup, "nfs", "posix").is_ok());
