@@ -7,7 +7,7 @@ umask 077
 WORK=$(mktemp -d)
 PRIMARY="mb-pg-pitr-src-$$"
 RECOVERY="mb-pg-pitr-dst-$$"
-trap 'docker rm -f "$PRIMARY" "$RECOVERY" >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
+trap 'docker rm -f "$PRIMARY" "$RECOVERY" >/dev/null 2>&1 || true; sudo rm -rf "$WORK"' EXIT
 CLI=rust/target/debug/multi-backup-native
 test -x "$CLI"
 for binary in docker pg_basebackup psql pg_isready jq age-keygen; do command -v "$binary"; done
@@ -40,6 +40,11 @@ pg() {
         -h 127.0.0.1 -p "$port" -U postgres -d postgres -c "$1"
 }
 ready 15432
+# Official Docker init provides host database access, but not host
+# replication protocol access. Add a narrowly scoped, SCRAM-protected
+# postgres replication rule for this disposable private CI network.
+docker exec -u postgres "$PRIMARY" sh -c "printf '%s\n' 'host replication postgres 172.17.0.1/32 scram-sha-256' >> /var/lib/postgresql/data/pg_hba.conf"
+test "$(pg 15432 'SELECT pg_reload_conf()')" = t
 pg 15432 "CREATE TABLE pitr_record (id integer PRIMARY KEY, payload text NOT NULL)"
 pg 15432 "INSERT INTO pitr_record SELECT i, 'initial-' || i FROM generate_series(1,10) i"
 # pg_basebackup is the engine's REAL physical-consistency producer. It

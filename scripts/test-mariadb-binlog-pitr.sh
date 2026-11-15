@@ -7,7 +7,7 @@ umask 077
 WORK=$(mktemp -d)
 SOURCE="mb-maria-pitr-src-$$"
 TARGET="mb-maria-pitr-dst-$$"
-trap 'docker rm -f "$SOURCE" "$TARGET" >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
+trap 'docker rm -f "$SOURCE" "$TARGET" >/dev/null 2>&1 || true; sudo rm -rf "$WORK"' EXIT
 CLI=rust/target/debug/multi-backup-native
 test -x "$CLI"
 for binary in docker mariadb mariadb-binlog jq age-keygen; do command -v "$binary"; done
@@ -58,7 +58,9 @@ STATUS=$(mysql 13306 'SHOW MASTER STATUS')
 START_FILE=$(printf '%s\n' "$STATUS" | awk 'NR==1 {print $1}')
 START_POS=$(printf '%s\n' "$STATUS" | awk 'NR==1 {print $2}')
 test "$START_POS" -ge 4
-test -f "$WORK/logs/$START_FILE"
+# The live server keeps binlogs owner-private. Do not relax its perms:
+# validation and encrypted capture are performed on a private root-copied
+# snapshot after the server is stopped.
 for n in $(seq 11 30); do
     mysql 13306 "INSERT INTO mb_pitr_source.records VALUES ($n, 'before-boundary-$n')"
 done
@@ -71,8 +73,11 @@ mysql 13306 "INSERT INTO mb_pitr_source.records VALUES (999, 'AFTER-PITR-BOUNDAR
 test "$(mysql 13306 'SELECT COUNT(*) FROM mb_pitr_source.records')" = 31
 mysql 13306 'FLUSH BINARY LOGS'
 docker stop "$SOURCE" >/dev/null
-test -s "$WORK/logs/$START_FILE"
-"$CLI" archive create --source "$WORK/logs" \
+sudo cp -a "$WORK/logs" "$WORK/logs-private-snapshot"
+sudo chown -R "$(id -u):$(id -g)" "$WORK/logs-private-snapshot"
+test -s "$WORK/logs-private-snapshot/$START_FILE"
+printf 'MariaDB encrypted binlog PITR range: %s [%s, %s)\n' "$START_FILE" "$START_POS" "$STOP_POS"
+"$CLI" archive create --source "$WORK/logs-private-snapshot" \
     --output "$WORK/sealed/mariabinlog.tar.gz.age" --recipient "$RECIPIENT" \
     --prefix mariabinlog
 "$CLI" archive verify --archive "$WORK/sealed/mariabinlog.tar.gz.age" \
