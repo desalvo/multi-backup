@@ -23,3 +23,9 @@ Run the test in `.github/workflows/ci.yml`, job `kubernetes-real-cluster`; manua
 For an independently managed multi-host runner, keep the same namespace, database TLS, pod spread, authenticated API and failover assertions; replace the disposable `kind` bootstrap with access to the externally managed cluster and explicitly test its RWX implementation. Never deploy these synthetic credentials to a real environment.
 
 This deliverable adds a real Kubernetes CI gate, **not** the general-purpose Kubernetes source backup plugin, a fully HA file store or RC certification.
+
+## r040 live Kubernetes discovery: synchronous PostgreSQL nested Tokio startup panic (15 November 2026)
+
+- CI run 43752224997 passed all 32 other jobs including production security and Rust server/container builds. The actual Kubernetes 3-node kind boot and OCI image loading also passed, then both Rust server Pods CrashLoopBackOff because `Database::configured()` was called directly in `#[tokio::main] async fn main()`. The synchronous `postgres 0.19.14` driver attempted to initialize its own Tokio runtime and panicked: `Cannot start a runtime from within a runtime`. Hence the RC Kubernetes acceptance was **FAIL**, not passed.
+- Correct both cluster bootstrap schema/TLS connection and initial PostgreSQL replica heartbeat by moving synchronous calls into `tokio::task::spawn_blocking`, using `.await??` to propagate startup errors, without loosening TLS validation or the fail-closed boundary. The recurrent heartbeat already ran in `spawn_blocking`.
+- The next CI must demonstrate real 2-Pod readiness, TLS-verified PG registration, private gateway and Kubernetes pod recovery. Other synchronous PG access paths in authenticated axum handlers warrant separate load/auth testing before final RC. Keep all PRs draft and stable publication disabled until qualified.

@@ -529,7 +529,11 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
-    let cluster=cluster::Database::configured()?;
+    // The postgres 0.19 synchronous client internally blocks on a Tokio
+    // runtime. Running it on the async server thread would attempt to
+    // nest a runtime and panic in every clustered Kubernetes Pod.
+    // All synchronous cluster bootstrap I/O must use blocking workers.
+    let cluster=tokio::task::spawn_blocking(cluster::Database::configured).await??;
     let agent_proxy_key=std::env::var_os("MULTI_BACKUP_AGENT_PROXY_SECRET_FILE")
         .map(|location|->Result<Zeroizing<String>,Box<dyn std::error::Error+Send+Sync>>{
             let path=PathBuf::from(location);
@@ -562,7 +566,13 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         let accessible=std::env::var("MULTI_BACKUP_CLUSTER_STORAGE_IDS")
             .unwrap_or_default().split(',').filter(|s|!s.is_empty())
             .map(str::to_owned).collect::<Vec<_>>();
-        db.heartbeat_replica(&replica,budget,&accessible)?;
+        // Initial replica registration is synchronous PostgreSQL I/O too.
+        // Fail startup if registration fails; never silently run unregistered.
+        let initial_db=db.clone();
+        let initial_id=replica.clone();
+        let initial_stores=accessible.clone();
+        tokio::task::spawn_blocking(move||
+            initial_db.heartbeat_replica(&initial_id,budget,&initial_stores)).await??;
         if std::env::var("MULTI_BACKUP_CLUSTER_EXECUTOR").ok().as_deref()==Some("enabled"){
             // Explicit opt-in only: shared filesystem jobs can be processed by
             // any replica. Local filesystems stay pinned to their owner.
