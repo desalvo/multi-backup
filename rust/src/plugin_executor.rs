@@ -52,6 +52,19 @@ pub fn backup_with_mode(input: &str, output: &str, source: &Path, root: &Path,
               top_namespace: &str, snapshot_attested: bool,
               gpfs_access: Option<GpfsAccess>,kind:BackupKind,
               parent_id:Option<&str>) -> Result<LogicalBackup> {
+    backup_with_mode_guard(input,output,source,root,identity,label,
+        namespace,top_namespace,snapshot_attested,gpfs_access,
+        kind,parent_id,&||Ok(()))
+}
+/// Distributed workers supply a lease guard. All source adapters that run
+/// under the cluster must honor it; never fall back to an unguarded writer.
+pub fn backup_with_mode_guard(input: &str, output: &str, source: &Path,
+              root: &Path, identity: &Path, label: &str, namespace: &str,
+              top_namespace: &str, snapshot_attested: bool,
+              gpfs_access: Option<GpfsAccess>,kind:BackupKind,
+              parent_id:Option<&str>,live:&dyn Fn()->Result<(),String>)
+              -> Result<LogicalBackup> {
+    live()?;
     supported_pair(Mode::Backup, input, output)?;
     let source = regular_directory(source)?;
     if input == "posix" {
@@ -79,9 +92,9 @@ pub fn backup_with_mode(input: &str, output: &str, source: &Path, root: &Path,
         return Err("Backup requires a nonempty label".into());
     }
     let store = Store::open(&root, &identity)?;
-    let snapshot = store.backup_in_namespace_mode(&identity,label,top_namespace,
+    let snapshot = store.backup_in_namespace_mode_guard(&identity,label,top_namespace,
         &[Source { namespace: namespace.to_owned(), directory: source }],
-        kind,parent_id)?;
+        kind,parent_id,live)?;
     if !store.verify(&identity, &snapshot.id)?.healthy {
         return Err("Created backup did not pass encrypted integrity verification".into());
     }
