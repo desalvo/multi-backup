@@ -137,3 +137,8 @@ The example is a development skeleton. Deploy a verified ingress that strips all
 
 The Rust postgres 0.19 client does not directly parse the libpq `sslmode=verify-full` enum. Multi Backup requires exactly one `sslmode=verify-full` query parameter in a structurally parsed postgresql:// URI, rejects duplicate/downgrade and unsafe host overrides, and safely normalizes only the transport's SSL mode to `require`. The native-tls adapter enforces TLS >=1.2 and **performs real certificate-chain and hostname verification**. For a private database CA set `MULTI_BACKUP_CLUSTER_TLS_CA_FILE=/run/secrets/db-ca.pem`; the example Kubernetes deployment copies the trusted `multi-backup-db-ca/db-ca.pem` secret to a UID 10001 private 0600 file. Never accept invalid certificates or hostnames, or silently fall back to plaintext.
 
+
+## R039 — OIDC login across replicas without sticky routing
+
+When clustering is configured, pending OIDC PKCE verifier/nonce pairs live in PostgreSQL with a 10-minute expiry and SHA-256-hashed state key. Callbacks can reach a different replica: a single atomic DELETE ... RETURNING consumes the challenge exactly once while the browser's secure state cookie still defends against login CSRF. A PostgreSQL failure causes authentication failure, never a fallback to local-only state. Standalone mode retains its in-memory state. Independent real-provider cross-replica callback and failover tests are still required for full HA certification.
+

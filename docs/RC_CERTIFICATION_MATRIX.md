@@ -337,3 +337,8 @@ The example Deployment now materializes 0600 Secret copies for UID 10001 and set
 
 Exact URI parsing for sslmode=verify-full was added, matching postgres 0.19's Require wire mode to verified native-tls certificate chain and hostname checks with TLS >=1.2 and optional private CA file. A Kubernetes CA Secret now supplies the trust anchor to UID 10001 via private 0600 initContainer copy. Production Gate asserts the implementation. **Still mandatory:** real PG with valid/invalid certificates, wrong hostname, expired CA, interrupted TLS, multi-node failover; successful compilation alone is not TLS certification.
 
+
+## r039 OIDC HA improvement
+
+Added PostgreSQL-backed OIDC PKCE pending challenge store with atomic one-time cross-pod consumption, strict ten-minute expiry and fail-closed DB failure. Previously the pending challenge existed only in one pod and required sticky ingress sessions. Still release-blocking: real IdP two-pod callback/replay/issuer mismatch tests, credential-at-rest DB handling, session revocation and actual load balancer end-to-end.
+

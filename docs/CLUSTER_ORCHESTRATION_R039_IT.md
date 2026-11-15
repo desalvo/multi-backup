@@ -167,3 +167,8 @@ L'HPA scala le repliche dell'API, non abilita automaticamente lo spostamento di 
 
 **Correzione di compatibilità:** il crate postgres Rust 0.19 non implementa direttamente la stringa `sslmode=verify-full` come modalità libpq, ma supporta `require`. L'app richiede comunque la **DSN URI PostgreSQL con una e una sola query `sslmode=verify-full`**; la analizza con un parser URL strutturale, rifiuta duplicati, `disable`/`prefer`, parametri host/CA ingannevoli e quindi passa internamente `sslmode=require` al client PostgreSQL. Il connettore `native-tls` impone TLS almeno 1.2 e verifica **certificato, catena CA e nome host** senza bypass. Se il CA del PostgreSQL non è nel truststore di sistema, definire `MULTI_BACKUP_CLUSTER_TLS_CA_FILE=/run/secrets/db-ca.pem`, certificato PEM CA fidato. L'esempio Kubernetes copia anche `multi-backup-db-ca/db-ca.pem` nella directory privata 0600. Non disattivare verifiche TLS in produzione.
 
+
+## R039 — login OIDC senza sticky sessions
+
+Il login OIDC PKCE del server Rust salva i challenge pendenti sulla stessa PostgreSQL delle sessioni quando il cluster è abilitato. Il browser conserva come prima un cookie HttpOnly/Secure associato al valore state; il server salva soltanto SHA-256 dello state e i parametri PKCE/nonce, con durata massima 10 minuti. Il callback può raggiungere qualunque replica ed esegue una DELETE ... RETURNING atomica: due callback concorrenti non possono consumare lo stesso challenge. Se PostgreSQL non risponde, l'autenticazione fallisce senza fallback in memoria privata di un pod. Al di fuori della modalità cluster resta il vecchio stato in memoria. Test reali OIDC su almeno due repliche e failover restano da eseguire prima di certificare l'HA.
+

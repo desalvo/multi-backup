@@ -83,3 +83,8 @@ Use the Kubernetes example in [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHEST
 
 The postgres 0.19 Rust driver recognizes TLS require rather than libpq's verify-full option. The HA startup parser REQUIRES and structurally validates an input URI query with exactly one sslmode=verify-full; the internal wire mode is then normalized to require and native-tls enforces TLS >=1.2 with certificate chain and hostname checking explicitly enabled. A custom PEM CA may be provided only by a validated regular file through MULTI_BACKUP_CLUSTER_TLS_CA_FILE, e.g. a 0600 Kubernetes Secret copy from multi-backup-db-ca/db-ca.pem. Tests reject disguised sslmode=disable and duplicate conflicting query values. This is a connection security control, not evidence of a live trusted PostgreSQL failover qualification.
 
+
+## r039 OIDC state across replicas
+
+Pending PKCE state keys are hashed with SHA256 and stored in PostgreSQL with verifier, nonce and expiry of 10 minutes. Callback consumes the record atomically with DELETE RETURNING after verifying the initiating browser's HttpOnly/Secure cookie. No local-memory fallback when database is configured but unavailable. DB roles must protect PKCE verifier and nonce from inspection. Real callback relay/replay/PG failure tests remain outstanding.
+
