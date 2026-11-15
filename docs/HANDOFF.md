@@ -571,3 +571,18 @@ Source manuals docs/PLUGIN_EXECUTORS_R039_IT.md and EN. Release blockers include
 ## r039+ latest SSH restore handoff (2026-11-15)
 
 rust/src/afs_volume.rs: RestoreNewJob.execution is an optional Execution; if absent, local authorized token. If ssh_agentless, validate pinned SSH key/known_hosts and authorized remote token, use the same ssh_command_for builder for vos dump and vos restore, enforcing no config/proxy/forwarding/password/interactive auth. Only typed vos arguments are shell-quoted for remote OpenSSH; new-volume confirmation and full/-overwrite abort plus subsequent ordered increments are unchanged. rust/tests/afs_stream_roundtrip.rs has fake ssh+vos branch; real host/AFS cell test remains RC blocker. Manuals docs/PLUGIN_EXECUTORS_R039_{IT,EN}.md cover this. Verify exact newest PR #11 SHA CI, not an intermediate previously green run.
+
+## r039 continuation — aggregate per-host upload ceiling (2026-11-15)
+
+Rust agent now optionally accepts `max_host_transfer_bytes_per_sec`
+in private agent configuration. Every agent HTTPS upload uses a shared
+filesystem-locked, private on-host rate counter in its spool directory,
+independent of the server's per-transfer limit. Invalid/corrupt state fails
+closed; unset field preserves existing behavior. Regression tests cover
+cross-reader accumulation, unsafe symlinks and corrupted/future state.
+
+**Unresolved:** this is cooperative agent-host upload throttling, not
+network QoS, a cross-host/pod cap or remote SSH CPU/RAM enforcement.
+Physical lost-lease manifest fencing, multi-node bandwidth reservations,
+live AFS restore, actual installer and Kubernetes failover remain RC blockers.
+Confirm CI on the exact new commit SHA; keep PR #11 draft.

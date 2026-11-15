@@ -352,3 +352,13 @@ Rust native fake-vos full-chain test plus age encryption does NOT satisfy real O
 ## r039+ remote AFS new-volume recovery extension
 
 Compiled code now supports typed SSH-agentless output restore over a fixed, quote-escaped vos restore command through the pinned SSH connection, without arbitrary scripts or local plaintext dump staging. The exact same new-volume/full/incremental confirmation and no-overwrite controls apply. Fake SSH+vos tests are included in rust/tests/afs_stream_roundtrip.rs; live host-identity, lost-connection and actual AFS destination-token/privilege checks remain release-blocking.
+
+### r039 host-wide upload throttling — development-only acceptance
+
+An optional local agent configuration cap shares one locked byte counter
+across independent HTTPS upload readers/processes. Unit tests cover file
+integrity, symlink rejection and shared accounting. This is **not**
+production-certified network shaping. Remaining hard gates: actual
+multi-process throughput measurement on macOS/Windows/Linux, crash/restart
+and clock-step recovery procedures, SSH/source streaming, server node-level
+or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.

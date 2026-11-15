@@ -667,3 +667,17 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 ## r039+ remote AFS new-volume restore (2026-11-15)
 
 Native Rust RestoreNewJob now optionally accepts Execution::SshAgentless with pinned host key/identity and authorized remote AFS token, alongside local token restore. Full+incremental data streams directly from verified age chunks to SSH stdin without plaintext dump staging. The exact typed vos restore command is quote-escaped and executed with -F none, strict host-key check, no proxy/forwarding/password and an explicit new-volume confirmation. Unit/fake SSH+vos integration tests updated. Full real cell/SSH failure drills, keytab, localauth and approved-agent remote restore are NOT yet certified.
+
+## r039 — cross-process host upload throttling (2026-11-15)
+
+- Added optional agent-local `max_host_transfer_bytes_per_sec` to throttle
+  aggregate HTTPS uploads across independent Rust agent processes, enforced
+  via an owner-private locked one-second byte accounting file.
+- Host lock is fail-closed for malformed counters, symlinks, bad permissions
+  or clock rollback; legacy configuration without the optional field is
+  unchanged. Added two-reader, state-corruption and symlink regressions.
+- This is a **local agent upload quota** only. Source dumps, multiple nodes,
+  server-originated transfers, Kubernetes global throughput and OS-enforced
+  CPU/RAM/network controls are still not complete or qualified.
+- New exact-head PR #11 full CI and actual multi-process throughput tests
+  are required before accepting this behavior as production ready.

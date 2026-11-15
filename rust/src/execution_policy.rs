@@ -3,7 +3,8 @@
 //! server ceilings. CPU and RAM thresholds are cooperative admission checks,
 //! NOT substitutes for cgroups/systemd/Windows Job Objects resource fencing.
 use serde::{Deserialize,Serialize};
-use std::{io::{self,Read,Write},time::{Duration,Instant},thread};
+use std::{fs::{self,OpenOptions},io::{self,Read,Write,Seek,SeekFrom},
+    path::{Path,PathBuf},time::{Duration,Instant,SystemTime,UNIX_EPOCH},thread};
 use sysinfo::System;
 
 #[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
@@ -140,15 +141,130 @@ impl<W:Write> Write for ThrottledWriter<W>{
     }
     fn flush(&mut self)->io::Result<()>{self.inner.flush()}
 }
+/// Agent-host-wide cooperative upload limit shared by independent agent
+/// processes through an owner-private, locked accounting file. Fixed
+/// one-second UTC windows deliberately permit no more than the configured
+/// byte count per window. This is LOCAL to one host: it is not a multi-node
+/// quota or OS-level network/cgroup enforcement.
+#[derive(Debug)]
+pub struct SharedHostBudget {
+    state_file:PathBuf,
+    rate:u64,
+}
+#[derive(Debug,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostBudgetState {
+    epoch_second:u64,
+    reserved_bytes:u64,
+}
+impl SharedHostBudget {
+    pub fn new(private_directory:&Path,rate:u64)->io::Result<Self>{
+        if rate<1024{return Err(io::Error::other("Host upload cap must be >= 1024 bytes/s"));}
+        let metadata=fs::symlink_metadata(private_directory)?;
+        if !metadata.file_type().is_dir(){
+            return Err(io::Error::other("Host budget directory must be a real directory"));
+        }
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode()&0o077!=0{
+                return Err(io::Error::other("Host budget directory must be private (0700)"));
+            }
+        }
+        Ok(Self{state_file:private_directory.join(".host-upload-budget-v1.json"),rate})
+    }
+    /// Reserve before reading from disk; failed/short reads may underutilize
+    /// bandwidth but can never silently raise the aggregate transfer ceiling.
+    pub fn reserve(&self,wanted:usize)->io::Result<usize>{
+        if wanted==0{return Ok(0);}
+        loop {
+            let mut options=OpenOptions::new();
+            options.read(true).write(true).create(true);
+            #[cfg(unix)] {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file=options.open(&self.state_file)?;
+            let metadata=fs::symlink_metadata(&self.state_file)?;
+            if !metadata.file_type().is_file(){
+                return Err(io::Error::other("Host budget file must not be a symlink"));
+            }
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.permissions().mode()&0o077!=0{
+                    return Err(io::Error::other("Host budget file must be private (0600)"));
+                }
+            }
+            fs2::FileExt::lock_exclusive(&file)?;
+            // Always unlock, including on malformed/partially written state.
+            let checked=(||->io::Result<Option<usize>> {
+                file.seek(SeekFrom::Start(0))?;
+                let mut bytes=Vec::new();
+                (&mut file).take(257).read_to_end(&mut bytes)?;
+                if bytes.len()>256{
+                    return Err(io::Error::other("Host budget state is oversized"));
+                }
+                let now=SystemTime::now().duration_since(UNIX_EPOCH)
+                    .map_err(|_|io::Error::other("System clock predates Unix epoch"))?;
+                let mut state:HostBudgetState=if bytes.is_empty(){
+                    HostBudgetState{epoch_second:now.as_secs(),reserved_bytes:0}
+                }else{
+                    serde_json::from_slice(&bytes).map_err(|_|
+                        io::Error::other("Corrupted host budget state: operator repair required"))?
+                };
+                if state.epoch_second>now.as_secs() || state.reserved_bytes>self.rate{
+                    return Err(io::Error::other(
+                        "Invalid host budget counter or clock rollback: failing closed"));
+                }
+                if state.epoch_second<now.as_secs(){
+                    state.epoch_second=now.as_secs();
+                    state.reserved_bytes=0;
+                }
+                let available=self.rate-state.reserved_bytes;
+                if available==0{return Ok(None);}
+                let count=(wanted as u64).min(available).min(self.rate)
+                    .min(128*1024) as usize;
+                state.reserved_bytes+=count as u64;
+                file.set_len(0)?;
+                file.seek(SeekFrom::Start(0))?;
+                serde_json::to_writer(&mut file,&state).map_err(io::Error::other)?;
+                file.sync_data()?;
+                Ok(Some(count))
+            })();
+            let unlock=fs2::FileExt::unlock(&file);
+            unlock?;
+            match checked? {
+                Some(count)=>return Ok(count),
+                None=>{
+                    let now=SystemTime::now().duration_since(UNIX_EPOCH)
+                        .map_err(|_|io::Error::other("Invalid system clock"))?;
+                    let rest=Duration::from_secs(1)
+                        .saturating_sub(Duration::from_nanos(now.subsec_nanos() as u64));
+                    thread::sleep(rest.max(Duration::from_millis(1)));
+                }
+            }
+        }
+    }
+}
+
 pub struct ThrottledReader<R:Read>{
     inner:R,limits:ExecutionLimits,window:Instant,window_bytes:u64,
     last_host_check:Instant,
+    host_budget:Option<SharedHostBudget>,
 }
 impl<R:Read> ThrottledReader<R>{
     pub fn new(inner:R,limits:ExecutionLimits)->Result<Self,String>{
         limits.validate()?;
         Ok(Self{inner,limits,window:Instant::now(),window_bytes:0,
-            last_host_check:Instant::now()-Duration::from_secs(2)})
+            last_host_check:Instant::now()-Duration::from_secs(2),
+            host_budget:None})
+    }
+}
+impl<R:Read> ThrottledReader<R>{
+    /// Attach an explicit host-local cap; never trust a network-supplied path.
+    pub fn with_host_upload_budget(mut self,private_dir:&Path,rate:u64)
+        ->io::Result<Self>{
+        self.host_budget=Some(SharedHostBudget::new(private_dir,rate)?);
+        Ok(self)
     }
 }
 impl<R:Read> Read for ThrottledReader<R>{
@@ -168,7 +284,11 @@ impl<R:Read> Read for ThrottledReader<R>{
             }
             buf.len().min(rate.saturating_sub(self.window_bytes).max(1) as usize)
         }else{buf.len()};
-        let n=self.inner.read(&mut buf[..length])?;
+        let allowed=match &self.host_budget {
+            Some(budget)=>budget.reserve(length)?,
+            None=>length,
+        };
+        let n=self.inner.read(&mut buf[..allowed])?;
         self.window_bytes=self.window_bytes.saturating_add(n as u64);
         Ok(n)
     }
@@ -208,5 +328,46 @@ mod tests{
         let mut r=ThrottledReader::new(&buf[..],l).unwrap();
         let mut readback=Vec::new();r.read_to_end(&mut readback).unwrap();
         assert_eq!(readback,buf);
+    }
+
+    #[test]fn independent_readers_share_same_host_budget_file(){
+        let directory=tempfile::tempdir().unwrap();
+        let limits=ExecutionLimits::default();
+        let mut a=ThrottledReader::new(&b"abcde"[..],limits.clone()).unwrap()
+            .with_host_upload_budget(directory.path(),8192).unwrap();
+        let mut b=ThrottledReader::new(&b"vwxyz"[..],limits).unwrap()
+            .with_host_upload_budget(directory.path(),8192).unwrap();
+        let mut left=[0u8;5];
+        let mut right=[0u8;5];
+        assert_eq!(a.read(&mut left).unwrap(),5);
+        assert_eq!(b.read(&mut right).unwrap(),5);
+        assert_eq!(&left,b"abcde");
+        assert_eq!(&right,b"vwxyz");
+        let stored=fs::read(directory.path().join(".host-upload-budget-v1.json")).unwrap();
+        let state:HostBudgetState=serde_json::from_slice(&stored).unwrap();
+        assert_eq!(state.reserved_bytes,10);
+    }
+    #[test]fn malformed_or_future_host_budget_fails_closed(){
+        let directory=tempfile::tempdir().unwrap();
+        let budget=SharedHostBudget::new(directory.path(),2048).unwrap();
+        fs::write(&budget.state_file,b"not valid json").unwrap();
+        assert!(budget.reserve(1).is_err());
+        fs::write(&budget.state_file,
+            serde_json::to_vec(&HostBudgetState{
+                epoch_second:u64::MAX,reserved_bytes:1}).unwrap()).unwrap();
+        assert!(budget.reserve(1).is_err());
+        assert!(SharedHostBudget::new(directory.path(),100).is_err());
+    }
+    #[cfg(unix)]
+    #[test]fn reject_symlink_host_budget_state(){
+        use std::os::unix::fs::symlink;
+        let directory=tempfile::tempdir().unwrap();
+        let victim=directory.path().join("victim");
+        fs::write(&victim,b"unchanged").unwrap();
+        let link=directory.path().join(".host-upload-budget-v1.json");
+        symlink(&victim,&link).unwrap();
+        let budget=SharedHostBudget::new(directory.path(),4096).unwrap();
+        assert!(budget.reserve(1).is_err());
+        assert_eq!(fs::read(&victim).unwrap(),b"unchanged");
     }
 }

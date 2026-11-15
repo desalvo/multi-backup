@@ -95,3 +95,24 @@ Sostituire il valore illustrativo con l'hash SHA-256 reale emesso da `preview`. 
 
 Un agente limita `max_concurrent_jobs` anche fra diversi processi CLI e tra job push/pull tramite slot-lock in `encrypted-spool`: quando tutti gli slot sono occupati, il nuovo job viene rifiutato senza superare il tetto; il lock viene rilasciato alla fine o dopo terminazione del processo. Non dichiarare ancora garantita la consistenza di schedulazioni attraverso host con device identity clonata: chiavi private e token non vanno copiati fra macchine.
 
+## r039 — Limite aggregato di upload tra processi dell'agente
+
+Il campo **facoltativo** `max_host_transfer_bytes_per_sec` in
+`agent.json` limita i byte al secondo complessivamente caricati verso il
+server da tutti i processi dello **stesso agente sullo stesso host**.
+Esempio: `"max_host_transfer_bytes_per_sec": 10485760` per 10 MiB/s.
+I limiti `limits.max_transfer_bytes_per_sec` provenienti dal server rimangono
+separati e si applicano a ciascun flusso; l'agente non può allentarli.
+Il contatore in `encrypted-spool/.host-upload-budget-v1.json` è condiviso tramite
+lock del filesystem, conservato con permessi privati (0600, directory 0700)
+e aggiornato prima di leggere i byte. Conta anche prenotazioni non consumate:
+può ridurre temporaneamente il throughput, mai aumentarlo.
+Non cancellare/sostituire il file mentre ci sono processi attivi.
+Uno stato corrotto, un rollback dell'orologio o permessi insicuri bloccano
+l'upload e richiedono intervento dell'amministratore.
+
+Questa versione limita l'**upload HTTPS dell'agente**; non limita l'intera
+banda dell'host, il dump AFS locale, il server, più host distinti o più pod
+Kubernetes. Per questi serve una quota condivisa cross-node e, per una garanzia
+rigida su CPU/RAM/rete, cgroups/Job Objects o controlli di rete a livello OS.
+Non considerare questa funzionalità certificata senza test su host reali.

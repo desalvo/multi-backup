@@ -24,6 +24,9 @@ struct Config {
     signing_key:PathBuf,token_file:PathBuf,sequence_file:PathBuf,
     profiles_dir:PathBuf,spool_dir:PathBuf,
     #[serde(default)] limits:ExecutionLimits,
+    /// Local operator ceiling across *all* concurrent upload processes.
+    /// Never taken from a remote job path or user-controlled request body.
+    #[serde(default)] max_host_transfer_bytes_per_sec:Option<u64>,
 }
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -125,7 +128,8 @@ fn init(opts:&BTreeMap<String,String>)->Res<()>{
         token_file:parent.join("agent-server-token.txt"),
         sequence_file:parent.join("agent-sequence.txt"),
         profiles_dir:profiles,spool_dir:spool,
-        limits:ExecutionLimits::default()};
+        limits:ExecutionLimits::default(),
+        max_host_transfer_bytes_per_sec:None};
     atomic_private(&location,&serde_json::to_vec_pretty(&cfg).map_err(err)?)?;
     println!("{}",serde_json::to_string_pretty(&json!({
         "agent_id":agent_id,"user":user,"public_key":public,
@@ -141,6 +145,9 @@ fn load(opts:&BTreeMap<String,String>)->Res<Config>{
         return Err("Invalid agent identity or HTTPS server endpoint".into());
     }
     c.limits.validate()?;
+    if c.max_host_transfer_bytes_per_sec.is_some_and(|cap|cap<1024){
+        return Err("Aggregate host upload cap must be >= 1024 bytes/s".into());
+    }
     Ok(c)
 }
 fn profile(config:&Config,id:&str)->Res<AgentProfile>{
@@ -218,9 +225,12 @@ fn request(config:&Config,method:&str,route:&str,body:Option<&Path>,
     let mut r=agent.request(method,&endpoint);
     for (key,value) in headers {r=r.set(&key,&value);}
     let response=if let Some(path)=body{
-        r.set("Content-Type","application/octet-stream")
-            .send(ThrottledReader::new(File::open(path).map_err(err)?,
-                limits.clone())?)
+        let mut upload=ThrottledReader::new(
+            File::open(path).map_err(err)?,limits.clone())?;
+        if let Some(rate)=config.max_host_transfer_bytes_per_sec{
+            upload=upload.with_host_upload_budget(&config.spool_dir,rate).map_err(err)?;
+        }
+        r.set("Content-Type","application/octet-stream").send(upload)
     }else{r.call()}.map_err(err)?;
     response.into_json::<Value>().map_err(err)
 }
@@ -394,7 +404,8 @@ fn run()->Res<()>{
                 "agent_id":cfg.agent_id,"user":cfg.user,"server":cfg.server_url,
                 "mode":"agent-outbound-push-or-pull",
                 "token_configured":cfg.token_file.exists(),
-                "server_approval":"must be confirmed via signed poll"
+                "server_approval":"must be confirmed via signed poll",
+                "max_host_transfer_bytes_per_sec":cfg.max_host_transfer_bytes_per_sec
             })).map_err(err)?);Ok(())
         }
         "preview"=>{
@@ -453,6 +464,7 @@ mod tests {
             spool_dir:root.path().to_path_buf(),
             limits:ExecutionLimits{max_concurrent_jobs:1,
                 ..ExecutionLimits::default()},
+            max_host_transfer_bytes_per_sec:None,
         };
         let first=acquire_slot(&cfg,&cfg.limits).unwrap();
         assert!(acquire_slot(&cfg,&cfg.limits).is_err());

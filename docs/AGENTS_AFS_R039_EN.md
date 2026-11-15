@@ -92,3 +92,22 @@ The server pins this exact agent/profile/hash/provider binding; pull enqueue and
 
 The local agent enforces max_concurrent_jobs across **independent CLI processes**, not only jobs in a single poll loop, using private disk-backed worker slots locked until the job/upload finishes. It rejects a new job when no slot is free. Do not clone a device identity or token across hosts.
 
+## r039 — Aggregate upload bandwidth across agent processes
+
+The optional local `agent.json` field `max_host_transfer_bytes_per_sec`
+caps total HTTPS upload bytes/s across independent **processes of one agent on
+the same host**. Example: `"max_host_transfer_bytes_per_sec": 10485760`
+limits aggregate uploads to 10 MiB/s. Existing server-selected
+`limits.max_transfer_bytes_per_sec` continues to cap each stream and cannot
+be relaxed by the agent.
+
+All upload readers reserve bytes through the locked private
+`encrypted-spool/.host-upload-budget-v1.json` counter (0600 under a 0700
+directory) before reading data. Failed/short reads can only underutilize the
+quota. Never delete or replace that state while workers are active. Malformed
+state, clock rollback or unsafe file permissions fail closed.
+
+This applies to **agent HTTPS uploads**, not source AFS dump, arbitrary host
+network traffic, server transfers, independent hosts or Kubernetes-wide
+replicas. OS-level hard limits and a shared cross-node quota still require
+separate implementations and live acceptance.
