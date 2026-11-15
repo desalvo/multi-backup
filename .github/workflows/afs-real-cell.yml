@@ -22,6 +22,11 @@ jobs:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           set -euo pipefail
+          . /etc/os-release
+          case "$ID:$VERSION_ID:$(uname -r)" in
+            debian:12:6.1.*-amd64|ubuntu:22.04:5.15.*-generic) ;;
+            *) echo "::error::Use Debian 12 Linux 6.1 amd64 or Ubuntu 22.04 GA 5.15 only"; exit 1;;
+          esac
           test "$RUNNER_ENVIRONMENT" = self-hosted
           test "$GITHUB_SHA" = "$EXPECTED_SHA"
           test "$GITHUB_SHA" = "$(printf %s "$GITHUB_SHA" | grep -E '^[a-f0-9]{40}$')"

@@ -718,3 +718,8 @@ Native database plugin IDs are now Preview for backup input and restore output o
 - Added POSIX E2E workflow and byte-for-byte safety tests; first run found a **real** broken RS parity repair with differently sized ciphertext; fixed the ciphertext zero-padding and proven PASS at run 43678452447 (full/incremental, wrong key, symlink/FIFO, selected restore, parity repair).
 - Added real OpenSSH server CI for SSH, both SCP transports and SFTP, strict pinned host and unauthorized key refusal. SSHFS path exercises real FUSE mount RO, encryption to age store and create-only RW SSHFS recovery; cannot certify without actual FUSE CI pass. The catalog SSH direct executor remains Planned.
 - Real OpenAFS CI switched to manually approved disposable self-hosted runner and exact SHA input. Requires real Linux OpenAFS DKMS/kernel compatibility and sudo, rather than unsupported hosted kernel. **Still not field certified.** Documentation: docs/ACCEPTANCE_POSIX_SSH_AFS_R039_IT.md.
+
+
+## r039 dedicated AFS runner Debian 12 platform update (15 Nov 2026)
+- Debian 12 Bookworm x86_64 with stock Linux 6.1.x-amd64 is now the **preferred** disposable lab VM. Retained Ubuntu 22.04 GA 5.15.x-generic compatibility. The bootstrap checks exact OS/kernel, selects libicu72 on Debian vs libicu70 Ubuntu, tests matching headers, installs distro OpenAFS DKMS, and requires actual modprobe before allowing an ephemeral GitHub runner. No unsupported kernel or production data allowed.
+- Added policy-gate lint for Debian 12; see docs/AFS_RUNNER_R039_IT.md and main-only approved exact-SHA dispatcher. **Still not field certified** until true Kerberos/VLDB/volserver/new volume restoration succeeds on user's isolated VM. Other agent/HA/installers remain separate gates.

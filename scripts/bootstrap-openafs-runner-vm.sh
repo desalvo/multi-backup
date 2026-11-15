@@ -1,12 +1,28 @@
 #!/usr/bin/env bash
-# Run ONLY on a clean sacrificial Ubuntu 22.04 GA kernel VM; root required.
+# Run ONLY on a clean sacrificial Debian 12 Linux 6.1 OR Ubuntu 22.04 GA 5.15 VM; root required.
 set -euo pipefail
 umask 077
 [ "$(id -u)" -eq 0 ] || { echo 'Root required' >&2; exit 2; }
 [ "$(uname -m)" = x86_64 ] || { echo 'x86_64 required' >&2; exit 2; }
 . /etc/os-release
-[ "$ID" = ubuntu ] && [ "$VERSION_ID" = 22.04 ] || { echo 'Use Ubuntu 22.04' >&2; exit 2; }
-case "$(uname -r)" in 5.15.*-generic) ;; *) echo 'Use new Ubuntu 22.04 VM with GA kernel 5.15-generic' >&2; exit 2;; esac
+case "$ID:$VERSION_ID" in
+  debian:12)
+    case "$(uname -r)" in
+      6.1.*-amd64) ICU_PACKAGE=libicu72 ;;
+      *) echo 'Debian 12 requires its standard 6.1.x-amd64 kernel for this tested profile; no backports/HWE kernel' >&2; exit 2;;
+    esac
+    ;;
+  ubuntu:22.04)
+    case "$(uname -r)" in
+      5.15.*-generic) ICU_PACKAGE=libicu70 ;;
+      *) echo 'Ubuntu 22.04 requires its GA 5.15.x-generic kernel' >&2; exit 2;;
+    esac
+    ;;
+  *)
+    echo 'Supported isolated lab images: Debian 12 amd64 with 6.1 kernel (preferred) or Ubuntu 22.04 GA 5.15' >&2
+    exit 2
+    ;;
+esac
 if [ -e /etc/openafs/ThisCell ] || [ -e /var/lib/krb5kdc/principal ] ||
    [ -e /etc/multi-backup-ci/allow-disposable-afs ] ||
    [ -e /var/lib/multi-backup-ci/afs-run-used ]; then
@@ -18,7 +34,7 @@ read -r -p 'Type DISPOSABLE-OPENAFS-VM to confirm: ' ACK
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends ca-certificates curl git jq tar gzip \
- sudo build-essential python3-venv python3-pip libicu70 libssl3 \
+ sudo build-essential python3-venv python3-pip "$ICU_PACKAGE" libssl3 \
  dkms "linux-headers-$(uname -r)" age krb5-user krb5-config
 test -d "/lib/modules/$(uname -r)/build"
 if ! apt-get install -y --no-install-recommends openafs-modules-dkms; then

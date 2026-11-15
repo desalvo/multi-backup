@@ -20,5 +20,9 @@ jobs:
           bash -n scripts/bootstrap-openafs-runner-vm.sh
           bash -n scripts/register-openafs-runner-once.sh
           grep -q -- 'DISPOSABLE-OPENAFS-VM' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- 'debian:12' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- '6.1.*-amd64' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- 'libicu72' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- 'ubuntu:22.04' scripts/bootstrap-openafs-runner-vm.sh
           grep -q -- '--ephemeral' scripts/register-openafs-runner-once.sh
           grep -q -- 'sha256sum --check' scripts/register-openafs-runner-once.sh
