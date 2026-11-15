@@ -12,7 +12,7 @@
 | Rust HA/server | r041 Production CI job real Kubernetes multi-node kind, PG TLS | PASS due pod, SQL e TLS in cluster; fencing fisico dopo perdita lease, GC multi-writer e operatività esterna ancora aperti |
 | POSIX | 43747178037 | PASS FULL/INC, parity, restore in CI; metadata, crash-large-scale open |
 | NFS autentico | 43766606434 | PASS server NFS reale, read-only attested mount, Rust encrypted FULL+INC, verify, restore, negatives |
-| Samba/CIFS SMB3 | 43766606434 | PASS server Samba autenticato, vero kernel CIFS, Rust encrypted FULL+INC, verify, restore locale; SMB direct RW restore planned |
+| Samba/CIFS SMB3 | 43766606434 | PASS server Samba autenticato, vero kernel CIFS, Rust encrypted FULL+INC, verify, restore locale; SMB direct RW create-only recovery added; exact-head CI required for PASS |
 | GlusterFS autentico | 43766606434 | PASS server e client FUSE reali, Rust FULL+INC, restore isolato; heal/quorum/ACL e snapshot cluster da verificare |
 | OpenAFS | 43747477666 | PASS cella MIT Kerberos + vos volume roundtrip; altre modalità agenti/privilegi ancora aperte |
 | PostgreSQL/MariaDB/Galera | 43747178038 / 43747178143 / 43747178077 | PASS test isolati logici e PITR; non equivale a produzione unattended |

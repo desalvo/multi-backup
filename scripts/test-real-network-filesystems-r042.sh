@@ -173,26 +173,22 @@ if "$CLI" plugins restore --input posix --output posix --root "$STORE" \
   --identity "$KEY" --id "$INC" --destination "$WORK/restored-inc" >/dev/null 2>&1; then
   echo "FAIL: existing restore target overwritten" >&2; exit 1
 fi
-if [ "$MODE" != smb ]; then
-  if "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
-    --identity "$KEY" --id "$INC" --destination "$RO/no-write" >/dev/null 2>&1; then
-    echo "FAIL: restore to read-only mount succeeded" >&2; exit 1
-  fi
-  if ! mountpoint -q "$RW"; then mount_rw; fi
-  "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
-    --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null
-  cmp "$ROOT/add.txt" "$RW/new-recovery/files/add.txt"
-  cmp "$ROOT/payload.bin" "$RW/new-recovery/files/payload.bin"
-  if "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
-    --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null 2>&1; then
-    echo "FAIL: existing remote restore target overwritten" >&2; exit 1
-  fi
-else
-  # CIFS restore direction is NOT yet implemented; fail closed, no fake success.
-  if "$CLI" plugins restore --input posix --output smb --root "$STORE" \
-    --identity "$KEY" --id "$INC" --destination "$RO/no-write" >/dev/null 2>&1; then
-    echo "FAIL: unsupported CIFS restore direction accepted" >&2; exit 1
-  fi
+# Every supported remote restore, including authenticated SMB3, MUST
+# reject read-only inputs and create a NEW directory on an exact RW mount.
+if "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
+  --identity "$KEY" --id "$INC" --destination "$RO/no-write" >/dev/null 2>&1; then
+  echo "FAIL: $MODE restored to read-only mount" >&2; exit 1
+fi
+if ! mountpoint -q "$RW"; then mount_rw; fi
+"$CLI" plugins probe --plugin "$MODE" --mount "$RW" --json > "$WORK/rw.json"
+test "$(jq -r .rw_mount_option "$WORK/rw.json")" = true
+"$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
+  --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null
+cmp "$ROOT/add.txt" "$RW/new-recovery/files/add.txt"
+cmp "$ROOT/payload.bin" "$RW/new-recovery/files/payload.bin"
+if "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
+  --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null 2>&1; then
+  echo "FAIL: existing $MODE recovery overwritten" >&2; exit 1
 fi
 echo "PASS: genuine $MODE server+kernel/FUSE client, Rust FULL/INC age encrypted verify-chain and byte-identical recovery"
 echo "NOT CERTIFIED: snapshot orchestration, complete ACL/xattr/UID/GID/mtime, network failover or production fencing"
