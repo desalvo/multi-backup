@@ -62,7 +62,7 @@ pub fn backup_with_mode_guard(input: &str, output: &str, source: &Path,
               root: &Path, identity: &Path, label: &str, namespace: &str,
               top_namespace: &str, snapshot_attested: bool,
               gpfs_access: Option<GpfsAccess>,kind:BackupKind,
-              parent_id:Option<&str>,live:&dyn Fn(bool)->Result<(),String>)
+              parent_id:Option<&str>,live:&dyn Fn(bool)->std::result::Result<(),String>)
               -> Result<LogicalBackup> {
     live(false)?;
     supported_pair(Mode::Backup, input, output)?;
