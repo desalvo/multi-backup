@@ -231,6 +231,165 @@ pub fn stream_dump_limited<W:io::Write>(job:&VolumeJob,mut target:W,
     if bytes==0{return Err("AFS dump produced empty stream".into());}
     Ok(bytes)
 }
+/// Stream a real vos dump stdout directly into authenticated age/zstd chunks.
+/// The resulting manifest is published only after vos has exited with code 0.
+/// No unencrypted temporary copy of a volume is ever written to disk.
+pub fn backup_local_volume_to_store(
+    job:&VolumeJob,root:&Path,identity:&Path,label:&str,
+    limits:&crate::execution_policy::ExecutionLimits,
+)->Result<crate::chunk_store::LogicalBackup,String>{
+    plan(job)?;
+    limits.validate()?;
+    limits.check_host()?;
+    if !matches!(&job.execution,Execution::Local) ||
+       !matches!(&job.auth,Authentication::ExistingToken){
+        return Err("Native AFS streaming backup requires local authorized token; credential-manager and remote transport integration remain separate".into());
+    }
+    let (kind,parent)=match &job.mode{
+        DumpMode::Full=>(crate::chunk_store::BackupKind::Full,None),
+        DumpMode::Incremental{parent_backup_id,..}=>
+            (crate::chunk_store::BackupKind::Incremental,Some(parent_backup_id.as_str()))
+    };
+    let store=crate::chunk_store::Store::open(root,identity)
+        .map_err(|e|e.to_string())?;
+    let mut child=spawn_local(job)?;
+    let stdout=child.stdout.take().ok_or("Missing vos stdout")?;
+    let mut input=crate::execution_policy::ThrottledReader::new(
+        stdout,limits.clone())?;
+    let logical_path=format!("afs/{}/{}.vos",job.cell,job.volume);
+    let outcome=store.backup_stream(identity,label,"",&logical_path,
+        &mut input,kind,parent,||{
+            let status=child.wait().map_err(|e|e.to_string())?;
+            if !status.success(){return Err("vos dump returned nonzero exit status".into());}
+            Ok(())
+        });
+    let backup=match outcome{
+        Ok(value)=>value,
+        Err(error)=>{
+            let _=child.kill();let _=child.wait();
+            return Err(error.to_string());
+        }
+    };
+    if !store.verify(identity,&backup.id).map_err(|e|e.to_string())?.healthy{
+        return Err("AFS encrypted dump failed verified 8+2 integrity check".into());
+    }
+    Ok(backup)
+}
+/// A restore target is deliberately NEW, never an existing AFS volume.
+/// AFS volume names must be <=22 bytes and cannot use readonly/backup suffix.
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreNewJob{
+    pub cell:String,
+    pub volume:String,
+    pub server:String,
+    pub partition:String,
+    pub auth:Authentication,
+}
+#[derive(Debug,Clone,Serialize)]
+pub struct RestorePlan{
+    pub executable:String,
+    pub arguments:Vec<String>,
+    pub new_volume_only:bool,
+    pub confirmation:String,
+}
+pub fn plan_restore_new(target:&RestoreNewJob)->Result<RestorePlan,String>{
+    if !valid(&target.cell,253,name)||
+       !valid(&target.server,253,host_char)||
+       !valid(&target.volume,22,name)||
+       target.volume.ends_with(".readonly")||
+       target.volume.ends_with(".backup")||
+       !target.partition.starts_with("/vicep")||
+       !valid(&target.partition[6..],3,|b|b.is_ascii_lowercase()){
+        return Err("Invalid target AFS site or new volume name".into());
+    }
+    if !matches!(&target.auth,Authentication::ExistingToken){
+        return Err("Native restore requires an independently approved existing AFS token; managed keytab/localauth execution is not yet certified".into());
+    }
+    // AFS "abort" never overwrites an existing VLDB volume. No fixed -id
+    // is supplied, so the VLDB allocates a new volume ID.
+    let args=vec!["restore".into(),"-server".into(),target.server.clone(),
+        "-partition".into(),target.partition.clone(),"-name".into(),
+        target.volume.clone(),"-cell".into(),target.cell.clone(),
+        "-overwrite".into(),"abort".into()];
+    Ok(RestorePlan{executable:"vos".into(),arguments:args,
+        new_volume_only:true,confirmation:format!("{}:{}:{}:{}",
+           target.cell,target.server,target.partition,target.volume)})
+}
+/// Restores one authenticated AFS full dump followed by its increments in
+/// order, to the NEW target created by the first command of this invocation.
+/// The first full restore uses -overwrite abort; subsequent increments use
+/// -overwrite incremental ONLY after that fresh full operation succeeded.
+/// In case of any failure the partial NEW target is left for manual review;
+/// this method never deletes or retries over an existing AFS volume.
+pub fn restore_new_chain_from_store(
+    root:&Path,identity:&Path,backup_id:&str,target:&RestoreNewJob,
+    confirmation:&str,limits:&crate::execution_policy::ExecutionLimits
+)->Result<(usize,u64),String>{
+    let plan=plan_restore_new(target)?;
+    if confirmation!=plan.confirmation {
+        return Err("Confirmation must match cell:server:/vicepXX:new-volume exactly".into());
+    }
+    limits.validate()?;limits.check_host()?;
+    let store=crate::chunk_store::Store::open(root,identity)
+        .map_err(|e|e.to_string())?;
+    let verified=crate::backup_chain::verify_chain(&store,identity,backup_id,true)
+        .map_err(|e|e.to_string())?;
+    if !verified.healthy{return Err("AFS full/incremental chain is not fully verified".into());}
+    let chain=crate::backup_chain::ancestors(&store,identity,backup_id)
+        .map_err(|e|e.to_string())?;
+    let root_source=chain.first().and_then(|b|b.entries.first())
+        .map(|e|e.path.as_str()).ok_or("AFS chain has no source object")?;
+    if !root_source.starts_with("afs/")||!root_source.ends_with(".vos")||
+       root_source.split('/').count()!=3{
+        return Err("Backup is not a typed per-volume AFS dump".into());
+    }
+    if chain.iter().enumerate().any(|(index,snapshot)|
+        snapshot.entries.len()!=1||
+        snapshot.entries[0].path!=root_source||
+        (index==0&&snapshot.kind!=crate::chunk_store::BackupKind::Full)||
+        (index>0&&snapshot.kind!=crate::chunk_store::BackupKind::Incremental)){
+        return Err("AFS restore chain mixes volume identities or dump types".into());
+    }
+    let mut bytes=0u64;
+    for (index,snapshot) in chain.iter().enumerate(){
+        // Native vos restore -overwrite=incremental is only reached after
+        // the fresh full was created successfully in THIS invocation.
+        let mut args=plan.arguments.clone();
+        if index>0 {
+            let last=args.last_mut().ok_or("Invalid restore arguments")?;
+            *last="incremental".into();
+        }
+        let mut child=Command::new(&plan.executable).args(&args)
+            .stdin(Stdio::piped()).stdout(Stdio::inherit())
+            .stderr(Stdio::inherit()).spawn().map_err(|e|e.to_string())?;
+        let mut input=child.stdin.take().ok_or("vos restore stdin absent")?;
+        let mut output=crate::execution_policy::ThrottledWriter::new(
+            &mut input,limits)?;
+        let writing=(||->Result<(),String>{
+            for chunk in &snapshot.entries[0].chunks{
+                limits.check_host()?;
+                let payload=store.read_chunk_ref(identity,chunk)
+                    .map_err(|e|e.to_string())?;
+                output.write_all(&payload).map_err(|e|e.to_string())?;
+                bytes=bytes.checked_add(payload.len() as u64)
+                    .ok_or("AFS restore size overflow")?;
+            }
+            output.flush().map_err(|e|e.to_string())?;
+            Ok(())
+        })();
+        drop(output);drop(input);
+        if let Err(error)=writing{
+            let _=child.kill();let _=child.wait();
+            return Err(format!("AFS restore stream failed; review partial new volume manually: {error}"));
+        }
+        let status=child.wait().map_err(|e|e.to_string())?;
+        if !status.success(){
+            return Err("AFS restore failed; inspect newly created partial volume, never automatically overwrite or remove it".into());
+        }
+    }
+    Ok((chain.len(),bytes))
+}
 #[cfg(test)]
 mod tests{
     use super::*;
