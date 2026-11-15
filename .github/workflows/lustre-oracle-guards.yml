@@ -1,0 +1,32 @@
+name: Multi Backup - Lustre and Oracle safe provider guards
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/test-lustre-oracle-guards.sh'
+      - 'scripts/test-real-lustre-roundtrip.sh'
+      - 'scripts/test-oracle-rman-lab.sh'
+      - '.github/workflows/lustre-oracle-guards.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe-lustre-oracle-guards:
+    name: Rust Lustre mount isolation and Oracle RMAN fail-closed checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate field acceptance scripts without running privileged lab tests
+        run: |
+          bash -n scripts/test-real-lustre-roundtrip.sh
+          bash -n scripts/test-oracle-rman-lab.sh
+          bash -n scripts/test-lustre-oracle-guards.sh
+      - name: Install real age and JSON helpers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq
+      - name: Compile current Rust native CLI
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Refuse fake Lustre mounts and unimplemented Oracle backup/restore
+        run: bash scripts/test-lustre-oracle-guards.sh
