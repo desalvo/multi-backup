@@ -185,6 +185,36 @@ pub async fn enqueue_cluster(State(state):State<AppState>,headers:HeaderMap,
         _=>error(StatusCode::BAD_REQUEST,"cluster_job_rejected")
     }
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoverClusterJob{
+    pub job_id:String,
+    pub previous_replica_id:String,
+    pub expected_attempts:i32,
+    pub writer_terminated:bool,
+    pub encrypted_store_reconciled:bool,
+}
+/// Never recover an in-flight distributed job merely because its lease
+/// expired. The operator needs independent proof of old writer termination
+/// and a verified storage catalog. Both are explicitly attested here, and
+/// the old replica must no longer have a live DB heartbeat.
+pub async fn recover_cluster_job(State(state):State<AppState>,headers:HeaderMap,
+                       Json(req):Json<RecoverClusterJob>)->Response{
+    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    if !state.0.security.recovery_ok(&headers){
+        return error(StatusCode::FORBIDDEN,"cluster_recovery_requires_independent_approval");
+    }
+    match tokio::task::spawn_blocking(move||
+        db.recover_quarantined(&req.job_id,&req.previous_replica_id,
+            req.expected_attempts,req.writer_terminated,
+            req.encrypted_store_reconciled)).await{
+        Ok(Ok(true))=>response(StatusCode::OK,
+            json!({"state":"queued","reconciled":true})),
+        Ok(Ok(false))=>error(StatusCode::CONFLICT,
+            "job_not_quarantined_or_original_writer_still_healthy"),
+        _=>error(StatusCode::BAD_REQUEST,"unsafe_cluster_job_recovery_rejected")
+    }
+}
 pub async fn cluster_status(State(state):State<AppState>,headers:HeaderMap)->Response{
     let db=match admin(&state,&headers,false){Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||db.status()).await{
