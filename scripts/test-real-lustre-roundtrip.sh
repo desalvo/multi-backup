@@ -60,9 +60,15 @@ for pair in "$LUSTRE_FULL_MOUNT|$FULL_DEST" "$LUSTRE_INCREMENTAL_MOUNT|$INCREMEN
   SRC=${pair%%|*}; DST=${pair#*|}
   A="$SRC/payload/stripe.bin"; B="$DST/field/lustre/payload/stripe.bin"
   [[ "$(stat -c '%a:%u:%g:%Y' "$A")" == "$(stat -c '%a:%u:%g:%Y' "$B")" ]] || { echo "FAIL: Lustre mode/owner/mtime not preserved" >&2; exit 1; }
-  cmp <(getfacl -cp "$A") <(getfacl -cp "$B") || { echo "FAIL: Lustre POSIX ACL not preserved" >&2; exit 1; }
-  cmp <(getfattr --only-values -n user.multi_backup_ci "$A") <(getfattr --only-values -n user.multi_backup_ci "$B") || { echo "FAIL: Lustre xattr not preserved" >&2; exit 1; }
-  [[ "$(lfs getstripe -c "$A")" == "$(lfs getstripe -c "$B")" ]] || { echo "FAIL: Lustre stripe-count not preserved" >&2; exit 1; }
+  SRC_ACL=$(getfacl -cp "$A") || { echo "FAIL: cannot read source Lustre ACL" >&2; exit 1; }
+  DST_ACL=$(getfacl -cp "$B") || { echo "FAIL: cannot read recovered Lustre ACL" >&2; exit 1; }
+  [[ "$SRC_ACL" == "$DST_ACL" ]] || { echo "FAIL: Lustre POSIX ACL not preserved" >&2; exit 1; }
+  SRC_XATTR=$(getfattr --only-values -n user.multi_backup_ci "$A") || { echo "FAIL: source Lustre xattr fixture missing" >&2; exit 1; }
+  DST_XATTR=$(getfattr --only-values -n user.multi_backup_ci "$B") || { echo "FAIL: recovered Lustre xattr missing" >&2; exit 1; }
+  [[ "$SRC_XATTR" == "$DST_XATTR" ]] || { echo "FAIL: Lustre xattr not preserved" >&2; exit 1; }
+  SRC_STRIPE=$(lfs getstripe -c "$A") || { echo "FAIL: cannot inspect source Lustre stripe" >&2; exit 1; }
+  DST_STRIPE=$(lfs getstripe -c "$B") || { echo "FAIL: cannot inspect restored Lustre stripe" >&2; exit 1; }
+  [[ "$SRC_STRIPE" == "$DST_STRIPE" ]] || { echo "FAIL: Lustre stripe-count not preserved" >&2; exit 1; }
 done
 echo "PASS genuine Lustre field acceptance: full/incremental encrypted store, new-target restore, bytes, ACL/xattr/mode/mtime/owner and striping"
 echo "Lustre restore evidence retained at: $FULL_DEST and $INCREMENTAL_DEST"
