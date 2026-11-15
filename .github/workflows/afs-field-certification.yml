@@ -110,6 +110,42 @@ jobs:
           if [ "$ID:$VERSION_ID" = debian:12 ]; then
             python3 scripts/patch-openafs-ansible-debian-facts.py "$HOME/.ansible/collections/ansible_collections/openafs_contrib/openafs/plugins/modules/openafs_get_install_paths.py"
           fi
+      - name: Repair cached Debian install-path fact only against real OpenAFS cacheinfo
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          if [ "$ID:$VERSION_ID" = debian:12 ]; then
+            sudo -n python3 - <<'PY'
+          import json
+          import os
+          import tempfile
+          from pathlib import Path
+
+          path = Path('/etc/ansible/facts.d/openafs.fact')
+          real_cacheinfo = Path('/etc/openafs/cacheinfo')
+          if path.is_file() and real_cacheinfo.is_file():
+              facts = json.loads(path.read_text(encoding='utf-8'))
+              dirs = facts.setdefault('dirs', {})
+              if not dirs.get('viceetcdir'):
+                  dirs['viceetcdir'] = '/etc/openafs'
+                  fd, temp = tempfile.mkstemp(prefix='.openafs-facts.', dir=str(path.parent))
+                  try:
+                      with os.fdopen(fd, 'w', encoding='utf-8') as out:
+                          json.dump(facts, out)
+                      os.chmod(temp, 0o644)
+                      os.replace(temp, path)
+                      print('PASS: repaired real Debian OpenAFS viceetcdir fact after checkpoint 3')
+                  finally:
+                      if os.path.exists(temp):
+                          os.unlink(temp)
+              else:
+                  print('PASS: real OpenAFS viceetcdir fact already present')
+          elif path.is_file() and not real_cacheinfo.is_file():
+              print('OpenAFS client cacheinfo missing; leave installed facts unchanged')
+          else:
+              print('No installed local OpenAFS facts yet; first-run Ansible module workaround will apply')
+          PY
+          fi
       - name: Deploy genuine isolated KDC and OpenAFS local test cell
         run: |
           set -euo pipefail
