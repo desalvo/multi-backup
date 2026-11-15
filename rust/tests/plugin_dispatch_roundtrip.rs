@@ -90,7 +90,7 @@ fn posix_pair_encrypts_verifies_and_restores_without_python() {
         "--label","no snapshot attestation"],false);
     // Attestation alone cannot fake an NFS/SMB mount: read-only kernel mount
     // evidence is independently required before any source bytes are read.
-    for remote in ["nfs","smb","sshfs"] {
+    for remote in ["nfs","smb","sshfs","cephfs","glusterfs","lustre"] {
         cli(&["plugins","backup","--input",remote,"--output","posix",
             "--source",path(&source),"--root",path(&root),"--identity",path(&key),
             "--label","not a real mount","--source-snapshot-attested"],false);
