@@ -322,6 +322,33 @@ impl Database {
                 )
             WHERE status='running' AND lease_until<now()", &[])?)
     }
+    /// Manual, audited recovery only. An offline heartbeat is not proof that
+    /// an old writer stopped, therefore we require independent operator
+    /// confirmation of both process termination and encrypted-store audit.
+    /// A still-live replica is NEVER eligible for this operation.
+    pub fn recover_quarantined(&self,job:&str,replica:&str,attempts:i32,
+             writer_terminated:bool,store_reconciled:bool)
+        ->Result<bool,BoxError>{
+        if !ident(job)||!ident(replica)||attempts<1||
+           !writer_terminated||!store_reconciled{
+            return Err(error("Recovery requires writer termination and storage verification attestations"));
+        }
+        let mut conn=self.connect()?;
+        let changed=conn.execute("UPDATE mb_cluster_jobs j SET
+            status='queued',replica_id=NULL,lease_token=NULL,
+            lease_until=NULL,finished_at=NULL,
+            result=jsonb_build_object('recovery','manually_reconciled',
+                'previous_attempts',j.attempts,'previous_replica',j.replica_id)
+            WHERE j.job_id=$1 AND j.status='needs_reconciliation'
+              AND j.replica_id=$2 AND j.attempts=$3
+              AND NOT EXISTS (
+                SELECT 1 FROM mb_cluster_replicas r
+                WHERE r.replica_id=j.replica_id
+                  AND r.last_seen>now()-interval '90 seconds'
+              )",
+            &[&job,&replica,&attempts])?;
+        Ok(changed==1)
+    }
     pub fn requires_reconciliation(&self)->Result<i64,BoxError>{
         let mut db=self.connect()?;
         let row=db.query_one("SELECT COUNT(*) FROM mb_cluster_jobs
