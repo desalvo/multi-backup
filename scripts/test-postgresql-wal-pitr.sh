@@ -59,18 +59,22 @@ pg 15432 "INSERT INTO pitr_record VALUES (999, 'after-marker-must-not-recover')"
 WAL_FILE=$(pg 15432 "SELECT pg_walfile_name(pg_switch_wal())")
 test -n "$WAL_FILE"
 for _ in $(seq 1 60); do
-    if test -s "$WORK/wal/$WAL_FILE"; then break; fi
+    if sudo sudo test -s "$WORK/wal/$WAL_FILE"; then break; fi
     sleep 2
 done
 test -s "$WORK/wal/$WAL_FILE"
 test "$(pg 15432 'SELECT count(*) FROM pitr_record')" = 31
 docker stop "$PRIMARY" >/dev/null
+# Preserve strict volserver ownership during capture: work from a private
+# privileged snapshot instead of relaxing the primary WAL archive permissions.
+sudo cp -a "$WORK/wal" "$WORK/wal-private-snapshot"
+sudo chown -R "$(id -u):$(id -g)" "$WORK/wal-private-snapshot"
 
 # Encrypt real pg_basebackup data and archived WAL using native Multi Backup.
 # Restoring requires both independently verified ciphertext archives.
 "$CLI" archive create --source "$WORK/base" --output "$WORK/sealed/pgbase.tar.gz.age" \
     --recipient "$RECIPIENT" --prefix pgbase
-"$CLI" archive create --source "$WORK/wal" --output "$WORK/sealed/pgwal.tar.gz.age" \
+"$CLI" archive create --source "$WORK/wal-private-snapshot" --output "$WORK/sealed/pgwal.tar.gz.age" \
     --recipient "$RECIPIENT" --prefix pgwal
 "$CLI" archive verify --archive "$WORK/sealed/pgbase.tar.gz.age" --identity "$WORK/key"
 "$CLI" archive verify --archive "$WORK/sealed/pgwal.tar.gz.age" --identity "$WORK/key"
