@@ -98,5 +98,19 @@ check_pods
 mapfile -t NEW_PODS < <(kubectl -n "$NS" get pods -l app=mb-ci-server -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 [[ ! " ${NEW_PODS[*]} " =~ " $OLD " ]] || { echo "Terminated pod still selected" >&2; exit 1; }
 for pod in "${NEW_PODS[@]}"; do check_db_replica "$pod"; done
+# kubectl port-forward to a Service binds a *single chosen backing pod*.
+# It may die when that pod is replaced: establish a NEW connection to prove
+# the new Service endpoints are routable, rather than reusing a stale tunnel.
+kill "$PF_PID" >/dev/null 2>&1 || true
+wait "$PF_PID" 2>/dev/null || true
+PF_PID=""
+kubectl -n "$NS" port-forward service/mb-ci-server 18080:8080 > "$TMP/port-forward-after.log" 2>&1 &
+PF_PID="$!"
+ready=0
+for i in {1..45}; do
+  if curl -fsS --max-time 2 http://127.0.0.1:18080/healthz >/dev/null 2>&1; then ready=1; break; fi
+  sleep 2
+done
+[[ "$ready" == 1 ]] || { cat "$TMP/port-forward-after.log" >&2; exit 1; }
 test "$(http_code http://127.0.0.1:18080/healthz)" = 200
 echo "Multi-node pod replacement, service recovery, PostgreSQL registration: PASS"

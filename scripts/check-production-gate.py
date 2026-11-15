@@ -162,15 +162,29 @@ def validate():
     assert "for manual in docs/manuals/*.pdf" in doc_steps, 'PDF r038 content smoke missing'
     assert jobs['native-release']['needs']==[
         'production-gate','macos-smoke','publications-smoke',
-        'rust-server-validation','rust-desktop-smoke',
+        'rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
         'rust-linux-rpm-native-preview','rust-linux-debian-native-preview'
     ], 'Native release cannot bypass Rust-only cross-platform acceptance'
     assert jobs['publish-container']['needs']==[
-        'production-gate','rust-server-validation','rust-desktop-smoke',
+        'production-gate','rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
         'rust-linux-rpm-native-preview','rust-linux-debian-native-preview','publications-smoke'
     ], 'Docker Hub publication cannot bypass Rust-only cross-platform acceptance'
+    assert jobs['kubernetes-real-cluster']['needs']==[
+        'production-gate','rust-server-validation'
+    ], 'Kubernetes must start only after Production Gate and OCI validation'
+    kind_steps=str(jobs['kubernetes-real-cluster']['steps'])
+    for token in ('kind create cluster','kind load docker-image',
+                  'test-kind-cluster.sh','kind delete cluster'):
+        assert token in kind_steps, f'Real Kubernetes acceptance missing {token}'
+    kind_manifest=(ROOT/'tests/kubernetes/ci-cluster.yaml').read_text('utf-8')
+    for token in ('replicas: 2','podAntiAffinity','sslmode','MULTI_BACKUP_CLUSTER_DATABASE_URL',
+                  'MULTI_BACKUP_CLUSTER_TLS_CA_FILE','MULTI_BACKUP_CLUSTER_EXECUTOR'):
+        if token=='sslmode':
+            assert 'sslmode=verify-full' in (ROOT/'tests/kubernetes/test-kind-cluster.sh').read_text('utf-8')
+        else:
+            assert token in kind_manifest, f'Kubernetes fixture contract missing {token}'
     assert 'ENABLE_STABLE_RUST' in jobs['native-release']['if']
     assert 'ENABLE_STABLE_RUST' in jobs['publish-container']['if']
     assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
