@@ -423,6 +423,12 @@ mod tests {
         assert!(SCHEMA.contains("node_local"));
         assert!(SCHEMA.contains("storage_ids"));
     }
+    #[test]fn expired_distributed_writers_must_be_quarantined(){
+        assert!(SCHEMA.contains("needs_reconciliation"));
+        assert!(SCHEMA.contains("lease_until"));
+        assert!(SCHEMA.contains("mb_agent_profiles"));
+        assert!(SCHEMA.contains("mb_cluster_sessions"));
+    }
     #[test]fn rejects_invalid_registry_without_database(){
         let bad=StorageLocation{storage_id:"local".into(),backend:"posix".into(),
             visibility:StorageVisibility::NodeLocal,owner_replica:None};
