@@ -707,3 +707,9 @@ Native database plugin IDs are now Preview for backup input and restore output o
 - MariaDB 11.4 binlog position PITR PASS on run 43672237760: Rust FULL and age-encrypted binlog, native replay, 30 records, ID sum 465; ID 999 excluded. PostgreSQL physical base + WAL recovery CI has initial HBA issue and corrected fixture; await exact test evidence.
 - PostgreSQL physical staging and MariaDB plaintext binlog replay staging exist **inside disposable CI lab**; full unattended production PITR and log retention still incomplete.
 - IT/EN instructions in `docs/DATABASE_PITR_R039_IT.md` and `docs/DATABASE_PITR_R039_EN.md`.
+
+## r039 Galera 4 native Rust and real 3-node CI (2026-11-15)
+- Galera 4 / MariaDB 11.4 genuine 3-node Docker test passed run 43673606744 (source 37e5de39), with real Primary/Synced membership, cross-node transactional writes, one-node failure and quorum2, IST/SST rejoin3, native age/zstd FULL at node2, cross-node binlog PITR and verified isolated restore.
+- Added optional `galera_expected_nodes` input-only Rust profile guard: requires 2..64 nodes, Primary/Synced/wsrep_ready pre- and post-dump, and fails closed with no new manifest when 2/3 nodes are present against a 3-member policy. Restoring directly into a Galera cluster is intentionally denied.
+- Verified binlog PITR: write 20 events on nodes1/3, capture node2 replicated ROW binlog with wsrep_gtid_mode/log_slave_updates; recovery exactly 60 rows, SUM(ids)=1830, excludes ID999, and cannot overwrite an existing database. Uses manually orchestrated replay, not a full native continuous PITR plugin.
+- New docs: `docs/DATABASE_GALERA_R039_IT.md` and EN. This proves same-host container integration, not production-grade network partitions, full-quorum loss, multi-source GTID, physical SST security, automated retention, crash-consistency or hard fencing.

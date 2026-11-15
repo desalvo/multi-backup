@@ -373,3 +373,7 @@ or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
 - MariaDB ROW binlog PITR on separate server: PASS run 43672237760 (30 records, sum IDs 465, excluded post-boundary ID 999). Does not establish multi-binlog retention/GTID/replay safety.
 - PostgreSQL basebackup + encrypted archived WAL + named recovery target acceptance: initially blocked by pg_hba replication rule; corrected CI pending fresh verified PASS. Production physical WAL/PITR remains blocked.
 - Both PITR scripts are manually orchestrated CI integration using native Rust encryption/restore, NOT certified full auto provider PITR or crash-consistent unattended no-plaintext operation.
+
+### r039 — Galera 4 three-member recovery acceptance
+- **PASS** GitHub Actions run 43673606744 source SHA 37e5de39: real MariaDB 11.4 / Galera 4, Primary/Synced 3 members, one-node kill/quorum2/rejoin3, 40-row age/zstd FULL, 20 replayed cross-node write-sets from node2's binlog, target at position 60/1830 (exclude ID 999). Refuse a 3-node-required backup at 2 members and refuse overwrite during restore.
+- **Coverage only** controlled CI isolated containers + typed Rust CLI. Not production-certified: physical multi-host partitions/SST auth, multi-binlog/GTID failover, continuous zero-plaintext binlog archiving, scheduler/agent PITR automation, ACL and concurrency parity.
