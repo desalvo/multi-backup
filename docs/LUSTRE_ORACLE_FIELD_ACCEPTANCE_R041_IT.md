@@ -55,3 +55,11 @@ Il workflow `lustre-oracle-field.yml` è solo `workflow_dispatch`, mai `pull_req
 - Restano necessari collaudi AFS, agenti, scritture distribuite e fencing, firma/upgrade/rollback e audit di sicurezza. Nessun tag stable.
 
 Per dettagli e corrispondente documento inglese: [LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md](LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md).
+
+## Esiti effettivi dei laboratori reali (15 novembre 2026)
+
+- **Commit verificato**: `eb3dbf2f964686452fbacc865fd1e9e3be1fcd92` per entrambi i laboratori.
+- **Lustre PASS**: [CI 43761650658](https://github.com/desalvo/multi-backup/actions/runs/43761650658) (e precedente [43760867316](https://github.com/desalvo/multi-backup/actions/runs/43760867316)). Rocky Linux 9/QEMU con kernel Lustre autentico, un MDT, tre OST, client reale, striping su due OST, verifica checksum e secondo mount RO. È un collaudo **infrastrutturale**, NON un restore cifrato Rust di snapshot MDT/OST consistenti con metadati completi.
+- **Oracle Database Free PASS**: [CI 43761650595](https://github.com/desalvo/multi-backup/actions/runs/43761650595). Backup RMAN autentico di `FREEPDB1` in ARCHIVELOG su database disposable, acquisizione dei backup piece via plugin generico POSIX Rust, cifratura age/zstd, verifica e restore byte-per-byte, poi `RESTORE PLUGGABLE DATABASE FREEPDB1 VALIDATE` sui file recuperati. Non è un restore fisico del DB e non implementa un adapter Oracle nativo.
+- **Guard di sicurezza PASS**: [CI 43761650585](https://github.com/desalvo/multi-backup/actions/runs/43761650585). La [full CI 43761650615](https://github.com/desalvo/multi-backup/actions/runs/43761650615) va controllata indipendentemente a conclusione.
+- **Restano bloccanti per la RC**: snapshot Lustre coerenti MDT+OST, restore Rust full/incremental con conservazione di ACL/xattr/UID/GID/mtime/stripe; adapter RMAN Oracle e restore reale su un nuovo database con archivelog/PITR; ulteriori collaudi di sicurezza/HA e installazione. PR Draft; nessun tag stable.
