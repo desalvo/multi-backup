@@ -525,13 +525,13 @@ mod tests {
         assert!(!plan(Mode::Backup, "posix", vault.id).unwrap().executable);
     }
     #[test]
-    fn glusterfs_remains_planned_in_both_directions() {
+    fn glusterfs_mounted_source_preview_is_not_a_certified_target() {
         let d=find("glusterfs").unwrap();
         assert_eq!(d.kind, DataKind::Files);
-        assert_eq!(d.backup_input, Stage::Planned);
+        assert_eq!(d.backup_input, Stage::Preview);
         assert_eq!(d.backup_output, Stage::Planned);
         assert_eq!(d.restore_input, Stage::Planned);
-        assert_eq!(d.restore_output, Stage::Planned);
+        assert_eq!(d.restore_output, Stage::Preview);
         assert!(d.lvm_modes.is_empty());
         assert!(!plan(Mode::Backup, "glusterfs", "anti-ransomware-vault").unwrap().executable);
         assert!(!plan(Mode::Restore, "anti-ransomware-vault", "glusterfs").unwrap().executable);
@@ -579,10 +579,10 @@ mod tests {
             let d = find(id).unwrap();
             // GPFS CES has a strictly read-only mounted-source preview;
             // output and all other providers remain declarative only.
-            assert_eq!(d.backup_input, if id=="gpfs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert_eq!(d.backup_output, Stage::Planned, "{id}");
             assert_eq!(d.restore_input, Stage::Planned, "{id}");
-            assert_eq!(d.restore_output, if id=="gpfs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }

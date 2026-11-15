@@ -13,7 +13,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs|nfs|smb|cephfs|glusterfs|lustre --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
-       multi-backup-native plugins restore --input posix --output posix --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
+       multi-backup-native plugins restore --input posix --output posix|nfs|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
        multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
        multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\

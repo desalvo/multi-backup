@@ -30,7 +30,8 @@ fn supported_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
         Mode::Backup => output == "posix" && matches!(input,
             "posix" | "nfs" | "smb" | "sshfs" | "gpfs" |
             "cephfs" | "glusterfs" | "lustre"),
-        Mode::Restore => input == "posix" && output == "posix",
+        Mode::Restore => input == "posix" && matches!(output,
+            "posix"|"nfs"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
     };
     if !supported {
         return Err(format!("No native generic executor for {input} -> {output}; operation denied").into());
@@ -115,6 +116,14 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
     let parent = destination.parent().filter(|p| !p.as_os_str().is_empty())
         .ok_or("Restore must specify an explicit destination parent")?;
     let parent = regular_directory(parent)?;
+    // Remote targets must be NEW immediate children of an exact RW mount.
+    // An ancestor mount or a matching prefix is not sufficient.
+    if output != "posix" {
+        let evidence=mount_probe::probe(output,&parent,None)?;
+        if !evidence.rw_mount_option {
+            return Err("Remote restore target must be an exact read-write mount".into());
+        }
+    }
     let name = destination.file_name().ok_or("Invalid restore directory name")?;
     if name == "." || name == ".." {
         return Err("Invalid restore directory name".into());
@@ -163,6 +172,11 @@ mod tests {
         }
         assert!(supported_pair(Mode::Backup, "posix", "anti-ransomware-vault").is_err());
         assert!(supported_pair(Mode::Restore, "posix", "github").is_err());
+        for plugin in ["nfs","sshfs","cephfs","glusterfs","lustre"] {
+            assert!(supported_pair(Mode::Restore,"posix",plugin).is_ok());
+        }
+        assert!(supported_pair(Mode::Restore,"posix","smb").is_err());
+        assert!(supported_pair(Mode::Restore,"posix","gpfs").is_err());
         assert!(supported_pair(Mode::Backup, "posix", "posix").is_ok());
     }
 }
