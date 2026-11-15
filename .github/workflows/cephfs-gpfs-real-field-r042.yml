@@ -1,11 +1,10 @@
-name: Multi Backup - protected real CephFS and IBM GPFS CES certification
-# NEVER run on pull_request: reviewed code on approved self-hosted runner only.
-# Manual workflow dispatch only after this file is reviewed and merged into main.
+name: Multi Backup - controlled IBM GPFS CES and CephFS real field certification
+# Runs ONLY after manual approval and merge to main, never on PR events.
 on:
   workflow_dispatch:
     inputs:
       reviewed_sha:
-        description: Exact reviewed 40-hex SHA in desalvo/multi-backup
+        description: Full 40-hex SHA of current reviewed main HEAD
         required: true
         type: string
       confirm:
@@ -16,65 +15,80 @@ permissions:
   contents: read
 jobs:
   preflight:
-    name: Reject unreviewed SHA and accidental lab dispatch
     runs-on: ubuntu-24.04
     steps:
-      - name: Explicit approval and source hash
+      - name: Require default branch, exact current SHA and explicit approval
         shell: bash
         env:
-          SHA: ${{ inputs.reviewed_sha }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           CONFIRM: ${{ inputs.confirm }}
         run: |
           set -euo pipefail
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$REF" = refs/heads/main
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$REVIEWED_SHA" = "$SHA"
           test "$CONFIRM" = APPROVED-DISPOSABLE-FILESYSTEM-LAB
-          echo "Reviewed source: $SHA"
-  certified-field-lab:
-    name: Genuine ${{ matrix.protocol }} independent field acceptance
-    needs: [preflight]
-    runs-on: ${{ matrix.runner }}
-    environment: ${{ matrix.environment }}
-    timeout-minutes: 75
+  gpfs-ces-field:
+    name: Authentic Storage Scale ${{ matrix.protocol }} encrypted Rust recovery
+    needs: preflight
+    runs-on: [self-hosted, gpfs-ci]
+    environment: gpfs-field-lab
+    timeout-minutes: 70
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - protocol: cephfs
-            runner: cephfs-ci
-            environment: cephfs-field-lab
-          - protocol: gpfs-ces-nfs
-            runner: gpfs-ci
-            environment: gpfs-field-lab
-          - protocol: gpfs-ces-smb
-            runner: gpfs-ci
-            environment: gpfs-field-lab
+        protocol: [gpfs-ces-nfs, gpfs-ces-smb]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.reviewed_sha }}
           persist-credentials: false
-      - name: Validate reviewed code is exactly checked out and script syntax
-        shell: bash
+      - name: Exact source and safe script
         env:
           SHA: ${{ inputs.reviewed_sha }}
         run: |
-          set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SHA"
           bash -n scripts/test-real-cephfs-gpfs-ces-field-r042.sh
-      - name: Compile the reviewed Rust backup executor
+      - name: Compile reviewed Rust binary
         run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
-      - name: Validate actual pre-provisioned fileset/snapshot and encrypted recovery
-        shell: bash
+      - name: Real IBM CES snapshot, authenticated encryption and recovered files
         env:
           MB_FIELD_APPROVAL: ${{ inputs.confirm }}
-          MB_FIELD_RO_MOUNT: ${{ vars.MB_FIELD_RO_MOUNT }}
-          MB_FIELD_RW_MOUNT: ${{ vars.MB_FIELD_RW_MOUNT }}
-          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_FIELD_SNAPSHOT_ID }}
-          MB_FIELD_SNAPSHOT_ATTESTATION: ${{ vars.MB_FIELD_SNAPSHOT_ATTESTATION }}
-          MB_GPFS_CES_BACKEND_ATTESTED: ${{ vars.MB_GPFS_CES_BACKEND_ATTESTED }}
+          MB_FIELD_RO_MOUNT: ${{ matrix.protocol == 'gpfs-ces-nfs' && vars.MB_GPFS_NFS_RO_MOUNT || vars.MB_GPFS_SMB_RO_MOUNT }}
+          MB_FIELD_RW_MOUNT: ${{ vars.MB_GPFS_SCRATCH_RW_MOUNT }}
+          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_GPFS_SNAPSHOT_ID }}
+          MB_FIELD_SNAPSHOT_ATTESTATION: COHERENT_READONLY_SNAPSHOT_R042
+          MB_GPFS_CES_BACKEND_ATTESTED: IBM_STORAGE_SCALE_CES_LAB
         run: bash scripts/test-real-cephfs-gpfs-ces-field-r042.sh "${{ matrix.protocol }}"
-      - name: Declare qualified scope; never auto-promote provider
+      - name: Scope-limited lab evidence
         if: success()
         run: |
-          echo "PASS: ${{ matrix.protocol }} dedicated field backup, encrypted verify and recovery." >> "$GITHUB_STEP_SUMMARY"
-          echo "NOT CERTIFIED: application consistency, GPFS native metadata/ILM, remote writer, failover, production restore; verify field report." >> "$GITHUB_STEP_SUMMARY"
+          echo 'PASS real IBM GPFS CES export, Rust age backup and byte-identical local restore' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Not certified: native GPFS client, GPFS direct writer, ACL/ILM metadata or HA failover' >> "$GITHUB_STEP_SUMMARY"
+  cephfs-field:
+    name: Real CephFS snapshot Rust backup and isolated recovery
+    needs: preflight
+    runs-on: [self-hosted, cephfs-ci]
+    environment: cephfs-field-lab
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_sha }}
+          persist-credentials: false
+      - name: Exact source and compile Rust
+        env:
+          SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SHA"
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Real CephFS client encrypted backup and recovery
+        env:
+          MB_FIELD_APPROVAL: ${{ inputs.confirm }}
+          MB_FIELD_RO_MOUNT: ${{ vars.MB_CEPHFS_RO_MOUNT }}
+          MB_FIELD_RW_MOUNT: ${{ vars.MB_CEPHFS_RW_MOUNT }}
+          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_CEPHFS_SNAPSHOT_ID }}
+          MB_FIELD_SNAPSHOT_ATTESTATION: COHERENT_READONLY_SNAPSHOT_R042
+        run: bash scripts/test-real-cephfs-gpfs-ces-field-r042.sh cephfs
