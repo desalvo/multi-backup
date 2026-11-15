@@ -6,6 +6,10 @@ umask 077
 MODE="$1"
 case "$MODE" in cephfs|gpfs-ces-nfs|gpfs-ces-smb) ;; *) echo 'Usage: cephfs|gpfs-ces-nfs|gpfs-ces-smb' >&2; exit 2;; esac
 test "$RUNNER_ENVIRONMENT" = self-hosted
+# A self-hosted runner must belong to the separate PRIVATE CI coordinator.
+test -n "${MB_PRIVATE_LAB_REPOSITORY:-}"
+test "${GITHUB_REPOSITORY:-}" = "$MB_PRIVATE_LAB_REPOSITORY"
+test "$MB_PRIVATE_LAB_REPOSITORY" != desalvo/multi-backup
 test "$MB_FIELD_APPROVAL" = APPROVED-DISPOSABLE-FILESYSTEM-LAB
 MARKER=/etc/multi-backup-ci/allow-disposable-filesystem-field
 test -f "$MARKER" && test ! -L "$MARKER"
