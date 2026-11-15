@@ -203,7 +203,7 @@ pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
     if matches!(&job.auth,Authentication::Keytab{..}){
         return Err("Remote keytab execution requires a separately approved remote credential profile".into());
     }
-    let cmd=ssh_command_for(&job.execution,&ssh_remote_command(&plan))?;
+    let mut cmd=ssh_command_for(&job.execution,&ssh_remote_command(&plan))?;
     // stderr must never be piped without a draining worker: remote vos can
     // emit enough diagnostics to deadlock the stdout backup stream.
     cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
