@@ -332,12 +332,25 @@ impl Database {
         }
         let mut db=self.connect()?;
         let token=Uuid::new_v4().to_string();
-        // Native UPDATE + locking CTE makes each claim atomic across replicas.
+        // Serialize admission on the target replica *before* taking the
+        // capacity-count snapshot. PostgreSQL READ COMMITTED fixes the
+        // snapshot per statement: a single CTE that waits on FOR UPDATE can
+        // still count a stale set of running jobs and overbook the node.
+        // This transaction keeps the row lock through the subsequent claim,
+        // while the second statement observes newly committed active leases.
+        let mut tx=db.transaction()?;
+        let locked=tx.query_opt(
+            "SELECT replica_id FROM mb_cluster_replicas
+             WHERE replica_id=$1 AND last_seen>now()-interval '90 seconds'
+             FOR UPDATE",&[&replica_id])?;
+        if locked.is_none(){return Ok(None);}
+        // Native UPDATE + candidate SKIP LOCKED makes cross-replica job
+        // ownership unique. Capacity admission is serialized separately.
         // A shared store is eligible only when explicitly registered as shared
         // AND this live replica advertises the storage ID as accessible.
         // Locals may ONLY run on their exact owner replica.
         // Idle capacity is accounted for in the same DB transaction.
-        let row=db.query_opt(r#"
+        let row=tx.query_opt(r#"
             WITH node AS MATERIALIZED (
               -- Serialize capacity admission for the SAME replica. SKIP LOCKED
               -- alone does not prevent multiple concurrent claims exceeding
@@ -345,7 +358,6 @@ impl Database {
               SELECT replica_id,max_jobs,storage_ids,last_seen
               FROM mb_cluster_replicas
               WHERE replica_id=$1 AND last_seen>now()-interval '90 seconds'
-              FOR UPDATE
             ),
             candidate AS (
               SELECT j.job_id FROM mb_cluster_jobs j
@@ -372,6 +384,7 @@ impl Database {
                 j.source_transport,j.job_spec,j.execution_limits,
                 j.lease_token,j.attempts
         "#,&[&replica_id,&token,&lease_secs])?;
+        tx.commit()?;
         row.map(|r|{
             Ok(Lease{job_id:r.get(0),plugin_id:r.get(1),
                 storage_id:r.get(2),source_transport:r.get(3),
