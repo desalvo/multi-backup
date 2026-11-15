@@ -48,6 +48,8 @@ spec:
               cp /in-admin/admin-hash /out/admin-hash
               cp /in-agent/agent-proxy /out/agent-proxy
               cp /in-age/age-identity /out/age-identity
+              cp /in-gateway/private-gate /out/private-gate
+              cp /in-recovery/recovery /out/recovery
               chown 10001:10001 /out/*
               chmod 0600 /out/*
           securityContext:
@@ -61,6 +63,8 @@ spec:
             - {name: admin-secret, mountPath: /in-admin, readOnly: true}
             - {name: agent-proxy-secret, mountPath: /in-agent, readOnly: true}
             - {name: age-secret, mountPath: /in-age, readOnly: true}
+            - {name: gateway-secret, mountPath: /in-gateway, readOnly: true}
+            - {name: recovery-secret, mountPath: /in-recovery, readOnly: true}
       containers:
         - name: server
           image: REPLACE_WITH_CI_VERIFIED_R039_SERVER_IMAGE
@@ -82,6 +86,9 @@ spec:
             # acceptance is complete; opt in only in a controlled test.
             - {name: MULTI_BACKUP_CLUSTER_EXECUTOR, value: "disabled"}
             - {name: MULTI_BACKUP_ADMIN_USER, value: "admin"}
+            - {name: MULTI_BACKUP_HARDENED_MODE, value: "true"}
+            - {name: MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE, value: "/run/secrets/private-gate"}
+            - {name: MULTI_BACKUP_RECOVERY_SECRET_FILE, value: "/run/secrets/recovery"}
             - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: "/run/secrets/admin-hash"}
             - {name: MULTI_BACKUP_AGENT_PROXY_SECRET_FILE, value: "/run/secrets/agent-proxy"}
             - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: "/run/secrets/age-identity"}
@@ -119,6 +126,10 @@ spec:
           secret: {secretName: multi-backup-agent-proxy, defaultMode: 256}
         - name: age-secret
           secret: {secretName: multi-backup-age, defaultMode: 256}
+        - name: gateway-secret
+          secret: {secretName: multi-backup-private-gate, defaultMode: 256}
+        - name: recovery-secret
+          secret: {secretName: multi-backup-recovery, defaultMode: 256}
 ---
 # The PVC must bind to a provisioner that supports RWX across all replicas.
 # A local-path or RWO volume is not a valid substitute for shared storage.
