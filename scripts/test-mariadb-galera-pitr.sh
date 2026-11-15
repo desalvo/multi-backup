@@ -51,9 +51,13 @@ wsrep_sst_method=rsync
 wsrep_gtid_mode=ON
 wsrep_gtid_domain_id=7300
 EOF
+    # Non-secret Galera settings must be readable by the container mysql
+    # user; a private 0600 bind mount is silently skipped by modern
+    # MariaDB ?includedir handling. Credentials remain separate and 0600.
+    chmod 0644 "$WORK/cnf/$index.cnf"
 done
 # The official server uses mariadb.conf.d; verify applied options early.
-docker run --rm -v "$WORK/cnf/1.cnf:/etc/mysql/mariadb.conf.d/99-galera.cnf:ro"     "$IMAGE" --print-defaults > "$WORK/effective-options.txt"
+docker run --rm --user mysql -v "$WORK/cnf/1.cnf:/etc/mysql/mariadb.conf.d/99-galera.cnf:ro"     "$IMAGE" --print-defaults > "$WORK/effective-options.txt"
 if ! grep -Eq -- '--wsrep[_-]on=ON' "$WORK/effective-options.txt"; then
     echo "Galera configuration not loaded by mariadbd" >&2
     cat "$WORK/effective-options.txt" >&2
