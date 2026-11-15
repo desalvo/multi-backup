@@ -1,0 +1,80 @@
+name: Multi Backup - protected real CephFS and IBM GPFS CES certification
+# NEVER run on pull_request: reviewed code on approved self-hosted runner only.
+# Manual workflow dispatch only after this file is reviewed and merged into main.
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: Exact reviewed 40-hex SHA in desalvo/multi-backup
+        required: true
+        type: string
+      confirm:
+        description: Type APPROVED-DISPOSABLE-FILESYSTEM-LAB
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  preflight:
+    name: Reject unreviewed SHA and accidental lab dispatch
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Explicit approval and source hash
+        shell: bash
+        env:
+          SHA: ${{ inputs.reviewed_sha }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$CONFIRM" = APPROVED-DISPOSABLE-FILESYSTEM-LAB
+          echo "Reviewed source: $SHA"
+  certified-field-lab:
+    name: Genuine ${{ matrix.protocol }} independent field acceptance
+    needs: [preflight]
+    runs-on: ${{ matrix.runner }}
+    environment: ${{ matrix.environment }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - protocol: cephfs
+            runner: cephfs-ci
+            environment: cephfs-field-lab
+          - protocol: gpfs-ces-nfs
+            runner: gpfs-ci
+            environment: gpfs-field-lab
+          - protocol: gpfs-ces-smb
+            runner: gpfs-ci
+            environment: gpfs-field-lab
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_sha }}
+          persist-credentials: false
+      - name: Validate reviewed code is exactly checked out and script syntax
+        shell: bash
+        env:
+          SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SHA"
+          bash -n scripts/test-real-cephfs-gpfs-ces-field-r042.sh
+      - name: Compile the reviewed Rust backup executor
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Validate actual pre-provisioned fileset/snapshot and encrypted recovery
+        shell: bash
+        env:
+          MB_FIELD_APPROVAL: ${{ inputs.confirm }}
+          MB_FIELD_RO_MOUNT: ${{ vars.MB_FIELD_RO_MOUNT }}
+          MB_FIELD_RW_MOUNT: ${{ vars.MB_FIELD_RW_MOUNT }}
+          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_FIELD_SNAPSHOT_ID }}
+          MB_FIELD_SNAPSHOT_ATTESTATION: ${{ vars.MB_FIELD_SNAPSHOT_ATTESTATION }}
+          MB_GPFS_CES_BACKEND_ATTESTED: ${{ vars.MB_GPFS_CES_BACKEND_ATTESTED }}
+        run: bash scripts/test-real-cephfs-gpfs-ces-field-r042.sh "${{ matrix.protocol }}"
+      - name: Declare qualified scope; never auto-promote provider
+        if: success()
+        run: |
+          echo "PASS: ${{ matrix.protocol }} dedicated field backup, encrypted verify and recovery." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED: application consistency, GPFS native metadata/ILM, remote writer, failover, production restore; verify field report." >> "$GITHUB_STEP_SUMMARY"
