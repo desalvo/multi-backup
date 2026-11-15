@@ -223,6 +223,20 @@ impl Store {
                                top_namespace:&str,sources:&[Source],
                                kind:BackupKind,parent_id:Option<&str>)
         ->Res<LogicalBackup> {
+        self.backup_in_namespace_mode_guard(identity,label,top_namespace,
+            sources,kind,parent_id,&||Ok(()))
+    }
+    /// A distributed worker calls this guard before every file/chunk and
+    /// immediately before manifest publication. A lost lease cannot START
+    /// publishing another manifest; expired leases must also be quarantined
+    /// instead of automatically reassigned. This is a cooperative safety
+    /// boundary; complete write fencing still needs live failover testing.
+    pub fn backup_in_namespace_mode_guard(&self,identity:&Path,label:&str,
+                               top_namespace:&str,sources:&[Source],
+                               kind:BackupKind,parent_id:Option<&str>,
+                               live:&dyn Fn()->Result<(),String>)
+        ->Res<LogicalBackup> {
+        live()?;
         if !top_namespace.is_empty() && !crate::backup_policy::safe_namespace(top_namespace) {
             return Err("Unsafe top namespace".into());
         }
@@ -246,6 +260,7 @@ impl Store {
         let mut entries = Vec::new();
         let mut visited = HashSet::new();
         for src in sources {
+            live()?;
             if !crate::backup_policy::safe_namespace(&src.namespace) {
                 return Err("Unsafe source namespace".into());
             }
@@ -253,6 +268,7 @@ impl Store {
                 return Err("Source must be a directory, not symlink".into());
             }
             for file in WalkDir::new(&src.directory).follow_links(false).max_depth(64) {
+                live()?;
                 let file = file?;
                 if file.file_type().is_dir() { continue; }
                 if !file.file_type().is_file() { return Err("Symlink/special file rejected".into()); }
@@ -273,6 +289,7 @@ impl Store {
                 let mut chunks = Vec::new();
                 let mut bytes = 0u64;
                 loop {
+                    live()?;
                     let mut block = Vec::new();
                     (&mut input).take(self.cfg.chunk_bytes as u64).read_to_end(&mut block)?;
                     if block.is_empty() { break; }
@@ -291,7 +308,10 @@ impl Store {
                 .duration_since(std::time::UNIX_EPOCH).map_or(0,|v|v.as_secs()),
             top_namespace:top_namespace.to_owned(),
             kind,parent_id:parent_id.map(str::to_owned)};
+        // Fail closed if the lease was lost during a long-running scan.
+        live()?;
         let encrypted = age(&serde_json::to_vec(&snapshot)?, Some(&self.cfg.recipient), None)?;
+        live()?;
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
         }
