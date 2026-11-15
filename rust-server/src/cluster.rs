@@ -78,6 +78,15 @@ CREATE TABLE IF NOT EXISTS mb_agent_registry (
   last_seen TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS mb_agent_profiles (
+  agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
+  profile_id TEXT NOT NULL,
+  profile_sha256 TEXT NOT NULL CHECK (char_length(profile_sha256)=64),
+  provider TEXT NOT NULL,
+  approved BOOLEAN NOT NULL DEFAULT FALSE,
+  approved_at TIMESTAMPTZ,
+  PRIMARY KEY(agent_id,profile_id)
+);
 CREATE TABLE IF NOT EXISTS mb_agent_request_nonces (
   agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
   sequence BIGINT NOT NULL,
@@ -101,6 +110,7 @@ CREATE TABLE IF NOT EXISTS mb_agent_uploads (
   agent_id TEXT NOT NULL REFERENCES mb_agent_registry(agent_id),
   owner_user TEXT NOT NULL,
   profile_id TEXT NOT NULL,
+  profile_sha256 TEXT NOT NULL,
   cell TEXT NOT NULL,
   volume TEXT NOT NULL,
   recipient TEXT NOT NULL,
@@ -109,6 +119,8 @@ CREATE TABLE IF NOT EXISTS mb_agent_uploads (
   ciphertext_sha256 TEXT NOT NULL,
   received_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE mb_agent_uploads
+  ADD COLUMN IF NOT EXISTS profile_sha256 TEXT;
 "#;
 fn error(message:impl Display)->BoxError{message.to_string().into()}
 fn ident(value:&str)->bool{
