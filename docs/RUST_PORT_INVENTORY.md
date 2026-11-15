@@ -68,3 +68,15 @@ Retain legacy format converter optionally, but stop requiring old Python archive
 
 Implementati in anteprima: FULL/INCREMENTAL con catene e statistiche complete, verify-chain, scheduler Rust run/daemon, purge con rebase, GC confermata con repack automatico Reed-Solomon 8+2, mantenimento dei vecchi shard per grace e recupero di preparazioni senza commit. Documentazione operativa bilingue e inventario sono in docs/OPERATIONS_R038_IT.md, docs/OPERATIONS_R038_EN.md e docs/FEATURE_INVENTORY_R038.md. Il completamento Rust e la release restano non certificati fino a CI, failover, dati reali, plugin, firma e rollback; la compatibilità degli archivi Python rimane opzionale.
 
+
+## r039+ native provider executable overlay (15 November 2026)
+
+| Area | Native Rust preview | Open acceptance |
+| --- | --- | --- |
+| Generic input filesystem | posix,nfs,smb,sshfs,gpfs CES,cephfs,glusterfs,lustre to encrypted age/zstd POSIX store; 8 paths | Real remote snapshots, ACL/xattr/stripe, mount stability |
+| Generic output restore | verified POSIX chunk store to fresh posix/nfs/sshfs/cephfs/glusterfs/lustre directory; 6 paths, exact RW mount | Cross-platform semantics and true output metadata, GPFS CES target |
+| Native stream foundation | Store::backup_stream direct producer Reader to protected chunks; finalizer guards manifest | More provider-specific source adapters |
+| OpenAFS | typed vos local/pinned SSH agentless full+incremental encrypted producer and fresh target vos restore full+incremental chain | Live AFS cell/ACL/VLDB, keytab/localauth, remote restore/HA |
+| Acceptance | fake vos executable + real age end-to-end compiled Rust CLI tests in Production Gate | All real provider integration/negative/certification tests |
+
+Canonical [Italian](PLUGIN_EXECUTORS_R039_IT.md) and [English](PLUGIN_EXECUTORS_R039_EN.md) operator guides. Do not infer 32 operational plugins or generic 682 certified pairs from planner entries.
