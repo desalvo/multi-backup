@@ -717,3 +717,5 @@ The kind acceptance test now authenticates with the known public CI-only Argon2i
 - Hosted Rust negative tests must reject fake Lustre mounts, reject Oracle database engine injection, and prove manual suites fail closed without an approved environment.
 - Actual Lustre requires isolated real RO snapshots and RW test mount, checks bytes and metadata. Oracle requires separately licensed isolated database and known existing RMAN backup; current test is RMAN validate-only, **not** a Multi Backup backup/restore integration.
 - Run exact-head PR CI, correct any errors before marking tests passed, then enroll explicitly approved disposable self-hosted runners only for operator-triggered field jobs. No real-lab PASS asserted.
+
+- r041 safety guard has also been added to the unified Production Gate as a required release prerequisite, not only as a standalone CI workflow. Ensure the **new exact-head** full CI passes before treating the gate as green.
