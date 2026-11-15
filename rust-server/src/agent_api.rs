@@ -25,8 +25,8 @@ fn response(status:StatusCode,data:Value)->Response{
 fn error(status:StatusCode,message:&str)->Response{
     response(status,json!({"error":message}))
 }
-fn admin(state:&AppState,headers:&HeaderMap,write:bool)->Result<cluster::Database,Response>{
-    let auth=session(headers,&state.0)
+async fn admin(state:&AppState,headers:&HeaderMap,write:bool)->Result<cluster::Database,Response>{
+    let auth=session(headers,&state.0).await
         .ok_or_else(||error(StatusCode::UNAUTHORIZED,"authentication_required"))?.1;
     if auth.user!=state.0.name {
         return Err(error(StatusCode::FORBIDDEN,"admin_required"));
@@ -39,7 +39,7 @@ fn admin(state:&AppState,headers:&HeaderMap,write:bool)->Result<cluster::Databas
         error(StatusCode::SERVICE_UNAVAILABLE,"cluster_registry_not_enabled"))
 }
 pub async fn list_agents(State(state):State<AppState>,headers:HeaderMap)->Response{
-    let db=match admin(&state,&headers,false){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,false).await{Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||agents::list(&db)).await{
         Ok(Ok(data))=>response(StatusCode::OK,data),
         _=>error(StatusCode::SERVICE_UNAVAILABLE,"agent_registry_unavailable")
@@ -47,7 +47,7 @@ pub async fn list_agents(State(state):State<AppState>,headers:HeaderMap)->Respon
 }
 pub async fn enroll(State(state):State<AppState>,headers:HeaderMap,
                     Json(body):Json<agents::Enrollment>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     // Enrollment/approval are high-impact administration actions.
     if !state.0.security.recovery_ok(&headers){
         return error(StatusCode::FORBIDDEN,"device_enrollment_requires_recovery_approval");
@@ -59,7 +59,7 @@ pub async fn enroll(State(state):State<AppState>,headers:HeaderMap,
 }
 pub async fn approve(State(state):State<AppState>,headers:HeaderMap,
                     Json(body):Json<agents::AgentChange>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     if !state.0.security.recovery_ok(&headers){
         return error(StatusCode::FORBIDDEN,"device_approval_requires_recovery_authorization");
     }
@@ -71,7 +71,7 @@ pub async fn approve(State(state):State<AppState>,headers:HeaderMap,
 }
 pub async fn revoke(State(state):State<AppState>,headers:HeaderMap,
                    Json(body):Json<agents::AgentChange>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     if !state.0.security.recovery_ok(&headers){
         return error(StatusCode::FORBIDDEN,"device_revocation_requires_recovery_authorization");
     }
@@ -83,7 +83,7 @@ pub async fn revoke(State(state):State<AppState>,headers:HeaderMap,
 }
 pub async fn approve_profile(State(state):State<AppState>,headers:HeaderMap,
                Json(profile):Json<agents::ProfileApproval>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     // Adding or replacing a remote runnable command/profile is privileged;
     // a valid agent token alone cannot authorize a new executable.
     if !state.0.security.recovery_ok(&headers){
@@ -97,7 +97,7 @@ pub async fn approve_profile(State(state):State<AppState>,headers:HeaderMap,
 }
 pub async fn enqueue_pull(State(state):State<AppState>,headers:HeaderMap,
                     Json(body):Json<agents::PullJob>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||agents::enqueue_pull(&db,&body)).await{
         Ok(Ok(id))=>response(StatusCode::CREATED,json!({"job_id":id,"state":"queued"})),
         _=>error(StatusCode::BAD_REQUEST,"agent_job_rejected")
@@ -120,7 +120,7 @@ pub async fn policy(State(state):State<AppState>,headers:HeaderMap)->Response{
 }
 pub async fn update_agent_limits(State(state):State<AppState>,headers:HeaderMap,
                     Json(body):Json<agents::ChangeLimits>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||
         agents::update_limits(&db,&body)).await{
         Ok(Ok(true))=>response(StatusCode::OK,json!({"updated":true})),
@@ -151,7 +151,7 @@ pub struct CreateStorage{
 }
 pub async fn register_storage(State(state):State<AppState>,headers:HeaderMap,
                       Json(body):Json<CreateStorage>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     if body.storage.visibility==multi_backup_core::cluster_placement::StorageVisibility::Shared &&
        !body.confirmed_shared {
         return error(StatusCode::BAD_REQUEST,"shared_storage_requires_explicit_confirmation");
@@ -172,7 +172,7 @@ pub struct EnqueueCluster {
 }
 pub async fn enqueue_cluster(State(state):State<AppState>,headers:HeaderMap,
                       Json(req):Json<EnqueueCluster>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     if multi_backup_core::plugins::find(&req.plugin_id).is_none(){
         return error(StatusCode::BAD_REQUEST,"unregistered_input_plugin");
     }
@@ -200,7 +200,7 @@ pub struct RecoverClusterJob{
 /// the old replica must no longer have a live DB heartbeat.
 pub async fn recover_cluster_job(State(state):State<AppState>,headers:HeaderMap,
                        Json(req):Json<RecoverClusterJob>)->Response{
-    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,true).await{Ok(v)=>v,Err(r)=>return r};
     if !state.0.security.recovery_ok(&headers){
         return error(StatusCode::FORBIDDEN,"cluster_recovery_requires_independent_approval");
     }
@@ -216,7 +216,7 @@ pub async fn recover_cluster_job(State(state):State<AppState>,headers:HeaderMap,
     }
 }
 pub async fn cluster_status(State(state):State<AppState>,headers:HeaderMap)->Response{
-    let db=match admin(&state,&headers,false){Ok(v)=>v,Err(r)=>return r};
+    let db=match admin(&state,&headers,false).await{Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||db.status()).await{
         Ok(Ok(status))=>response(StatusCode::OK,status),
         _=>error(StatusCode::SERVICE_UNAVAILABLE,"shared_cluster_registry_unavailable")

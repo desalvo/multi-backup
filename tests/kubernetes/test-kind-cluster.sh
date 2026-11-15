@@ -7,8 +7,12 @@ NS=multi-backup-ci
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 PF_PID=""
+PF_ONE_PID=""
+PF_TWO_PID=""
 cleanup() {
-  if [[ -n "$PF_PID" ]]; then kill "$PF_PID" >/dev/null 2>&1 || true; wait "$PF_PID" 2>/dev/null || true; fi
+  for pid in "$PF_PID" "$PF_ONE_PID" "$PF_TWO_PID"; do
+    if [[ -n "$pid" ]]; then kill "$pid" >/dev/null 2>&1 || true; wait "$pid" 2>/dev/null || true; fi
+  done
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -28,8 +32,9 @@ openssl x509 -req -days 2 -sha256 -in "$TMP/server.csr" \
   -CA "$TMP/ca.crt" -CAkey "$TMP/ca.key" -CAcreateserial \
   -extfile "$TMP/server.ext" -out "$TMP/server.crt" >/dev/null 2>&1
 cp "$TMP/ca.crt" "$TMP/db-ca.pem"
-# This is a published, TEST-ONLY Argon2id fixture; not a real account password.
-printf '%s\n' '$argon2id$v=19$m=65536,t=3,p=4$mxzRPI71Fc4HKAuFpBfrFQ$sT2wAmv5Qrsyq8bzBSgkDeGnJCUHYHE5DIhEf/0hjgA' > "$TMP/admin-hash"
+# Public fixture and known CI-only password, both intentionally non-secret.
+# DO NOT reuse these values for real deployments.
+printf '%s\n' '$argon2id$v=19$m=65536,t=3,p=4$T3BlbkFJLU1CLUNJLXIwNDA$l6bp51sbsLonNBWiZD8ckafdxSbf/+nP19GSR0Tmzgc' > "$TMP/admin-hash"
 openssl rand -hex 32 > "$TMP/private-gate"
 openssl rand -hex 32 > "$TMP/recovery-secret"
 DB_PASSWORD="$(openssl rand -hex 24)"
@@ -89,6 +94,54 @@ test "$(http_code -H 'X-Multi-Backup-Private-Gate: invalid' http://127.0.0.1:180
 test "$(http_code -H "X-Multi-Backup-Private-Gate: $(cat "$TMP/private-gate")" http://127.0.0.1:18080/login)" = 200
 test "$(http_code -H "X-Multi-Backup-Private-Gate: $(cat "$TMP/private-gate")" http://127.0.0.1:18080/api/cluster/status)" = 401
 echo "ClusterIP Service and hardened private gateway: PASS"
+
+# Authenticate through Pod A, use the SAME PostgreSQL-backed session on Pod B,
+# then revoke on Pod B and prove rejection on Pod A. A Service port-forward
+# alone is pinned to one pod, so direct private pod forwards are intentional.
+kubectl -n "$NS" port-forward "pod/${PODS[0]}" 18181:8080 > "$TMP/pod-one.log" 2>&1 &
+PF_ONE_PID="$!"
+kubectl -n "$NS" port-forward "pod/${PODS[1]}" 18182:8080 > "$TMP/pod-two.log" 2>&1 &
+PF_TWO_PID="$!"
+for port in 18181 18182; do
+  ready=0
+  for i in {1..45}; do
+    if curl -fsS --max-time 2 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then ready=1; break; fi
+    sleep 1
+  done
+  [[ "$ready" == 1 ]] || { echo "Pod port forward failed on $port" >&2; exit 1; }
+done
+GATE="$(cat "$TMP/private-gate")"
+login_code="$(curl -sS --max-time 15 -D "$TMP/login-headers" -o /dev/null -w '%{http_code}' \
+  -H "X-Multi-Backup-Private-Gate: $GATE" \
+  -H 'Origin: https://backup.example.invalid' \
+  --data-urlencode 'username=ciadmin' \
+  --data-urlencode 'password=MB-CI-Only-Password-2026!' \
+  http://127.0.0.1:18181/login)"
+[[ "$login_code" == 303 ]] || { echo "Real Pod A login failed: HTTP $login_code" >&2; exit 1; }
+token="$(sed -nE 's/^[Ss]et-[Cc]ookie:[[:space:]]*mb_session=([[:xdigit:]]{64}).*/\1/p' "$TMP/login-headers" | tr -d '\r' | head -n1)"
+[[ "$token" =~ ^[[:xdigit:]]{64}$ ]] || { echo "Login session cookie missing" >&2; exit 1; }
+for port in 18181 18182; do
+  test "$(http_code -H "X-Multi-Backup-Private-Gate: $GATE" \
+    -H "Cookie: mb_session=$token" "http://127.0.0.1:$port/")" = 200
+  test "$(http_code -H "X-Multi-Backup-Private-Gate: $GATE" \
+    -H "Cookie: mb_session=$token" "http://127.0.0.1:$port/api/cluster/status")" = 200
+done
+csrf="$(curl -fsS -H "X-Multi-Backup-Private-Gate: $GATE" \
+  -H "Cookie: mb_session=$token" http://127.0.0.1:18182/ |
+  sed -nE 's/.*name="csrf-token" content="([[:xdigit:]]{64})".*/\1/p' | head -n1)"
+[[ "$csrf" =~ ^[[:xdigit:]]{64}$ ]] || { echo "Shared CSRF token missing" >&2; exit 1; }
+test "$(http_code -X POST -H "X-Multi-Backup-Private-Gate: $GATE" \
+  -H 'Origin: https://backup.example.invalid' \
+  -H "Cookie: mb_session=$token" -H "x-csrf-token: $csrf" \
+  http://127.0.0.1:18182/logout)" = 303
+test "$(http_code -H "X-Multi-Backup-Private-Gate: $GATE" \
+  -H "Cookie: mb_session=$token" http://127.0.0.1:18181/)" = 303
+echo "Cross-Pod A/B login, admin status, shared CSRF and logout revocation: PASS"
+kill "$PF_ONE_PID" "$PF_TWO_PID" >/dev/null 2>&1 || true
+wait "$PF_ONE_PID" 2>/dev/null || true
+wait "$PF_TWO_PID" 2>/dev/null || true
+PF_ONE_PID=""
+PF_TWO_PID=""
 # Failure is safe: executor is explicitly DISABLED, so no writer is evicted.
 OLD="${PODS[0]}"
 kubectl -n "$NS" delete pod "$OLD" --wait=false

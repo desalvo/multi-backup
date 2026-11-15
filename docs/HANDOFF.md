@@ -703,6 +703,14 @@ OpenAFS actual KDC/VLDB, token, encrypted Rust FULL+incremental and new-volume b
 - Correct both cluster bootstrap schema/TLS connection and initial PostgreSQL replica heartbeat by moving synchronous calls into `tokio::task::spawn_blocking`, using `.await??` to propagate startup errors, without loosening TLS validation or the fail-closed boundary. The recurrent heartbeat already ran in `spawn_blocking`.
 - The next CI must demonstrate real 2-Pod readiness, TLS-verified PG registration, private gateway and Kubernetes pod recovery. Other synchronous PG access paths in authenticated axum handlers warrant separate load/auth testing before final RC. Keep all PRs draft and stable publication disabled until qualified.
 
+## r040 cluster authenticated HTTP runtime safety
+
+The first genuine Kubernetes run exposed nested-Tokio runtime panics on synchronous PostgreSQL startup calls. The same synchronous client was previously called from `session()`, login/OIDC and logout request paths. All cross-replica HTTP session reads/writes and OIDC state operations now dispatch PostgreSQL I/O through `tokio::task::spawn_blocking`, propagate errors and fail closed; admin agent/cluster authorization is async and awaits shared SQL session validation before any state-changing action. These changes are NOT RC-qualified until independent live login/cross-pod/logout and race/timeout tests pass. The prior native/bare-PG tests did not exercise authenticated HTTP routes on two live pods.
+
+## Cross-Pod HTTP session and runtime integration
+
+The kind acceptance test now authenticates with the known public CI-only Argon2id hash via Pod A, passes the generated HttpOnly session cookie to a direct tunnel to Pod B, checks the admin-only cluster/status API on BOTH pods, uses the shared CSRF value to log out on Pod B and proves the old cookie is rejected on Pod A. No operational secret/password is reused; all private gateway/PG/TLS keys are freshly generated in CI. This tests the newly blocking-thread-dispatched PostgreSQL session and OIDC path infrastructure; a real external OIDC IdP end-to-end callback remains a separate RC gate. The test also maintains the separate network/kubelet failure tests and cannot stand in for physical fencing.
+
 ## r041 handoff — Lustre and Oracle field testing (15 November 2026)
 - New stacked branch: `feature/r041-lustre-oracle-field-acceptance` based on `feature/r040-real-kubernetes-ci` (draft PR #12). Do not merge the stack or release stable merely because hosted tests pass.
 - Added scripts `scripts/test-lustre-oracle-guards.sh`, `scripts/test-real-lustre-roundtrip.sh`, `scripts/test-oracle-rman-lab.sh`; workflows `.github/workflows/lustre-oracle-guards.yml`, `.github/workflows/lustre-oracle-field.yml` and operator instructions `docs/LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md`.
