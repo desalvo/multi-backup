@@ -1,0 +1,31 @@
+name: Multi Backup - real Oracle Free RMAN encrypted PDB backup-piece acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/test-oracle-free-container.sh'
+      - '.github/workflows/oracle-free-live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  oracle-free-live-rman:
+    name: Real Oracle Free container, RMAN backup -> Rust encrypted pieces -> RMAN restore VALIDATE
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actual age, jq, OpenSSL and validate acceptance script
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq openssl
+          bash -n scripts/test-oracle-free-container.sh
+      - name: Compile exact PR Rust native executable
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Oracle Database Free authentic RMAN PDB backup and encrypted roundtrip
+        run: bash scripts/test-oracle-free-container.sh
+      - name: Record precise qualification scope
+        if: success()
+        run: |
+          echo 'PASS: real Oracle Database Free PDB RMAN backup, Rust encrypted backup-piece storage/recovery, and RMAN restore VALIDATE.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED: Oracle provider-native adapter, isolated physical database restore, full CDB, archived redo/PITR, production licensing.' >> "$GITHUB_STEP_SUMMARY"
