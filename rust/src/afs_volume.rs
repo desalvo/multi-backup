@@ -176,14 +176,22 @@ pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
         return Err("Remote keytab execution requires a separately approved remote credential profile".into());
     }
     let mut cmd=Command::new("ssh");
-    cmd.args(["-T","-o","BatchMode=yes","-o","StrictHostKeyChecking=yes",
-              "-o","IdentitiesOnly=yes","-o","ForwardAgent=no",
-              "-o","PermitLocalCommand=no","-o","ConnectTimeout=20","-o"]);
+    cmd.args(["-T","-F","none",
+              "-o","BatchMode=yes","-o","StrictHostKeyChecking=yes",
+              "-o","IdentitiesOnly=yes","-o","PreferredAuthentications=publickey",
+              "-o","PasswordAuthentication=no","-o","KbdInteractiveAuthentication=no",
+              "-o","ForwardAgent=no","-o","ForwardX11=no",
+              "-o","ClearAllForwardings=yes","-o","ControlMaster=no",
+              "-o","ProxyCommand=none","-o","ProxyJump=none",
+              "-o","UpdateHostKeys=no","-o","PermitLocalCommand=no",
+              "-o","ConnectTimeout=20","-o"]);
     cmd.arg(format!("UserKnownHostsFile={}",known_hosts.display()));
     cmd.arg("-i").arg(identity);
     cmd.arg("--").arg(format!("{user}@{host}"));
     cmd.arg(ssh_remote_command(&plan));
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+    // stderr must never be piped without a draining worker: remote vos can
+    // emit enough diagnostics to deadlock the stdout backup stream.
+    cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
         .map_err(|e|e.to_string())
 }
 pub fn stream_dump_to<W:io::Write>(job:&VolumeJob,target:W)
@@ -234,16 +242,22 @@ pub fn stream_dump_limited<W:io::Write>(job:&VolumeJob,mut target:W,
 /// Stream a real vos dump stdout directly into authenticated age/zstd chunks.
 /// The resulting manifest is published only after vos has exited with code 0.
 /// No unencrypted temporary copy of a volume is ever written to disk.
-pub fn backup_local_volume_to_store(
+pub fn backup_volume_to_store(
     job:&VolumeJob,root:&Path,identity:&Path,label:&str,
     limits:&crate::execution_policy::ExecutionLimits,
 )->Result<crate::chunk_store::LogicalBackup,String>{
     plan(job)?;
     limits.validate()?;
     limits.check_host()?;
-    if !matches!(&job.execution,Execution::Local) ||
-       !matches!(&job.auth,Authentication::ExistingToken){
-        return Err("Native AFS streaming backup requires local authorized token; credential-manager and remote transport integration remain separate".into());
+    // Direct local token and pinned SSH agentless execution are supported;
+    // SSH -localauth needs an attested fileserver and explicit site. Raw
+    // server-side scripts, unapproved keytabs and managed-agent impersonation
+    // are NOT accepted here.
+    match (&job.execution,&job.auth){
+        (Execution::Local,Authentication::ExistingToken) |
+        (Execution::SshAgentless{..},Authentication::ExistingToken) |
+        (Execution::SshAgentless{afs_server:true,..},Authentication::LocalAuth)=>{},
+        _=>return Err("Unsupported AFS producer credentials or transport; use approved agent profile".into()),
     }
     let (kind,parent)=match &job.mode{
         DumpMode::Full=>(crate::chunk_store::BackupKind::Full,None),
@@ -252,7 +266,11 @@ pub fn backup_local_volume_to_store(
     };
     let store=crate::chunk_store::Store::open(root,identity)
         .map_err(|e|e.to_string())?;
-    let mut child=spawn_local(job)?;
+    let mut child=match &job.execution{
+        Execution::Local=>spawn_local(job)?,
+        Execution::SshAgentless{..}=>spawn_ssh(job)?,
+        Execution::ManagedAgent{..}=>return Err("Managed agent must run a locally approved AFS profile".into())
+    };
     let stdout=child.stdout.take().ok_or("Missing vos stdout")?;
     let mut input=crate::execution_policy::ThrottledReader::new(
         stdout,limits.clone())?;
