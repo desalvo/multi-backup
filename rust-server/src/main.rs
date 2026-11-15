@@ -600,6 +600,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/api/agents/admin/approve",post(agent_api::approve))
         .route("/api/agents/admin/revoke",post(agent_api::revoke))
         .route("/api/agents/admin/enqueue",post(agent_api::enqueue_pull))
+        .route("/api/agents/admin/profile",post(agent_api::approve_profile))
         .route("/api/agents/admin/limits",post(agent_api::update_agent_limits))
         .route("/api/agents/policy",get(agent_api::policy))
         .route("/api/agents/poll",get(agent_api::poll))
