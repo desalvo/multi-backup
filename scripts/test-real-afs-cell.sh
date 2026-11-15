@@ -7,7 +7,12 @@ CELL=example.com
 REALM=EXAMPLE.COM
 SERVER=$(hostname -I | awk '{print $1}')
 VOLUME=test
-NEW_VOLUME=mbrestore1
+# Reusable isolated VM: each GitHub job/attempt restores into a NEW AFS volume.
+RUN_SUFFIX=$(printf '%s' "$GITHUB_RUN_ID" | tail -c 10)
+ATTEMPT=${GITHUB_RUN_ATTEMPT:-1}
+case "$ATTEMPT" in *[!0-9]*|'') echo 'Invalid run attempt' >&2; exit 2;; esac
+NEW_VOLUME="mbrestore${RUN_SUFFIX}${ATTEMPT}"
+test "${#NEW_VOLUME}" -le 22
 ROOT_DIR=$(mktemp -d)
 trap 'rm -rf "$ROOT_DIR"' EXIT
 umask 077
