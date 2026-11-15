@@ -202,7 +202,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
         "Mounted filesystem plus server snapshot if available", "Support NFSv3, v4.x; do not assume root or atomic snapshots"),
     PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, NONE,
-        "SMB durable handles or snapshots if available", "Input first; ACL/ADS/Windows path semantics need explicit mapping"),
+        "SMB durable handles or snapshots if available", "Authenticated SMB3 RO input and new-directory-only RW mounted recovery preview; ACL/ADS/Windows path semantics still pending"),
     PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PREVIEW, PLAN,
         "CephFS snapshots or quiesced mount", "No cross-filesystem atomicity claim; separate CephFS and RBD plugins"),
     PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PREVIEW, PLAN,
@@ -429,7 +429,7 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             "posix" | "nfs" | "smb" | "gpfs" | "sshfs" |
             "cephfs" | "glusterfs" | "lustre"),
         Mode::Restore => source.id == "posix" && matches!(destination.id,
-            "posix" | "nfs" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
+            "posix" | "nfs" | "smb" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
     };
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
@@ -504,7 +504,7 @@ mod tests {
                       "cephfs","glusterfs","lustre"]{
             assert!(plan(Mode::Backup,input,"posix").unwrap().preview_executable);
         }
-        for output in ["posix","nfs","sshfs","cephfs","glusterfs","lustre"]{
+        for output in ["posix","nfs","smb","sshfs","cephfs","glusterfs","lustre"]{
             assert!(plan(Mode::Restore,"posix",output).unwrap().preview_executable);
         }
         assert!(!plan(Mode::Backup,"afs","posix").unwrap().preview_executable,

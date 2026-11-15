@@ -95,6 +95,14 @@ fn posix_pair_encrypts_verifies_and_restores_without_python() {
             "--source",path(&source),"--root",path(&root),"--identity",path(&key),
             "--label","not a real mount","--source-snapshot-attested"],false);
     }
+    // Local POSIX paths must never impersonate a mounted authenticated CIFS.
+    let fake_parent=tmp.path().join("not-a-cifs-client-mount");
+    fs::create_dir(&fake_parent).unwrap();
+    let fake_target=fake_parent.join("new-recovery");
+    cli(&["plugins","restore","--input","posix","--output","smb",
+        "--root",path(&root),"--identity",path(&key),"--id",id,
+        "--destination",path(&fake_target)],false);
+    assert!(!fake_target.exists());
     cli(&["plugins","backup","--input","posix","--output","anti-ransomware-vault",
         "--source",path(&source),"--root",path(&root),"--identity",path(&key),
         "--label","not allowed"],false);

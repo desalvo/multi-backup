@@ -31,7 +31,7 @@ fn supported_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
             "posix" | "nfs" | "smb" | "sshfs" | "gpfs" |
             "cephfs" | "glusterfs" | "lustre"),
         Mode::Restore => input == "posix" && matches!(output,
-            "posix"|"nfs"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
+            "posix"|"nfs"|"smb"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
     };
     if !supported {
         return Err(format!("No native generic executor for {input} -> {output}; operation denied").into());
@@ -172,10 +172,10 @@ mod tests {
         }
         assert!(supported_pair(Mode::Backup, "posix", "anti-ransomware-vault").is_err());
         assert!(supported_pair(Mode::Restore, "posix", "github").is_err());
-        for plugin in ["nfs","sshfs","cephfs","glusterfs","lustre"] {
+        for plugin in ["nfs","smb","sshfs","cephfs","glusterfs","lustre"] {
             assert!(supported_pair(Mode::Restore,"posix",plugin).is_ok());
         }
-        assert!(supported_pair(Mode::Restore,"posix","smb").is_err());
+        assert!(supported_pair(Mode::Restore,"posix","smb").is_ok());
         assert!(supported_pair(Mode::Restore,"posix","gpfs").is_err());
         assert!(supported_pair(Mode::Backup, "posix", "posix").is_ok());
     }

@@ -1,0 +1,45 @@
+name: Multi Backup - genuine NFS Samba and GlusterFS Rust recovery acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/test-real-network-filesystems-r042.sh'
+      - '.github/workflows/network-filesystems-live-r042.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-network-fs:
+    name: Genuine ${{ matrix.protocol }} server, read-only client, Rust FULL/INC and recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        protocol: [nfs, smb, glusterfs]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install authentic protocol services and crypto tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq openssl
+          case "${{ matrix.protocol }}" in
+            nfs) sudo apt-get install -y nfs-kernel-server nfs-common rpcbind ;;
+            smb) sudo apt-get install -y samba smbclient cifs-utils ;;
+            glusterfs) sudo apt-get install -y glusterfs-server glusterfs-client fuse3 ;;
+          esac
+          bash -n scripts/test-real-network-filesystems-r042.sh
+          test -c /dev/fuse || test "${{ matrix.protocol }}" != glusterfs
+      - name: Compile actual Rust engine and native plugin dispatcher
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Verify real server and mount; encrypted FULL incremental and isolated restore
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+        run: bash scripts/test-real-network-filesystems-r042.sh "${{ matrix.protocol }}"
+      - name: Record certification boundary
+        if: success()
+        run: |
+          echo 'PASS: actual server and kernel/FUSE mount; Rust encrypted FULL/INC, verify-chain, byte-identical recovery, negative controls.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED: production snapshot/ACL/xattr/ownership fidelity, failover, unattended service installation, or unrelated providers.' >> "$GITHUB_STEP_SUMMARY"

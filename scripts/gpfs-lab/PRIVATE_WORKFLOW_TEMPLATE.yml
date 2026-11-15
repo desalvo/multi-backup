@@ -1,0 +1,84 @@
+name: PRIVATE Multi Backup - authentic IBM GPFS CES field CI
+# Copy into a NEW PRIVATE GitHub repository under .github/workflows/gpfs-field.yml
+# Do NOT register self-hosted GPFS/CephFS runners in public desalvo/multi-backup.
+on:
+  workflow_dispatch:
+    inputs:
+      public_main_sha:
+        description: Exact 40-hex current public desalvo/multi-backup main commit
+        type: string
+        required: true
+      approval:
+        description: Type APPROVED-DISPOSABLE-FILESYSTEM-LAB
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  approved-public-sha:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Human-approved private coordinator verifies public main SHA
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.public_main_sha }}
+          APPROVAL: ${{ inputs.approval }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$REPO" != desalvo/multi-backup
+          test "$REF" = refs/heads/main
+          test "$APPROVAL" = APPROVED-DISPOSABLE-FILESYSTEM-LAB
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$(git ls-remote https://github.com/desalvo/multi-backup.git refs/heads/main | awk '{print $1}')"
+  gpfs-ces:
+    needs: approved-public-sha
+    runs-on: [self-hosted, gpfs-ci]
+    # GitHub Free private repositories cannot use Environment required reviewers.
+    # Exact SHA is approved out-of-band by root on the dedicated runner VM.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: gpfs-ces-nfs
+            source_var: MB_GPFS_NFS_RO_MOUNT
+          - mode: gpfs-ces-smb
+            source_var: MB_GPFS_SMB_RO_MOUNT
+    steps:
+      - name: Fetch exactly reviewed public main source, no PR head code
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.public_main_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" != desalvo/multi-backup
+          MARKER=/etc/multi-backup-ci/approved-public-main-sha
+          test -f "$MARKER" && test ! -L "$MARKER"
+          test "$(stat -c %u "$MARKER")" = 0
+          test "$(cat "$MARKER")" = "$SOURCE_SHA"
+          git clone -q --depth 1 --branch main https://github.com/desalvo/multi-backup.git source
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Build independent native Rust CLI, never install IBM binaries in CI
+        working-directory: source
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Genuine independently attested IBM CES snapshot encrypted backup+recovery
+        working-directory: source
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: self-hosted
+          MB_PRIVATE_LAB_REPOSITORY: ${{ github.repository }}
+          MB_FIELD_APPROVAL: ${{ inputs.approval }}
+          MB_APPROVED_PUBLIC_SHA: ${{ inputs.public_main_sha }}
+          MB_FIELD_RO_MOUNT: ${{ vars[matrix.source_var] }}
+          MB_FIELD_RW_MOUNT: ${{ vars.MB_GPFS_SCRATCH_RW_MOUNT }}
+          MB_FIELD_SNAPSHOT_ID: ${{ vars.MB_GPFS_SNAPSHOT_ID }}
+          MB_FIELD_SNAPSHOT_ATTESTATION: COHERENT_READONLY_SNAPSHOT_R042
+          MB_GPFS_CES_BACKEND_ATTESTED: IBM_STORAGE_SCALE_CES_LAB
+        run: bash scripts/test-real-cephfs-gpfs-ces-field-r042.sh "${{ matrix.mode }}"
+      - name: Report limited successful scope
+        if: success()
+        run: |
+          echo 'PASS real GPFS CES source and Rust encrypted bytewise local recovery.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED GPFS native writer, ILM/ACL mapping or production failover.' >> "$GITHUB_STEP_SUMMARY"
