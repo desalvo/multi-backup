@@ -1,57 +1,80 @@
-name: Multi Backup - authentic OpenAFS and Kerberos cell
+name: Multi Backup - authenticated OpenAFS Kerberos field certification
+# This workflow intentionally NEVER runs untrusted pull_request code on a
+# privileged self-hosted runner. An owner invokes workflow_dispatch only
+# after reviewing the exact branch commit and approving the disposable VM.
 on:
-  pull_request:
-    paths:
-      - 'rust/src/afs_volume.rs'
-      - 'rust/src/chunk_store.rs'
-      - 'scripts/test-real-afs-cell.sh'
-      - '.github/workflows/afs-real-cell.yml'
   workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact reviewed 40-character commit SHA to certify"
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   authentic-afs-kdc-volume-restore:
-    name: OpenAFS VLDB/volserver + Kerberos KDC + encrypted Rust restore
-    runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    name: Field-only real OpenAFS/Kerberos full+incremental volume restore
+    runs-on: [self-hosted, linux, x64, openafs-ci]
+    timeout-minutes: 90
     steps:
+      - name: Disallow production or reused hosts before checkout
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+          test "$GITHUB_SHA" = "$(printf %s "$GITHUB_SHA" | grep -E '^[a-f0-9]{40}$')"
+          test "$(id -u)" -ne 0
+          sudo -n true
+          # Only a dedicated disposable VM explicitly authorized by its admin.
+          sudo test -f /etc/multi-backup-ci/allow-disposable-afs
+          test "$(sudo cat /etc/multi-backup-ci/allow-disposable-afs)" = 'DEDICATED_DISPOSABLE_OPENAFS_CELL_VM'
+          if sudo test -e /var/lib/multi-backup-ci/afs-run-used; then
+            echo "::error::OpenAFS VM was used before: reprovision the disposable VM"
+            exit 1
+          fi
+          sudo install -d -m 0700 /var/lib/multi-backup-ci
+          sudo touch /var/lib/multi-backup-ci/afs-run-used
+          uname -a
+          test -d "/lib/modules/$(uname -r)/build"
       - uses: actions/checkout@v4
-      - name: Verify OpenAFS kernel-module prerequisites and native clients
+      - name: Install native system dependencies and prove OpenAFS DKMS kernel compatibility
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y age jq git python3-pip python3-venv build-essential \
-            dkms krb5-user krb5-config linux-headers-$(uname -r)
-          test -d /lib/modules/$(uname -r)/build
-      - name: Install OpenAFS official community provisioning roles
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            age jq git python3-pip python3-venv build-essential \
+            dkms krb5-user krb5-config "linux-headers-$(uname -r)"
+          if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openafs-modules-dkms; then
+            echo "::error::OpenAFS DKMS fails on the selected host kernel; VM must be rebuilt with a supported kernel"
+            sudo find /var/lib/dkms/openafs -name make.log -exec tail -65 '{}' ';' || :
+            exit 1
+          fi
+          sudo modprobe openafs
+          lsmod | grep '^openafs'
+      - name: Install SHA-pinned official OpenAFS Ansible collection
         run: |
           set -euo pipefail
           python3 -m venv /tmp/mb-afs-ansible
           /tmp/mb-afs-ansible/bin/pip install 'ansible-core>=2.17,<2.19'
           /tmp/mb-afs-ansible/bin/ansible-galaxy collection install \
             git+https://github.com/openafs-contrib/ansible-openafs.git,11fa2a5bbb27d4b44d297c5105f7dd9bc6347190
-      - name: Provision genuine KDC, OpenAFS database/fileservers and client
+      - name: Provision genuine KDC + VLDB + fileserver + mounted OpenAFS client
         run: |
           set -euo pipefail
           /tmp/mb-afs-ansible/bin/ansible-playbook openafs_contrib.openafs.local_install \
             -i 'localhost,' -c local \
-            -e afs_cell=example.com \
-            -e afs_realm=EXAMPLE.COM \
-            -e afs_install_method=managed \
-            -e afs_module_install_method=dkms
-          # Do not accept a fake vos command, empty token or absent AFS mount.
-          command -v vos
-          command -v kinit
-          command -v aklog
-          command -v tokens
-          command -v fs
-          mount | grep -i 'afs'
+            -e afs_cell=example.com -e afs_realm=EXAMPLE.COM \
+            -e afs_install_method=managed -e afs_module_install_method=dkms
+          for tool in vos fs tokens kinit aklog; do command -v "$tool"; done
+          mount | grep -i afs
           test -d /afs/example.com/test
-      - name: Build native Rust backup engine
+      - name: Compile actual Rust backup/restore executable
         run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
-      - name: Mandatory authentic AFS/Kerberos encrypted full+incremental restore
+      - name: Mandatory Kerberos, VLDB, full+incremental and restore on NEW volume
         run: bash scripts/test-real-afs-cell.sh
-      - name: Live AFS acceptance conclusion
-        if: success()
+      - name: Summarize exact certified commit and verified real-cell results
         run: |
-          echo "Real Kerberos KDC, AFS token, VLDB, volserver and mounted client passed full+incremental encrypted restore" >> "$GITHUB_STEP_SUMMARY"
+          echo "PASS: genuine Kerberos KDC, AFS token, VLDB, volserver, mounted client, encrypted full/incremental and new-volume restore" >> "$GITHUB_STEP_SUMMARY"
+          echo "Certified exact source SHA: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
