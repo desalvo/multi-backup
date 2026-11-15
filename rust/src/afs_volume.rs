@@ -415,6 +415,25 @@ mod tests{
         volume:"user.test".into(),auth:Authentication::ExistingToken,
         execution:Execution::Local,mode:DumpMode::Full,
         server:None,partition:None,command_profile:None}}
+    #[test]fn restore_only_creates_explicit_new_volume_with_no_overwrite(){
+        let mut target=RestoreNewJob{
+            cell:"example.org".into(),volume:"new.restored".into(),
+            server:"afs1.example.org".into(),partition:"/vicepa".into(),
+            auth:Authentication::ExistingToken
+        };
+        let p=plan_restore_new(&target).unwrap();
+        assert!(p.new_volume_only);
+        assert_eq!(&p.arguments[p.arguments.len()-2..],&["-overwrite","abort"]);
+        assert!(!p.arguments.iter().any(|a|a=="-id"||a=="-file"));
+        assert_eq!(p.confirmation,"example.org:afs1.example.org:/vicepa:new.restored");
+        target.volume="something.backup".into();
+        assert!(plan_restore_new(&target).is_err());
+        target.volume="a".repeat(23);
+        assert!(plan_restore_new(&target).is_err());
+        target.volume="new.restored".into();
+        target.auth=Authentication::LocalAuth;
+        assert!(plan_restore_new(&target).is_err());
+    }
     #[test]fn safe_full_plan(){
         let p=plan(&job()).unwrap();
         assert_eq!(p.executable,"vos");
