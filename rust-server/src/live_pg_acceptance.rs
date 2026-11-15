@@ -148,3 +148,70 @@ fn real_pg_two_replica_affinity_capacity_lease_and_fencing(){
     assert!(!db.is_current(&b,&second.job_id,&second.token).unwrap());
     assert!(db.finish(&a,&recovered.job_id,&recovered.token,true,&json!({})).unwrap());
 }
+
+
+#[test]
+#[ignore = "requires disposable genuine PostgreSQL 16"]
+fn real_pg_parallel_claims_and_signed_nonce_single_winner(){
+    use std::sync::{Arc,Barrier};
+    use std::thread;
+    let db=live_pg_ci_fixture();
+    let tag=Uuid::new_v4().simple().to_string();
+    let node=format!("node{tag}");
+    let store=format!("store{tag}");
+    db.register_storage(&StorageLocation{
+        storage_id:store.clone(),backend:"posix".into(),
+        visibility:StorageVisibility::Shared,owner_replica:None,
+    }).unwrap();
+    db.heartbeat_replica(&node,1,&[store.clone()]).unwrap();
+    let limits=ExecutionLimits::default();
+    for n in 0..8{
+        db.enqueue(&format!("job{tag}{n}"),"posix",&store,
+            SourceTransport::ServerLocal,&limits,&json!({}),0).unwrap();
+    }
+    let barrier=Arc::new(Barrier::new(9));
+    let workers=(0..8).map(|_|{
+        let db=db.clone();
+        let barrier=barrier.clone();
+        let node=node.clone();
+        thread::spawn(move||{
+            barrier.wait();
+            db.claim(&node,60).unwrap()
+        })
+    }).collect::<Vec<_>>();
+    barrier.wait();
+    let results=workers.into_iter().filter_map(|h|h.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(),1,
+        "Parallel PostgreSQL claims must not overbook capacity=1");
+    let leased=&results[0];
+    assert!(db.is_current(&node,&leased.job_id,&leased.token).unwrap());
+    assert!(db.claim(&node,60).unwrap().is_none());
+    assert!(db.finish(&node,&leased.job_id,&leased.token,true,
+        &json!({})).unwrap());
+    assert!(db.claim(&node,60).unwrap().is_some(),
+        "A finished slot must become available again");
+
+    let device=format!("replay{tag}");
+    let (secret,public)=wire::device_keypair();
+    agent::register(&db,&agent::Enrollment{
+        agent_id:device.clone(),owner_user:"operator".into(),
+        device_public_key:public,
+    }).unwrap();
+    assert!(agent::set_approval(&db,&device,true,false).unwrap());
+    let signed=wire::sign(&secret,"GET","/api/agents/policy",&device,
+        "operator",1,wire::now(),&wire::hex_sha(b""),b"").unwrap();
+    let barrier=Arc::new(Barrier::new(9));
+    let workers=(0..8).map(|_|{
+        let db=db.clone();
+        let barrier=barrier.clone();
+        let proof=signed.clone();
+        thread::spawn(move||{
+            barrier.wait();
+            agent::record_sequence(&db,&proof).unwrap()
+        })
+    }).collect::<Vec<_>>();
+    barrier.wait();
+    let accepted=workers.into_iter().filter(|h|h.join().unwrap()).count();
+    assert_eq!(accepted,1,"Concurrent requests must never reuse a signed nonce");
+}
