@@ -83,6 +83,7 @@ jobs:
           cargo test --manifest-path rust/Cargo.toml --lib cluster_placement
           cargo test --manifest-path rust/Cargo.toml --lib agent_protocol
           cargo test --manifest-path rust/Cargo.toml --lib afs_volume
+          cargo test --manifest-path rust/Cargo.toml --bin multi-backup-agent
           cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-agent
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
