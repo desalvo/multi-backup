@@ -74,11 +74,17 @@ jobs:
           python -m unittest discover -s tests -p test_rust_bridge.py -v
           sudo apt-get update -qq
           sudo apt-get install -y age
-          python scripts/test-rust-archive-compat.py rust/target/release/multi-backup-native
+          # Legacy Python archive interoperability is optional, not an RC blocker.
+          # Native functional recovery is mandatory instead.
+          cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
+      - name: Rust r038 operator documentation contract
+        run: python scripts/check-documentation-consistency.py
 
   rust-server-validation:
     name: Rust web server, storage and OCI image build verification
@@ -372,6 +378,13 @@ jobs:
           for item in docs/manuals/*.pdf docs/brochures/*.pdf; do
             test -s "$item"
             pdftotext "$item" - | grep -qi 'Multi Backup'
+          done
+          # The two source manuals must actually be rebuilt and carry the
+          # clearly labelled Rust r038 development-preview supplement.
+          for manual in docs/manuals/*.pdf; do
+            pdftotext "$manual" - | grep -Fqi 'Rust r038:'
+            pdftotext "$manual" - | grep -Fq 'gc-collect'
+            pdftotext "$manual" - | grep -Fq 'verify-chain'
           done
       - uses: actions/upload-artifact@v4
         with:

@@ -190,6 +190,7 @@ mod tests{
     fn unified_virtual_folders_in_dav_xml(){
         let b=LogicalBackup{version:1,id:"a".repeat(64),label:"unified".into(),
             protected:false,created_unix:0,top_namespace:String::new(),
+            kind:multi_backup_core::chunk_store::BackupKind::Full,parent_id:None,
             entries:vec![
                 Entry{path:"github/repo/README.md".into(),bytes:1,chunks:vec![]},
                 Entry{path:"ci/run.json".into(),bytes:2,chunks:vec![]},

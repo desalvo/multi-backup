@@ -1,8 +1,7 @@
-//! Native reliability-policy core for the staged Python -> Rust migration.
+//! Native Rust backup/restore core and plugin execution foundation.
 //!
-//! Python still provides the working GUI, encrypted format and providers until
-//! differential compatibility tests and all native E2E workflows are certified.
-//! This Rust module intentionally does not open or modify existing archives.
+//! The Python engine is frozen as a fallback; legacy archive byte compatibility
+//! is no longer a release gate. Complete functional recovery remains mandatory.
 
 pub mod archive;
 pub mod chunk_store;
@@ -18,7 +17,11 @@ pub mod dropbox_client;
 pub mod github_client;
 pub mod vault;
 pub mod plugins;
+pub mod plugin_executor;
 pub mod backup_policy;
+pub mod backup_chain;
+pub mod account_restore;
+pub mod scheduler;
 pub mod mount_probe;
 
 use std::collections::HashSet;

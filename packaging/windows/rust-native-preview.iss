@@ -1,5 +1,5 @@
 #define MyAppName "Multi Backup Rust Preview"
-#define MyAppVersion "0.1.0-r020"
+#define MyAppVersion "0.1.0-r038"
 #define MyAppPublisher "Alessandro De Salvo"
 #define MyAppExeName "MultiBackupRust.exe"
 
@@ -23,7 +23,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
-VersionInfoVersion=0.1.0.20
+VersionInfoVersion=0.1.0.38
 VersionInfoDescription=Multi Backup Rust native preview
 AppMutex=MultiBackupRustPreview
 

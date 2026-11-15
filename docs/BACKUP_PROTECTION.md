@@ -1,4 +1,4 @@
-# Explicit backup protection — native Rust r036
+# Explicit backup protection — r036 baseline with r038 operations
 
 An explicitly protected backup **must never be deleted** by an application
 operator, retention policy, scheduler or garbage collector until an authorized
@@ -30,13 +30,7 @@ not delete the backup. Desktop Storage shows a **PROTETTO** lock label and
 offers separate actions to protect, request unprotection with confirmation
 and delete only when unprotected.
 
-Deleting an unprotected logical backup removes its **manifest only**.
-Existing ciphertext chunks, stripe metadata and parity are kept intact:
-they may be shared with protected and other active snapshots. A future GC
-must reconcile all live manifests/protection markers and parity references
-under the same exclusive lock, then apply the configured quarantine/grace
-window before removing any orphan. Do **not** run a filesystem-wide manual
-cleanup by age or filename.
+Deleting a backup now first **rebases descendants or promotes the next increment to FULL**, then removes the chosen encrypted manifest. Protected or unhealthy children block this change. Purge NEVER deletes chunks, stripe metadata or parity. The r038 local GC is a separate preview/confirmed operation, with grace (48h default, 24h minimum) and authenticated reference scan. Mixed live/dead parity stripes are kept intact until crash-safe repacking is qualified. Never delete ciphertext manually based on age or filename.
 
 ZIP64 export/import and storage relocation include the encrypted hold
 marker so a protected backup remains protected after transport or copy.
@@ -62,10 +56,7 @@ cannot be deleted while an active checkpoint references it.
 
 `rust/src/backup_policy.rs` defines `protected` as a retention override:
 an explicitly protected backup is always returned in the preservation set,
-even when its retention window has expired. The earlier 30-day retention
-and daily garbage-collection **policies are planning objects**; the autonomous
-scheduler and full safe deletion/GC execution have **not** been completed
-by this patch.
+even when its retention window has expired. The 30-day automatic retention purge remains policy-only. A native Rust one-shot/polling scheduler and *manually confirmed local GC* are implemented in r038 as development previews, not a production-certified unattended cleanup system.
 
 These controls are application-level protections: users with filesystem
 administrative privileges or a compromised storage backend may tamper with
@@ -117,5 +108,14 @@ timestamps are **never auto-expired**. The retention preview reads
 status, and passes the *authoritative encrypted hold flag* to the
 30-day policy. A protected backup always remains in the preserve set,
 including when it is older than 30 days. No deletion is performed by
-`retention-preview`. The full recurring scheduler and garbage collector
-are not yet operational.
+`retention-preview`. Rust r038 includes an experimental scheduler and separately confirmed local GC; automated retention-deletion and remote GC are NOT enabled.
+
+
+## r038 — protezione del successore durante il rebase
+
+A protected child prevents the purge of a parent if that action would rewrite the child's authenticated lineage. A separate confirmed `unprotect-backup` is required; it must never run implicitly. `storage protect` configures 8+2 parity; `storage protect-backup` sets a no-delete hold; neither provides independent hardware WORM. The physical GC only removes unreferenced ciphertext, and partially live parity stripes are retained. See [IT procedures](R038_OPERATIONS_IT.md) and [EN procedures](R038_OPERATIONS_EN.md).
+
+## r038 — Impatto della protezione sul rebase e sul repack
+
+Un backup o un discendente protetto non può essere cancellato o avere i manifest riscritti implicitamente dal purge con riconciliazione. Eliminare un FULL promuove il successore incrementale a FULL; eliminare un incrementale ricollega i successori al predecessore. La GC è separata dal purge e include repack automatico della parità 8+2, con nuovo indice autenticato pubblicato solo dopo aver verificato i nuovi shard e vecchia stripe conservata durante il grace period. Nessuna GC bypassa la protezione esplicita o costituisce WORM reale.
+

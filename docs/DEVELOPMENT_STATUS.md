@@ -1,6 +1,6 @@
 # Multi Backup development status
 
-**Last existing working release:** 0.1.0-r018-rc1 (Python/Tk); **main development baseline:** Rust-native r037 preview  
+**Last published working release:** 0.1.0-r018-rc1 (Python/Tk); **main baseline:** Rust r037; **active branch:** Rust r038 functional plugin executor  
 **Repository:** https://github.com/desalvo/multi-backup  
 **Baseline:** migrated from desalvo/github-backup 0.1.0-r001; new project namespace and plugin architecture.
 
@@ -562,3 +562,59 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - The merge commit deliberately omits `[full-ci]` and does not request public early release or stable publication. The previous working r018 early-release assets must remain available, and experimental server/plugin/mount features must remain opt-in, not advertised production-ready.
 - The next main-branch CI for this integration/documentation snapshot must be observed independently; the green premerge PR is not proof that follow-up commits passed.
 - **Remaining RC acceptance:** real authenticated GitHub+Dropbox backups/restores (CI/LFS and interruptions), installed native GUI/user visual and access checks, legacy migration recovery, Apple Developer ID/notarization, Windows Authenticode/RPM signatures, update/rollback, mounted WebDAV server hardening, scheduler and protected GC certification, live provider plugin adapters and independent security assessment. No stable tag or promoted Docker image is authorized on these results alone.
+
+
+## r038 — Rust-first development decision and plugin runtime (2026-11-14)
+
+- By explicit user decision, historical Python archive migration/byte parity is **optional** and no longer a blocking RC gate. Existing archives, keys and converters are retained, never silently deleted. Functional backup/restore and user-visible behavior remain mandatory.
+- Versioned native GUI/CLI previews as r038 and replaced Python archive-wire compatibility in Production Gate with real Rust binary plugin restore acceptance; Mac, Windows and Debian package jobs also exercise the test.
+- New `rust/src/plugin_executor.rs` implements executable POSIX→POSIX age-encrypted chunk backup and fresh-directory verified restore, including source/store containment checks, refusal to archive private identity files, integrity verification and no overwrite.
+- Four additional **Linux-only read-only mounted source previews**: NFSv3/v4, SMB/CIFS, SSHFS/FUSE and GPFS CES NFS/SMB. Exact read-only mount evidence and an operator snapshot-attestation flag are required; neither is proof of vendor snapshot/ACL consistency, and no remote target writes are enabled.
+- Rust generic plugin preview backup pairs: **5**; certified generic backup pairs: **0/682**. Static catalog: 32 plugins/53 backup roles unchanged. Dedicated Rust GitHub and Dropbox provider paths still need common-plugin integration and real account E2E.
+- **Still open:** PR #10 full green CI, native GUI settings parity, GitHub/Dropbox live recovery and resume, real mounted filesystem recovery, protected garbage collection/scheduler, full OS installed-app qualification, signing and update/rollback. Do not claim final migration or stable release yet.
+
+
+## r038 — chain-aware incremental deletion and garbage collection (2026-11-14)
+
+- Created native full/incremental snapshot mode with full encrypted reference
+  manifests and immutable deduplicated chunks, preserving a linked
+  `parent_id` history. Rust CLI/GUI allow selecting total or incremental.
+- Added `backup_chain::details` with complete/increment history and exact
+  uncompressed/zstd compressed/zstd deduplicated byte metrics, file counts,
+  modifications and deletions. Chain verification defaults to all ancestors.
+- Added durable Rust scheduler `schedule run/daemon` with per-job backup
+  type or verification, independent cadence and optional no-chain verify.
+  Still needs configuration UI/persistence and crash resilience certification.
+- Direct child reparenting now occurs as the default confirmed deletion:
+  deleting an intermediate increment reconnects children to its predecessor;
+  deleting a full promotes direct incremental descendants to full. Deletion
+  verifies descendants, refuses protected or corrupt ones, changes only
+  encrypted manifests and preserves ALL ciphertext objects until GC.
+- Added separate locked POSIX ciphertext GC: explicit dry-run and confirmed
+  execution, minimum 24-hour orphan grace (default 48), complete live
+  manifest/chain/parity validation, deletion of wholly dead parity groups and
+  unreferenced chunks only. Shared live/dead parity stripes are left intact;
+  **crash-safe parity repacking remains mandatory for maximum reclamation**.
+- Added `garbage_collection_roundtrip.rs` with physical deletion/grace,
+  shared stripe safety and real-age recovery tests; included in macOS,
+  Windows and Debian packaging acceptance. All new CI still to be verified.
+- Account-scoped restore planning now records independent source and target
+  identities. GitHub target owner must match the explicit target account;
+  Dropbox checks the write-token account through its account endpoint before
+  cross-account upload. Provider-wide selection, authentication and
+  live multi-account E2E remain incomplete.
+- PR #10 stays draft until passing new full CI and external restore tests.
+  Historical Python archive migration is optional, not a release gate.
+
+## r038 — documentation reconciliation and operational manuals (2026-11-14)
+
+- Added bilingual Rust developer-preview operator runbooks at `docs/R038_OPERATIONS_IT.md` and `docs/R038_OPERATIONS_EN.md`, with exact CLI recipes for full/incremental backup, file/count/byte metrics, default whole-chain verification, safe selective restore, provider cross-account authorization, manifest purge/rebase, manual GC with grace/parity safeguards and schedule JSON.
+- Reconciled earlier inconsistent current-tense statements in `CHUNK_STORAGE_V1.md`, `BACKUP_PROTECTION.md`, `MAINTENANCE_POLICY.md`, `PLUGIN_API.md`, `RELEASE_CHANNELS.md`, `SECURITY.md` and `RUST_PORT_INVENTORY.md`. Historical milestones remain explicit rather than being erased.
+- Expanded bilingual PDF manual source with four explicitly labelled r038 experimental chapters per language. PDF output still must be regenerated and checked by CI; existing PDF binary may remain historic until regenerated.
+- Release policy unchanged: r018 is last distributed; Rust r038 remains a draft PR until current-head CI, real recovery tests, installer signoff and security tests pass. No merge, stable tag, Docker publication or user-data GC performed by documentation changes.
+
+## r038 — Audit documentazione e parità automatica (14 novembre 2026)
+
+- Documentazione: nuovi manuali operativi Rust IT/EN, inventario delle funzionalità, indice documentale e controllo di coerenza CI. Aggiornato generatore PDF bilingue con sezioni Rust e avvertenze sulla GUI Python/Tk storica.
+- Implementazione: repack automatico delle stripe 8+2 miste durante GC confermata, nuovi shard age verificati, indice successore committato ultimo, mantenimento del predecessore fino a grace 48h. Previste riprese da preparazioni non committate.
+- Test: roundtrip del purge, GC, protezione, repack, interruzione prima del commit; CI corrente in attesa di certificazione. Restano fault-injection di produzione, multiwriter, restore account reali e aggiornamenti firmati. Nessun merge o rilascio.

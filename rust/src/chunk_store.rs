@@ -1,6 +1,6 @@
 //! Opt-in v1 content-addressed store: one logical backup manifest, encrypted chunks.
 //! This does NOT modify existing tar.gz.age archives. Chunks use HMAC-SHA256 IDs.
-use std::{collections::HashSet, fs::{self, File, OpenOptions}, io::{Read, Write},
+use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{Read, Write},
     path::{Component, Path, PathBuf}, process::{Command, Stdio}};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -16,6 +16,15 @@ pub const DEFAULT_CHUNK: usize = 4 * 1024 * 1024;
 pub struct ChunkRef { pub id: String, pub sha256: String, pub bytes: usize }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entry { pub path: String, pub bytes: u64, pub chunks: Vec<ChunkRef> }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum BackupKind { #[default] Full, Incremental }
+impl BackupKind {
+    pub fn parse(value:&str)->Result<Self,String>{
+        match value {"full"=>Ok(Self::Full),"incremental"=>Ok(Self::Incremental),
+            _=>Err("Backup mode must be full or incremental".into())}
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogicalBackup {
     pub version: u32, pub id: String, pub label: String, pub entries: Vec<Entry>,
@@ -29,6 +38,12 @@ pub struct LogicalBackup {
     /// Optional nested namespace at the logical backup level.
     #[serde(default)]
     pub top_namespace: String,
+    /// Full snapshots and incrementals both have complete, self-contained
+    /// chunk-reference inventories. Incrementals reuse immutable chunks.
+    #[serde(default)]
+    pub kind: BackupKind,
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: String }
@@ -154,6 +169,14 @@ impl Store {
     pub fn read_chunk_ref(&self,identity:&Path,chunk:&ChunkRef)->Res<Vec<u8>>{
         self.read_chunk(identity,chunk)
     }
+    /// Exact zstd size before age encryption; verifies plaintext integrity.
+    pub(crate) fn compressed_chunk_bytes(&self,key:&Path,chunk:&ChunkRef)->Res<u64>{
+        self.read_chunk(key,chunk)?;
+        let path=self.chunk_path(&chunk.id)?;
+        let metadata=fs::symlink_metadata(&path)?;
+        if !metadata.file_type().is_file(){return Err("Unsafe encrypted chunk".into());}
+        Ok(age(&fs::read(path)?,None,Some(key))?.len() as u64)
+    }
     fn read_chunk(&self, identity: &Path, chunk: &ChunkRef) -> Res<Vec<u8>> {
         if !safe_hash(&chunk.id) || !safe_hash(&chunk.sha256) ||
             chunk.bytes > self.cfg.chunk_bytes { return Err("Invalid chunk reference".into()); }
@@ -193,12 +216,33 @@ impl Store {
     pub fn backup_in_namespace(&self,identity:&Path,label:&str,
                                top_namespace:&str,sources:&[Source])
         ->Res<LogicalBackup> {
+        self.backup_in_namespace_mode(identity,label,top_namespace,sources,
+                                      BackupKind::Full,None)
+    }
+    pub fn backup_in_namespace_mode(&self,identity:&Path,label:&str,
+                               top_namespace:&str,sources:&[Source],
+                               kind:BackupKind,parent_id:Option<&str>)
+        ->Res<LogicalBackup> {
         if !top_namespace.is_empty() && !crate::backup_policy::safe_namespace(top_namespace) {
             return Err("Unsafe top namespace".into());
         }
         if label.len() > 256 || sources.is_empty() { return Err("Invalid label/sources".into()); }
         let lock = OpenOptions::new().create(true).write(true).open(self.root.join(".lock"))?;
         fs2::FileExt::lock_exclusive(&lock)?;
+        match (kind,parent_id){
+            (BackupKind::Full,None)=>{},
+            (BackupKind::Incremental,Some(parent))=>{
+                if !safe_hash(parent){return Err("Invalid incremental parent ID".into());}
+                let previous=self.load(identity,parent)?;
+                if previous.top_namespace!=top_namespace{
+                    return Err("Incremental cannot cross logical namespace".into());
+                }
+                // Detect invalid/missing ancestor or a forged cycle before
+                // committing new lineage. Referenced chunks are independent.
+                crate::backup_chain::ancestors(self,identity,parent)?;
+            }
+            _=>return Err("Full backup cannot have parent; incremental requires parent".into())
+        }
         let mut entries = Vec::new();
         let mut visited = HashSet::new();
         for src in sources {
@@ -245,13 +289,16 @@ impl Store {
             label: label.to_owned(), entries, protected:false,
             created_unix:std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH).map_or(0,|v|v.as_secs()),
-            top_namespace:top_namespace.to_owned()};
+            top_namespace:top_namespace.to_owned(),
+            kind,parent_id:parent_id.map(str::to_owned)};
         let encrypted = age(&serde_json::to_vec(&snapshot)?, Some(&self.cfg.recipient), None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
         }
-        fs2::FileExt::unlock(&lock)?;
+        // Keep the store lock until parity for the new manifest is committed:
+        // garbage collection must never observe a valid but unprotected backup.
         self.protect(identity, &snapshot.id)?;
+        fs2::FileExt::unlock(&lock)?;
         Ok(snapshot)
     }
     pub fn load(&self, identity: &Path, id: &str) -> Res<LogicalBackup> {
@@ -265,6 +312,12 @@ impl Store {
         if !value.top_namespace.is_empty() &&
            !crate::backup_policy::safe_namespace(&value.top_namespace) {
             return Err("Invalid manifest top namespace".into());
+        }
+        match (value.kind,value.parent_id.as_deref()){
+            (BackupKind::Full,None)=>{},
+            (BackupKind::Incremental,Some(parent))
+                if safe_hash(parent)&&parent!=id=>{},
+            _=>return Err("Invalid encrypted backup chain metadata".into())
         }
         value.protected = self.is_backup_protected(identity,id)?;
         let mut names = HashSet::new();
@@ -301,6 +354,9 @@ impl Store {
     /// the SAME logical backup, with a single atomic fresh destination.
     pub fn restore_many(&self, identity: &Path, id: &str, selections:&[String],
                    dest: &Path) -> Res<usize> {
+        // In-flight restore is a live reader; hold the GC/purge lock for its
+        // entire verified chunk stream and atomic new-directory publication.
+        let _reader_guard=self.app_lock()?;
         if dest.exists(){return Err("Never overwrite a restore target".into());}
         if selections.len()>1000||selections.iter().any(|s|!safe_path(s)){
             return Err("Invalid file/folder selection".into());
@@ -362,9 +418,13 @@ struct Protection {
     id: String,
     members: Vec<ChunkRef>,
     stripe: crate::parity::Stripe,
+    /// Authenticated atomic repack commit: successor stripe takes precedence
+    /// only after its 8+2 parity has been durably written and checked.
+    #[serde(default)]
+    supersedes: Option<String>,
 }
 impl Store {
-    fn read_protection(&self, identity: &Path) -> Res<Vec<Protection>> {
+    fn read_protection_all(&self, identity: &Path) -> Res<Vec<Protection>> {
         let folder = self.root.join("stripes");
         if !folder.exists() { return Ok(Vec::new()); }
         let mut found = Vec::new();
@@ -389,6 +449,127 @@ impl Store {
         }
         Ok(found)
     }
+
+    /// An authenticated new stripe index is the atomic commit point.
+    /// Before that index exists, its old stripe stays authoritative.
+    /// After a crash following commit, both indexes may exist until GC;
+    /// readers deterministically choose the verified replacement.
+    fn read_protection(&self, identity: &Path) -> Res<Vec<Protection>> {
+        let all=self.read_protection_all(identity)?;
+        let by_id:std::collections::HashMap<&str,&Protection>=all.iter()
+            .map(|s|(s.id.as_str(),s)).collect();
+        if by_id.len()!=all.len() {return Err("Duplicate parity stripe ID".into());}
+        let mut superseded=HashSet::new();
+        for stripe in &all {
+            if let Some(old_id)=&stripe.supersedes {
+                if !safe_hash(old_id)||old_id==&stripe.id {
+                    return Err("Invalid parity repack predecessor".into());
+                }
+                if !superseded.insert(old_id.to_owned()) {
+                    return Err("Concurrent repack replacements for one stripe".into());
+                }
+                // After GC the predecessor's obsolete index can be absent.
+                // While present, require the replacement to retain exactly a
+                // strict subset of authenticated original chunk references.
+                if let Some(predecessor)=by_id.get(old_id.as_str()) {
+                    if stripe.members.len()>=predecessor.members.len() ||
+                       stripe.members.iter().any(|live|
+                           !predecessor.members.iter().any(|m|m.id==live.id &&
+                               m.sha256==live.sha256&&m.bytes==live.bytes)){
+                        return Err("Repack must retain a strict subset of original members".into());
+                    }
+                }
+                let base=self.root.join("parity")
+                    .join(&stripe.id[..2]).join(&stripe.id);
+                for index in 0..crate::parity::PARITY {
+                    let path=base.join(format!("{index}.age"));
+                    let meta=fs::symlink_metadata(&path)?;
+                    if !meta.file_type().is_file(){return Err("Unsafe repacked parity shard".into());}
+                    let bytes=age(&fs::read(path)?,None,Some(identity))?;
+                    let slot=crate::parity::DATA+index;
+                    if bytes.len()!=stripe.stripe.shard_size ||
+                       sha(&bytes)!=stripe.stripe.info[slot].sha256{
+                        return Err("Repacked parity shard failed integrity".into());
+                    }
+                }
+            }
+        }
+        // Chains of successive repacks are allowed, but not cycles.
+        for s in &all {
+            let mut seen=HashSet::new();
+            let mut cursor=s.supersedes.as_deref();
+            while let Some(id)=cursor {
+                if id==s.id || !seen.insert(id) {
+                    return Err("Cyclic parity repack lineage".into());
+                }
+                cursor=by_id.get(id).and_then(|x|x.supersedes.as_deref());
+            }
+        }
+        Ok(all.into_iter().filter(|s|!superseded.contains(&s.id)).collect())
+    }
+    /// Prepare a smaller 8+2 stripe containing only surviving chunks.
+    /// Writes encrypted parity first, authenticates both shards, and commits
+    /// a superseding encrypted index LAST. No old object is deleted here.
+    /// A crash before the index leaves the original stripe authoritative;
+    /// a crash after commit leaves both on disk until grace-qualified GC.
+    fn repack_mixed_stripes_locked(&self,identity:&Path,
+                                   live:&HashSet<String>)->Res<usize> {
+        let stripes=self.read_protection(identity)?;
+        let mut count=0usize;
+        for old in &stripes {
+            let remaining:Vec<ChunkRef>=old.members.iter().filter(|m|
+                live.contains(&m.id)).cloned().collect();
+            if remaining.is_empty()||remaining.len()==old.members.len(){
+                continue;
+            }
+            let ciphertexts:Vec<Vec<u8>>=remaining.iter().map(|m|->Res<Vec<u8>>{
+                self.read_chunk(identity,m)?;
+                Ok(fs::read(self.chunk_path(&m.id)?)?)
+            }).collect::<Res<_>>()?;
+            let (meta,shards)=crate::parity::encode(&ciphertexts)?;
+            let mut random=[0u8;32];
+            rand::rngs::OsRng.fill_bytes(&mut random);
+            let new_id=hex::encode(random);
+            let folder=self.root.join("parity").join(&new_id[..2]).join(&new_id);
+            for parity_index in 0..crate::parity::PARITY{
+                let plaintext=&shards[crate::parity::DATA+parity_index];
+                let encrypted=age(plaintext,Some(&self.cfg.recipient),None)?;
+                let destination=folder.join(format!("{parity_index}.age"));
+                if !write_new(&destination,&encrypted)?{
+                    return Err("Repack parity collision".into());
+                }
+                let checked=age(&fs::read(&destination)?,None,Some(identity))?;
+                if checked!=*plaintext{
+                    return Err("Repacked parity verification failed".into());
+                }
+            }
+            #[cfg(unix)] {
+                File::open(&folder)?.sync_all()?;
+                File::open(folder.parent().ok_or("Parity directory missing")?)?
+                    .sync_all()?;
+            }
+            let successor=Protection{
+                id:new_id.clone(),members:remaining,stripe:meta,
+                supersedes:Some(old.id.clone())
+            };
+            let index=self.root.join("stripes").join(format!("{new_id}.json.age"));
+            let authenticated=age(&serde_json::to_vec(&successor)?,
+                                  Some(&self.cfg.recipient),None)?;
+            if !write_new(&index,&authenticated)?{
+                return Err("Repack index collision".into());
+            }
+            #[cfg(unix)] File::open(index.parent().ok_or("Index parent missing")?)?
+                .sync_all()?;
+            // All live data must still verify under the newly active index.
+            // Keeping the old stripe until a later GC provides crash recovery.
+            if !self.read_protection(identity)?.iter().any(|s|s.id==new_id){
+                return Err("Parity repack commit was not discoverable".into());
+            }
+            count+=1;
+        }
+        Ok(count)
+    }
+
     /// Create 8+2 stripes over age ciphertext. Parity itself is encrypted to
     /// the same age recipient, and stripe metadata is independently encrypted.
     /// Existing protected chunk IDs are reused without creating duplicate parity.
@@ -424,7 +605,8 @@ impl Store {
                     return Err("Parity filename conflict".into());
                 }
             }
-            let index = Protection {id:id.clone(), members:group.to_vec(),stripe:meta};
+            let index = Protection {id:id.clone(),members:group.to_vec(),stripe:meta,
+                supersedes:None};
             let protected_index = age(&serde_json::to_vec(&index)?,
                 Some(&self.cfg.recipient),None)?;
             if !write_new(&self.root.join("stripes").join(format!("{id}.json.age")),
@@ -654,7 +836,8 @@ impl Store {
         let mut nonce=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut nonce);
         let snapshot=LogicalBackup{version:1,id:hex::encode(nonce),
             label:label.to_string(),entries,protected:false,
-            created_unix:0,top_namespace:String::new()};
+            created_unix:0,top_namespace:String::new(),
+            kind:BackupKind::Full,parent_id:None};
         let encrypted=age(&serde_json::to_vec(&snapshot)?,
             Some(&self.cfg.recipient),None)?;
         if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)? {
@@ -898,6 +1081,10 @@ impl Store {
         if backup.protected {
             return Err("Backup is PROTECTED. Explicitly remove protection first".into());
         }
+        if self.list(identity)?.iter().any(|backup|
+            backup.parent_id.as_deref()==Some(id)){
+            return Err("Backup has dependent increments; use delete-rebase to preserve the chain".into());
+        }
         let manifest=self.manifest_path(id)?;
         if !fs::symlink_metadata(&manifest)?.file_type().is_file(){
             return Err("Unsafe manifest deletion".into());
@@ -905,6 +1092,77 @@ impl Store {
         fs::remove_file(manifest)?;
         fs2::FileExt::unlock(&lock)?;
         Ok(())
+    }
+
+    /// Rebase direct descendants before removing a full or incremental.
+    /// Every snapshot already has a complete independent chunk-reference
+    /// inventory, so no plaintext payload or shared chunk is ever modified.
+    /// On failure before parent deletion, the parent remains available.
+    /// Protected children cannot have their chain identity rewritten.
+    pub fn delete_backup_rebase(&self,identity:&Path,id:&str,confirm_id:&str)
+        ->Res<usize>{
+        if id!=confirm_id||!safe_hash(id){
+            return Err("Confirm the complete backup ID before chain rebase".into());
+        }
+        let lock=self.app_lock()?;
+        let target=self.load(identity,id)?;
+        if target.protected{
+            return Err("Protected backup: remove protection explicitly first".into());
+        }
+        let children:Vec<_>=self.list(identity)?.into_iter()
+            .filter(|backup|backup.parent_id.as_deref()==Some(id)).collect();
+        for child in &children {
+            if child.protected{
+                return Err("Protected dependent prevents chain rebase".into());
+            }
+            let verification=crate::backup_chain::verify_chain(self,identity,&child.id,true)?;
+            if !verification.healthy{
+                return Err("Dependent increment failed integrity verification".into());
+            }
+        }
+        let folder=self.root.join("manifests");
+        for child in &children {
+            let mut updated=child.clone();
+            if target.kind==BackupKind::Full {
+                updated.kind=BackupKind::Full;
+                updated.parent_id=None;
+            } else {
+                updated.parent_id=target.parent_id.clone();
+                if updated.parent_id.is_none(){
+                    updated.kind=BackupKind::Full;
+                }
+            }
+            let ciphertext=age(&serde_json::to_vec(&updated)?,
+                Some(&self.cfg.recipient),None)?;
+            let mut temp=NamedTempFile::new_in(&folder)?;
+            temp.write_all(&ciphertext)?;
+            temp.as_file().sync_all()?;
+            let destination=self.manifest_path(&updated.id)?;
+            if !fs::symlink_metadata(&destination)?.file_type().is_file(){
+                return Err("Unsafe descendant manifest during rebase".into());
+            }
+            temp.persist(&destination).map_err(|error|error.error)?;
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&destination,fs::Permissions::from_mode(0o600))?;
+            }
+        }
+        // Authenticate every rewritten successor under its NEW lineage
+        // before the original ancestor can be removed.
+        for child in &children {
+            let checked=crate::backup_chain::verify_chain(
+                self,identity,&child.id,true)?;
+            if !checked.healthy {
+                return Err("Rebased successor did not pass independent chain integrity verification".into());
+            }
+        }
+        let manifest=self.manifest_path(id)?;
+        if !fs::symlink_metadata(&manifest)?.file_type().is_file(){
+            return Err("Unsafe manifest deletion".into());
+        }
+        fs::remove_file(manifest)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(children.len())
     }
 }
 
@@ -930,5 +1188,284 @@ impl Store {
             });
         }
         Ok(crate::backup_policy::expiry_preview(&records,policy,now)?)
+    }
+}
+
+
+/// Conservative reference-counting GC: purge/rebase changes only manifests.
+/// GC is the sole place where orphan ciphertext may be physically deleted.
+/// Mixed live/dead 8+2 parity stripes are retained until a separate
+/// crash-safe repack can replace them; no protection is silently weakened.
+#[derive(Debug,serde::Serialize)]
+pub struct GarbageCollectionReport {
+    pub dry_run:bool,
+    pub live_backups:usize,
+    pub live_chunks:usize,
+    pub orphan_chunk_candidates:usize,
+    pub obsolete_stripe_candidates:usize,
+    pub blocked_chunks_by_shared_parity:usize,
+    pub mixed_stripes_to_repack:usize,
+    pub repacked_stripes:usize,
+    pub orphan_parity_directories:usize,
+    pub deleted_orphan_parity_directories:usize,
+    /// Old repack protection is retained until its new replacement ages past
+    /// the grace boundary. Physical freeing may need a future GC cycle.
+    pub reclaimable_bytes:u64,
+    pub deleted_chunks:usize,
+    pub deleted_stripes:usize,
+    pub reclaimed_bytes:u64,
+    pub grace_hours:u64,
+}
+impl Store {
+    pub fn garbage_collect(&self,identity:&Path,grace_hours:u64,execute:bool)
+        ->Res<GarbageCollectionReport>{
+        if !(24..=24*365).contains(&grace_hours){
+            return Err("GC grace must be 24 hours to 365 days".into());
+        }
+        // Every writer, including storage backups and manifest rebase, must
+        // hold the same .lock. Re-evaluate all references under this lock.
+        let _guard=self.app_lock()?;
+        let backups=self.list(identity)?;
+        let mut live=HashSet::new();
+        for backup in &backups {
+            // Fail closed for malformed chains, lost refs, corrupt data or
+            // parity. No partial cleanup when live backup integrity is suspect.
+            crate::backup_chain::ancestors(self,identity,&backup.id)?;
+            let result=self.verify(identity,&backup.id)?;
+            if !result.healthy {
+                return Err(format!("GC blocked by unhealthy live backup {}",backup.id).into());
+            }
+            for entry in &backup.entries {
+                for chunk in &entry.chunks {live.insert(chunk.id.clone());}
+            }
+        }
+        // The preview is non-mutating. Execution first constructs and checks
+        // durable replacement parity, never deleting an existing shard.
+        let original=self.read_protection(identity)?;
+        let pending_repack=original.iter().filter(|stripe|{
+            let used=stripe.members.iter().filter(|m|live.contains(&m.id)).count();
+            used>0 && used<stripe.members.len()
+        }).count();
+        let repacked=if execute {
+            self.repack_mixed_stripes_locked(identity,&live)?
+        }else{0};
+        if execute {
+            for backup in &backups {
+                if !self.verify(identity,&backup.id)?.healthy {
+                    return Err("Post-repack live backup failed redundancy verification".into());
+                }
+            }
+        }
+        let now=std::time::SystemTime::now();
+        let min_age=std::time::Duration::from_secs(grace_hours*3600);
+        let old_enough=|path:&Path|->Res<bool>{
+            let md=fs::symlink_metadata(path)?;
+            if !md.file_type().is_file(){return Err("GC refuses non-regular file".into());}
+            Ok(now.duration_since(md.modified()?).is_ok_and(|age|age>=min_age))
+        };
+        let stripes=self.read_protection_all(identity)?;
+        let active_ids:HashSet<String>=self.read_protection(identity)?
+            .iter().map(|stripe|stripe.id.clone()).collect();
+        let by_id:HashMap<&str,&Protection>=stripes.iter()
+            .map(|stripe|(stripe.id.as_str(),stripe)).collect();
+        let replacements:HashMap<&str,&str>=stripes.iter().filter_map(|stripe|
+            stripe.supersedes.as_deref().map(|old|(old,stripe.id.as_str()))).collect();
+        let mut retained_stripe_members=HashSet::new();
+        let mut obsolete_stripes=Vec::new();
+        let mut recoverable_bytes=0u64;
+        for stripe in &stripes {
+            let record=self.root.join("stripes").join(format!("{}.json.age",stripe.id));
+            let referenced=stripe.members.iter().any(|item|live.contains(&item.id));
+            let active=active_ids.contains(&stripe.id);
+            let eligible_superseded=if !active {
+                let replacement=replacements.get(stripe.id.as_str())
+                    .ok_or("Superseded parity stripe has no successor")?;
+                let successor=self.root.join("stripes")
+                    .join(format!("{replacement}.json.age"));
+                // Keep old data for at least one full grace period AFTER
+                // durable replacement commit, not only since old object birth.
+                let mature=old_enough(&successor)?;
+                // Process oldest generations before deleting a replacement
+                // which would otherwise strand its own old predecessor.
+                let previous_gone=stripe.supersedes.as_deref()
+                    .is_none_or(|old|!by_id.contains_key(old));
+                mature&&previous_gone
+            }else{false};
+            if (active && referenced)||(!active&&!eligible_superseded)||
+               !old_enough(&record)? {
+                for item in &stripe.members {
+                    retained_stripe_members.insert(item.id.clone());
+                }
+                continue;
+            }
+            let folder=self.root.join("parity").join(&stripe.id[..2]).join(&stripe.id);
+            match fs::symlink_metadata(&folder){
+                Ok(meta) if !meta.file_type().is_dir()=>
+                    return Err("Unsafe obsolete parity folder".into()),
+                Err(error) if error.kind()!=std::io::ErrorKind::NotFound=>
+                    return Err(error.into()),
+                _=>()
+            }
+            let mut files=vec![record];
+            // A crash may have removed one obsolete shard after commit.
+            // Missing retired shards are safe only for a no-longer-active
+            // fully orphan stripe or a mature superseded old stripe.
+            for i in 0..crate::parity::PARITY {
+                let shard=folder.join(format!("{i}.age"));
+                match fs::symlink_metadata(&shard) {
+                    Err(error) if error.kind()==std::io::ErrorKind::NotFound=>continue,
+                    Err(error)=>return Err(error.into()),
+                    Ok(meta) if !meta.file_type().is_file()=>
+                        return Err("Unsafe obsolete parity shard".into()),
+                    Ok(_)=>{
+                        if !old_enough(&shard)?{files.clear();break;}
+                        files.push(shard);
+                    }
+                }
+            }
+            if files.is_empty() {
+                for item in &stripe.members {
+                    retained_stripe_members.insert(item.id.clone());
+                }
+                continue;
+            }
+            let mut bytes=0u64;
+            for file in &files {
+                bytes=bytes.checked_add(fs::symlink_metadata(file)?.len())
+                    .ok_or("Parity GC size overflow")?;
+            }
+            recoverable_bytes=recoverable_bytes.checked_add(bytes)
+                .ok_or("GC size overflow")?;
+            obsolete_stripes.push((stripe.id.clone(),files,folder));
+        }
+        // A power loss before the replacement INDEX commit can leave only
+        // prepared encrypted parity shards behind. Those folders do not form
+        // a committed stripe; reclaim them only after their OWN grace period.
+        let parity_root=self.root.join("parity");
+        let mut orphan_parity=Vec::new();
+        if parity_root.exists(){
+            if !fs::symlink_metadata(&parity_root)?.file_type().is_dir(){
+                return Err("Unsafe parity tree".into());
+            }
+            let known:HashSet<&str>=stripes.iter().map(|s|s.id.as_str()).collect();
+            for item in WalkDir::new(&parity_root).follow_links(false)
+                .min_depth(2).max_depth(2) {
+                let item=item?;
+                if !item.file_type().is_dir() {
+                    return Err("Unexpected parity tree entry".into());
+                }
+                let folder=item.path().to_path_buf();
+                let id=folder.file_name().and_then(|s|s.to_str())
+                    .ok_or("Non-UTF8 parity directory")?;
+                if !safe_hash(id) || folder!=parity_root.join(&id[..2]).join(id) {
+                    return Err("Noncanonical parity directory".into());
+                }
+                if known.contains(id) {continue;}
+                let meta=fs::symlink_metadata(&folder)?;
+                if now.duration_since(meta.modified()?).map_or(true,|age|age<min_age){
+                    continue;
+                }
+                let mut candidates=Vec::new();
+                let mut bytes=0u64;
+                let mut safe=true;
+                for file in fs::read_dir(&folder)? {
+                    let path=file?.path();
+                    let name=path.file_name().and_then(|s|s.to_str())
+                        .ok_or("Non-UTF8 orphan parity filename")?;
+                    if name!="0.age"&&name!="1.age" {
+                        return Err("Unexpected orphan parity content".into());
+                    }
+                    if !old_enough(&path)?{safe=false;break;}
+                    bytes=bytes.checked_add(fs::symlink_metadata(&path)?.len())
+                        .ok_or("Orphan parity size overflow")?;
+                    candidates.push(path);
+                }
+                if safe {
+                    recoverable_bytes=recoverable_bytes.checked_add(bytes)
+                        .ok_or("GC size overflow")?;
+                    orphan_parity.push((folder,candidates,bytes));
+                }
+            }
+        }
+        let root=self.root.join("chunks");
+        let mut candidates=Vec::new();
+        let mut blocked=0usize;
+        if root.exists(){
+            if !fs::symlink_metadata(&root)?.file_type().is_dir(){
+                return Err("Invalid chunk store directory".into());
+            }
+            for item in WalkDir::new(&root).follow_links(false).min_depth(1).max_depth(3){
+                let item=item?;
+                if item.file_type().is_symlink(){
+                    return Err("GC encountered a symlink in chunk storage".into());
+                }
+                if item.file_type().is_dir(){continue;}
+                if !item.file_type().is_file(){
+                    return Err("GC encountered a special chunk storage entry".into());
+                }
+                let path=item.path().to_path_buf();
+                let file=path.file_name().and_then(|s|s.to_str())
+                    .ok_or("Non-UTF8 chunk name")?;
+                let id=file.strip_suffix(".age").ok_or("Unexpected chunk file")?;
+                if !safe_hash(id){
+                    return Err("Unsafe chunk object identifier".into());
+                }
+                if self.chunk_path(id)? != path{
+                    return Err("Chunk does not match canonical object path".into());
+                }
+                if live.contains(id){continue;}
+                if retained_stripe_members.contains(id){
+                    blocked+=1;
+                    continue;
+                }
+                if !old_enough(&path)? {continue;}
+                let bytes=fs::symlink_metadata(&path)?.len();
+                recoverable_bytes=recoverable_bytes.checked_add(bytes)
+                    .ok_or("GC size overflow")?;
+                candidates.push((path,bytes));
+            }
+        }
+        let mut report=GarbageCollectionReport{
+            dry_run:!execute,live_backups:backups.len(),live_chunks:live.len(),
+            orphan_chunk_candidates:candidates.len(),
+            obsolete_stripe_candidates:obsolete_stripes.len(),
+            blocked_chunks_by_shared_parity:blocked,
+            mixed_stripes_to_repack:pending_repack,
+            repacked_stripes:repacked,
+            orphan_parity_directories:orphan_parity.len(),
+            deleted_orphan_parity_directories:0,
+            reclaimable_bytes:recoverable_bytes,
+            deleted_chunks:0,deleted_stripes:0,reclaimed_bytes:0,
+            grace_hours,
+        };
+        if !execute{return Ok(report);}
+        // Delete orphan stripe INDEX first: no live chunk depends on it.
+        // Parity pieces are only removed for fully orphan, grace-qualified
+        // groups; mixed groups are preserved intact for future compaction.
+        for (_id,files,folder) in obsolete_stripes {
+            let size=files.iter().try_fold(0u64,|sum,path|->Res<u64>{
+                Ok(sum.checked_add(fs::symlink_metadata(path)?.len())
+                    .ok_or("GC stripe size overflow")?)
+            })?;
+            for path in files {fs::remove_file(path)?;}
+            if folder.exists(){fs::remove_dir(folder)?;}
+            report.deleted_stripes+=1;
+            report.reclaimed_bytes=report.reclaimed_bytes.checked_add(size)
+                .ok_or("GC reclaimed size overflow")?;
+        }
+        for (folder,files,bytes) in orphan_parity {
+            for file in files {fs::remove_file(file)?;}
+            fs::remove_dir(folder)?;
+            report.deleted_orphan_parity_directories+=1;
+            report.reclaimed_bytes=report.reclaimed_bytes.checked_add(bytes)
+                .ok_or("GC reclaimed size overflow")?;
+        }
+        for (path,bytes) in candidates {
+            fs::remove_file(path)?;
+            report.deleted_chunks+=1;
+            report.reclaimed_bytes=report.reclaimed_bytes.checked_add(bytes)
+                .ok_or("GC reclaimed size overflow")?;
+        }
+        Ok(report)
     }
 }

@@ -57,7 +57,13 @@ def validate():
     assert (ROOT/'scripts/package-rust-macos-preview.sh').is_file(), 'Native Mac packager missing'
     assert (ROOT/'scripts/package-rust-windows-preview.ps1').is_file(), 'Native Windows packager missing'
     assert 'swiftc -O packaging/macos/biometric.swift' in (ROOT/'scripts/package-rust-macos-preview.sh').read_text('utf-8'), 'Native Rust Mac bundle lacks Touch ID adapter'
-    assert 'restored_from_protected_vault' in (ROOT/'scripts/test-rust-archive-compat.py').read_text('utf-8'), 'Native protected vault restore parity not tested'
+    assert (ROOT/'rust/tests/plugin_dispatch_roundtrip.rs').is_file(), 'Native plugin functional test missing'
+    assert (ROOT/'rust/tests/incremental_chain_roundtrip.rs').is_file(), 'Incremental lineage acceptance missing'
+    assert (ROOT/'rust/tests/garbage_collection_roundtrip.rs').is_file(), 'Repack GC recovery acceptance missing'
+    assert (ROOT/'scripts/check-documentation-consistency.py').is_file(), 'Rust r038 documentation gate missing'
+    assert 'scripts/check-documentation-consistency.py' in str(jobs['production-gate']['steps']), 'Operator docs check must block publication'
+    assert 'garbage_collection_roundtrip' in str(jobs['production-gate']['steps']), 'Automatic 8+2 repack acceptance must remain a Production Gate test'
+    assert 'plugin_dispatch_roundtrip' in str(jobs['production-gate']['steps']), 'Native plugin functional recovery must remain a blocking gate'
     assert 'archive::extract_from_memory' in (ROOT/'rust-desktop/src/main.rs').read_text('utf-8'), 'Native GUI uses an unprotected plaintext restore path'
     assert 'rust-desktop/Cargo.toml' in str(jobs['rust-desktop-smoke']['steps'])
     assert '--smoke' in str(jobs['rust-desktop-smoke']['steps'])
@@ -66,6 +72,18 @@ def validate():
                         jobs['publications-smoke']['steps'])
     assert 'scripts/capture-ui.py' in doc_steps and 'scripts/build-publications.py' in doc_steps
     assert 'docs/screenshots/about.png' in doc_steps, 'About screenshot validation missing'
+    # Prevent releasing outdated PDF manuals while Rust operations change.
+    for path in ('docs/R038_OPERATIONS_IT.md', 'docs/R038_OPERATIONS_EN.md'):
+        guide=(ROOT/path).read_text('utf-8')
+        for token in ('gc-preview','gc-collect','verify-chain',
+                      'delete-backup','--mode incremental','--target-account',
+                      'schedule run'):
+            assert token in guide, f'Operational reference missing {token}: {path}'
+    publisher=(ROOT/'scripts/build-publications.py').read_text('utf-8')
+    for token in ('append_r038_rust_preview_chapters','Rust r038:',
+                  'gc-collect','verify-chain'):
+        assert token in publisher, f'PDF manual generator missing Rust r038: {token}'
+    assert "for manual in docs/manuals/*.pdf" in doc_steps, 'PDF r038 content smoke missing'
     assert jobs['native-release']['needs']==[
         'production-gate','macos-smoke','publications-smoke',
         'rust-server-validation','rust-desktop-smoke',

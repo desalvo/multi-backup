@@ -471,3 +471,59 @@ Expanded scope makes the previous 57.5% product-wide readiness estimate outdated
 - Merge is **source integration**, not promotion: `main` still includes the working Python/Tk implementation for compatible releases and a Rust-only development desktop + CLI + experimental server. Last previous early-release assets are not invalidated. No `[full-ci]` on squash commit, and no stable or Docker publication requested.
 - For the next chat: check main CI and resolve any regressions. Preserve version compatibility, protected age identity and protected logical manifests; never activate destructive automatic cleanup/GC based only on retention preview. Qualify full GitHub/Dropbox restore with real providers, CI artifacts/LFS, crash-resume, macOS physical Touch ID, Windows sign/installer, legacy import, multi-GB acceptance, WebDAV real OS mounting, rollback, signature and independent security gates before publicly promoting RC.
 - `docs/RC_CERTIFICATION_MATRIX.md` is authoritative for *what remains unverified*. Use the compiled preview binaries and screenshots from Actions run 43640869549 for physical acceptance; do not claim live-account or signed release evidence not actually observed.
+
+
+## r038 active handoff — Rust primary and plugin implementation
+
+User decision (2026-11-14): do not spend further RC-critical development on backward compatibility with Python-created archives (no critical legacy backup usage). Keep optional import tools and old files/identities but **remove archival byte-format parity from release blocking tests**. Release criteria are instead real Rust backup→verified restore, functional parity of GUI/providers, security and deployment certification.
+
+PR [#10](https://github.com/desalvo/multi-backup/pull/10) on `feature/r038-rust-primary-plugin-executor`. Implemented a compiled generic POSIX→POSIX encrypted backup and restore executor plus guarded Linux read-only mounted NFS/SMB/SSHFS/GPFS CES sources → encrypted POSIX store. Mounted sources must be exact read-only OS mounts and require explicit operator-supplied snapshot attestation; the flag does not prove a real storage snapshot or metadata preservation. Rust binary functional tests are mandatory in Production Gate and Mac/Windows/Debian packaging. No generic remote target write, WORM or device writer is enabled.
+
+32 registered plugins, 31 backup input and 22 output roles (53 declarations), 5 preview-executable source→POSIX backup pairs, **0/682 generic pairs certified**. Dedicated native GitHub/Dropbox implementations remain separate from generic dispatch. Next: green PR CI, real provider E2E, Rust-only GUI and settings feature closures, scheduler/retention/GC with protected references, native trusted release/upgrade and rollback. The r018 published Python/Tk assets remain unchanged. Do not merge on an unverified new CI.
+
+
+## r038 continuation — requested full/incremental deletion, real GC and cross-account restore
+
+User clarified: deletion of any full or incremental must preserve the full
+restorability of every surviving successor, with predecessor/successor links
+adjusted and an incremental promoted to full when its original full is
+removed. Purge may rewrite encrypted manifests, **never physically delete
+chunks**; only a later garbage collection can free space. Maximize safe
+reclamation without weakening shared 8+2 parity protection.
+
+Code on PR #10: `rust/src/backup_chain.rs` (full/incremental lineage and
+exact four size statistics), `rust/src/chunk_store.rs` (immutable complete
+snapshot refs, descendant-rebasing delete, protected hold checks, separate
+reference-based GC), `rust/src/scheduler.rs` (manual/daemon backup and
+verification), `rust/src/account_restore.rs` and independent write-account
+checks for GitHub/Dropbox remote restore. Native GUI exposes full/incremental
+selection, details, default full-chain verification, rebase deletion,
+GC preview and confirmed GC run.
+
+GC safeguards: fresh reference scan under common lock, all live backups
+must pass age/HMAC/parity integrity checks, default 48h grace (min 24h),
+only fully dead parity stripes and truly orphan chunks are eligible. A stripe
+with both live and dead chunk members is retained intact; crash-safe
+**parity stripe repacking** is the next concrete storage optimization.
+No automatic GC daemon or remote GC is certified yet.
+
+Tests added: `rust/tests/incremental_chain_roundtrip.rs` and
+`rust/tests/garbage_collection_roundtrip.rs`, wired into cross-platform
+native packaging. Check the latest PR CI on the current head before merge;
+older green r037 CI is not proof for r038. Preserve the private vault,
+never permit silent deletion or remote source credential reuse. Source and
+destination accounts are independent, and destination credentials must
+authorize destination access. Signed stable release remains blocked.
+
+## r038 handoff — audited documentation and operational procedures
+
+- **Source of truth for the Rust preview:** `docs/R038_OPERATIONS_IT.md` and `docs/R038_OPERATIONS_EN.md`. Both include commands, account-target permissions, scheduler JSON, restore, backup full/incremental, chain verification, rebase/purge and separate confirmed GC.
+- Documentation in older milestones and PDF screenshots reflects r018 Python/Tk; `scripts/build-publications.py` now produces four r038-specific *development-preview* chapters in each bilingual manual. After CI, verify PDFs really contain new text and re-render correctly. Brochures describe earlier delivery and must not claim r038 certification.
+- Current branch PR #10, not merged. Published r018 preserved. Old Python format migration optional. New Rust end-to-end recovery and safe storage lifecycle are mandatory.
+- Do not confuse metadata-only purge with later physical GC. Mixed live/dead 8+2 parity stripe repack and actual authenticated cross-user multi-object restore remain unimplemented. Check latest PR CI, fix regressions, certify independent real data restores and operating-system signatures before merge/release.
+
+## r038 — Handoff aggiornato dopo audit documentale
+
+PR #10 branch feature/r038-rust-primary-plugin-executor. Documenti autorevoli: docs/DOCUMENTATION_INDEX_R038.md, docs/FEATURE_INVENTORY_R038.md, docs/OPERATIONS_R038_IT.md, docs/OPERATIONS_R038_EN.md; sempre aggiornare anche DEVELOPMENT_STATUS.md, RC_CERTIFICATION_MATRIX.md e documenti tecnici. scripts/check-documentation-consistency.py è il gate automatico. Il generatore PDF include appendice Rust e avvisa che screenshot Tk r018 sono storici.
+
+Repack automatico 8+2 nella GC: parità nuova creata e verificata, indice autenticato supersedes pubblicato ultimo, vecchia stripe conservata durante grace del successore. I frammenti preparati senza commit vengono considerati orfani dopo grace. GC preview non modifica. Il purge conserva chunk e parità; protezioni sui discendenti bloccano riscritture implicite. Non dichiarare certificato senza CI dell'ultimo SHA, power-loss fault injection, restore su dati reali, installer firmati e rollback. Compatibilità degli archivi Python facoltativa, non bloccante.
