@@ -5,6 +5,7 @@ on:
       - 'scripts/bootstrap-openafs-runner-vm.sh'
       - 'scripts/register-openafs-runner-once.sh'
       - 'scripts/patch-openafs-ansible-debian-facts.py'
+      - 'scripts/patch-openafs-ansible-local-facts-access.py'
       - 'scripts/test-real-afs-cell.sh'
       - 'docs/AFS_RUNNER_R039_IT.md'
       - '.github/workflows/afs-runner-lint.yml'
@@ -23,6 +24,12 @@ jobs:
           bash -n scripts/register-openafs-runner-once.sh
           bash -n scripts/test-real-afs-cell.sh
           python3 -m py_compile scripts/patch-openafs-ansible-debian-facts.py
+          python3 -m py_compile scripts/patch-openafs-ansible-local-facts-access.py
+          curl --fail --location --retry 3 --silent --show-error -o /tmp/local_install.yaml https://raw.githubusercontent.com/openafs-contrib/ansible-openafs/11fa2a5bbb27d4b44d297c5105f7dd9bc6347190/playbooks/local_install.yaml
+          python3 scripts/patch-openafs-ansible-local-facts-access.py /tmp/local_install.yaml
+          python3 scripts/patch-openafs-ansible-local-facts-access.py /tmp/local_install.yaml
+          grep -q 'mode: "0640"' /tmp/local_install.yaml
+          grep -q 'Prove the non-root AFS volume module can read' /tmp/local_install.yaml
           grep -q 'afs-active' scripts/register-openafs-runner-once.sh
           grep -q 'viceetcdir' scripts/patch-openafs-ansible-debian-facts.py
           grep -q 'RUN_SUFFIX' scripts/test-real-afs-cell.sh

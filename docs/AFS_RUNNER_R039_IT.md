@@ -49,3 +49,12 @@ The real Debian 12 job completed Kerberos and the OpenAFS server/client mount, t
 Keep Debian 12 VM, OpenAFS, Kerberos and Rust on the ISOLATED Proxmox network. GitHub runner remains per-job ephemeral; register fresh each time with a NEW short-lived GitHub token. The registration script reuses verified official runner archive after checking SHA256, uses exclusive flock, creates and removes each runner session/workspace, preserving the VM. The trusted workflow uses a per-job active lease and cleanup; after an abrupt termination inspect the VM and logs before manual lease recovery. Do not grant it production network or administrative credentials.
 
 Previous afs-run-used marker is retired; current job guard uses afs-active. Restore volume name uses GitHub run ID/attempt to avoid overwriting old test volumes. To retry from mb-afs-runner after verifying no runner process is active, git pull --ff-only in ~/multi-backup and run bash scripts/register-openafs-runner-once.sh. New VM bootstrap is NOT required. Still not AFS-certified until real full/incremental/new volume byte comparison is green.
+
+
+## CI 43731741639: true root cause of `viceetcdir` (15 Nov 2026)
+
+The **same** `openafs_volume: Unable to locate viceetcdir directory` remained after fixing Debian install path discovery. Log showed `PASS: real OpenAFS viceetcdir fact already present` while running that check under `sudo`. The pinned upstream volume task is **unprivileged**; facts were created under `become: true` on a runner started with `umask 077`. Root can therefore read the file while the unprivileged volume module cannot; its broad `except Exception` masks EACCES as a missing directory.
+
+The updated pinned upstream `local_install.yaml` is patched at the **boundary between client checkpoint 3 and volume checkpoint 4**: it sets `/etc/ansible/facts.d/openafs.fact` to root-owned, runner-group readable **0640** (not world-readable) and runs a non-root Python assertion checking the fact JSON and actual AFS `cacheinfo` path. The patch refuses unknown upstream playbooks and is tested against the exact upstream commit `11fa2a5b` in static CI.
+
+Preserve the Debian 12 Proxmox VM, KDC, OpenAFS client and kernel, and shared runner binary archive cache. Still register a new ephemeral runner per CI job; the main workflow remains owner-only, SHA-pinned, with `afs-active` lease cleanup. Do not claim a working real volume recovery or certification until the field run reaches green.
