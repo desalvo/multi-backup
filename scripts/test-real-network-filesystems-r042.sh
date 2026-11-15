@@ -38,6 +38,7 @@ nfs)
   sudo modprobe nfsd
   sudo systemctl start rpcbind || true
   sudo systemctl start nfs-server || sudo systemctl start nfs-kernel-server
+  sudo mkdir -p /etc/exports.d
   printf '%s 127.0.0.1(rw,sync,no_subtree_check,no_root_squash,insecure)\n' "$ROOT" | sudo tee "$EXPORTS" >/dev/null
   sudo exportfs -ra
   sudo exportfs -v | grep -F "$ROOT" >/dev/null
@@ -76,18 +77,20 @@ EOF
     if sudo ss -lnt | grep -q '127.0.0.1:445'; then break; fi
     sleep 1
   done
-  mount_ro() { sudo mount -t cifs //127.0.0.1/test "$RO" -o guest,vers=3.0,ro,uid="$(id -u)",gid="$(id -g)"; }
-  mount_rw() { sudo mount -t cifs //127.0.0.1/test "$RW" -o guest,vers=3.0,rw,uid="$(id -u)",gid="$(id -g)"; }
+  mount_ro() { sudo mount -t cifs //127.0.0.1/test "$RO" -o guest,vers=3.0,ro,noperm,file_mode=0644,dir_mode=0755,uid="$(id -u)",gid="$(id -g)"; }
+  mount_rw() { sudo mount -t cifs //127.0.0.1/test "$RW" -o guest,vers=3.0,rw,noperm,file_mode=0644,dir_mode=0755,uid="$(id -u)",gid="$(id -g)"; }
   expected=cifs
   ;;
 glusterfs)
   sudo systemctl start glusterd
   sudo mkdir -p "$WORK/brick"
-  sudo gluster --mode=script volume create "$VOL" "127.0.0.1:$WORK/brick" force
+  GLUSTER_HOST=$(hostname -f)
+  test -n "$GLUSTER_HOST"
+  sudo gluster --mode=script volume create "$VOL" "$GLUSTER_HOST:$WORK/brick" force
   sudo gluster --mode=script volume start "$VOL"
   sudo gluster volume status "$VOL"
-  mount_ro() { sudo mount -t glusterfs -o ro "127.0.0.1:/$VOL" "$RO"; }
-  mount_rw() { sudo mount -t glusterfs -o rw "127.0.0.1:/$VOL" "$RW"; }
+  mount_ro() { sudo mount -t glusterfs -o ro "$GLUSTER_HOST:/$VOL" "$RO"; }
+  mount_rw() { sudo mount -t glusterfs -o rw "$GLUSTER_HOST:/$VOL" "$RW"; }
   expected=fuse.glusterfs
   mount_rw
   sudo cp -a "$ROOT/." "$RW/"
@@ -100,6 +103,9 @@ test "$(findmnt -rn -T "$RO" -o FSTYPE)" = "$expected"
 "$CLI" plugins probe --plugin "$MODE" --mount "$RO" --json > "$WORK/mount.json"
 test "$(jq -r .fs_type "$WORK/mount.json")" = "$expected"
 test "$(jq -r .rw_mount_option "$WORK/mount.json")" = false
+# Require actual source readability, not just a plausible fs type.
+stat "$RO/nested/data.txt"
+head -c 1 "$RO/nested/data.txt" >/dev/null
 # An exact mount, but NO assertion of source consistency, must fail.
 if "$CLI" plugins backup --input "$MODE" --output posix --source "$RO" \
   --root "$STORE" --identity "$KEY" --label unsafe >/dev/null 2>&1; then
