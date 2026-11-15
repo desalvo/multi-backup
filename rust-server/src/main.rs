@@ -595,6 +595,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/api/cluster/status",get(agent_api::cluster_status))
         .route("/api/cluster/storage",post(agent_api::register_storage))
         .route("/api/cluster/jobs",post(agent_api::enqueue_cluster))
+        .route("/api/cluster/jobs/recover",post(agent_api::recover_cluster_job))
         .route("/api/agents/admin/list",get(agent_api::list_agents))
         .route("/api/agents/admin/enroll",post(agent_api::enroll))
         .route("/api/agents/admin/approve",post(agent_api::approve))
