@@ -814,3 +814,5 @@ The kind acceptance test now authenticates with the known public CI-only Argon2i
 - A normal POSIX directory is rejected as Lustre, and Oracle must remain non-executable in generic Rust database adapters; scripts fail closed before any unapproved lab access. Explicit owner/commit SHA/environment/runner checks and manual workflow_dispatch only.
 - Current Rust Lustre metadata preservation is incomplete; field suite is intentionally strict and may fail until implemented. Oracle RMAN verification is **preflight only**, not backup/restore through Multi Backup; Oracle stays PLANNED and release-blocking.
 - Docs: `docs/LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md` (and IT companion). Workflows: `lustre-oracle-guards.yml` and `lustre-oracle-field.yml`. Complete these gates only with authenticated real-lab evidence for the exact commit, do not merge/publish stable merely for a hosted PASS.
+
+- The compiled Rust fake-Lustre/Oracle negative suite now also runs **inside the existing unified Production Gate** before any native/OCI publication; the standalone provider workflow remains a focused independent check. Exact-head full CI after this change is required.
