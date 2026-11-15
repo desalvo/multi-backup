@@ -108,3 +108,18 @@ See [Italian companion](CLUSTER_ORCHESTRATION_R039_IT.md), [agent manual EN](AGE
 
 The Rust server GUI includes a read-only administrator **Cluster, agenti e backup paralleli** section, built from GET /api/cluster/status and GET /api/agents/admin/list. Each replica displays the same PostgreSQL inventory of live servers, capabilities, registered shared versus node-local stores, queued/running/finished jobs and agents awaiting approval, online or revoked. The dashboard never interprets database-sourced names as HTML. It does not yet implement the complete administration editor: enrolled agent approval/limits and storage registration remain protected API actions. Verify browser sessions and cluster state with a real multi-pod load balancer before claiming unified HA production readiness.
 
+
+## r039 — expired leases and guarded recovery
+
+The native filesystem writer verifies its PostgreSQL lease during chunk production and **immediately before** publishing the encrypted manifest. Per-replica capacity admission is serialized on the replica row so simultaneous claims cannot overbook the job ceiling. Expired running jobs are moved to **needs_reconciliation** instead of being silently reassigned: the previous writer might still have access to the shared filesystem. Queued independent jobs continue to load-balance automatically.
+
+An administrator with separate recovery authorization may call POST /api/cluster/jobs/recover with:
+
+~~~json
+{"job_id":"backup-docs-001","previous_replica_id":"FAILED_REPLICA_ID",
+ "expected_attempts":1,"writer_terminated":true,
+ "encrypted_store_reconciled":true}
+~~~
+
+Set the two attestation booleans to true ONLY after independently verifying the old writer has stopped and auditing any uncommitted chunks/manifests/parity. The server rejects recovery if the old replica still has a fresh heartbeat, or if job identity/attempt does not match quarantine. This fail-closed design does **not** yet provide fully automatic resume of in-progress backups or prove crash-proof exactly-once content commits. Physical writer fencing under network partitions remains a required RC gate.
+

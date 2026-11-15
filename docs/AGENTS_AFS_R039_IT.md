@@ -80,3 +80,18 @@ Non considerare certificata la r039 finché non sono superati: CI per tutti gli 
 Il server imposta una policy per agente tramite POST /api/agents/admin/limits; il file JSON dell'agente contiene limits propri. Per pull la risposta del poll contiene i limiti del server; per push l'agente ottiene prima la policy server tramite GET /api/agents/policy, pur scegliendo autonomamente quando iniziare. La policy effettiva è sempre la più restrittiva.
 
 Campi: max_concurrent_jobs (1–256), threads_per_job (1–64), max_transfer_bytes_per_sec (byte/s), max_host_cpu_percent, max_host_memory_percent, min_free_memory_bytes. Default 4 job, 4 thread e nessuna soglia opzionale; es. 10485760 B/s = 10 MiB/s. Si possono eseguire in parallelo dump di VOLUMI AFS differenti, ma NON dividere il dump di un singolo volume. Server e agente limitano il traffico ciphertext; soglie CPU/RAM sono cooperative, non cgroups hard. Per SSH agentless non sono garantite soglie load/memoria sul remoto senza un probe approvato. [Manuale di cluster IT](CLUSTER_ORCHESTRATION_R039_IT.md) e [EN](CLUSTER_ORCHESTRATION_R039_EN.md).
+
+## r039 — approvazione obbligatoria dei profili e concorrenza multiprocesso
+
+La registrazione e approvazione dell'agente **non** autorizza automaticamente ogni profilo/comando. Preparare un file profiles/ID.json nell'area privata dell'agente e usare `multi-backup-agent preview --config PATH --profile ID`. Il comando mostra il piano vos e il relativo `profile_sha256`; il gestore deve confrontare l'hash con il contenuto sottoposto a revisione. Solo dopo approvazione indipendente, chiamare **POST /api/agents/admin/profile**, autenticato come amministratore con CSRF e recovery authorization separata:
+
+~~~json
+{"agent_id":"afs-host-01","profile_id":"volume-test",
+ "profile_sha256":"64-caratteri-hex-del-file-json-revisionato",
+ "provider":"afs"}
+~~~
+
+Sostituire il valore illustrativo con l'hash SHA-256 reale emesso da `preview`. Il server registra e approva esattamente quella coppia profilo/hash: `POST /api/agents/admin/enqueue` e qualsiasi upload cifrato (push o pull) vengono rifiutati se hash/profilo non corrispondono, se l'agente è revocato oppure se il pull non possiede una lease valida. L'upload viene rifiutato **prima** di ricevere il flusso cifrato non autorizzato, e la validazione viene ripetuta durante il commit. Ogni modifica del file richiede una nuova approvazione.
+
+Un agente limita `max_concurrent_jobs` anche fra diversi processi CLI e tra job push/pull tramite slot-lock in `encrypted-spool`: quando tutti gli slot sono occupati, il nuovo job viene rifiutato senza superare il tetto; il lock viene rilasciato alla fine o dopo terminazione del processo. Non dichiarare ancora garantita la consistenza di schedulazioni attraverso host con device identity clonata: chiavi private e token non vanno copiati fra macchine.
+

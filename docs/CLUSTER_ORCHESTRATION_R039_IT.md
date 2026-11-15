@@ -138,3 +138,18 @@ Riferimenti: [agenti IT](AGENTS_AFS_R039_IT.md), [agenti EN](AGENTS_AFS_R039_EN.
 
 Nell'interfaccia web Rust è stato aggiunto il pannello **Cluster, agenti e backup paralleli**. Visualizza in sola lettura, con accesso amministrativo, l'insieme delle repliche (heartbeat e capacità), storage condivisi o locali con owner, ultimi job con stato/replica/trasporto e agenti approvati, offline o revocati. Il pannello interroga GET /api/cluster/status e GET /api/agents/admin/list sul server raggiunto e riceve lo stesso registro PostgreSQL indipendentemente dalla replica. Nessun input del database viene interpretato come HTML; l'interfaccia usa contenuti testuali sicuri. La gestione di registrazione, policy e cancellazione degli agenti resta effettuata tramite API amministrative protette; non è un'interfaccia di gestione completa degli agenti. Da collaudare su deployment Kubernetes con bilanciatore e sessioni condivise.
 
+
+## r039 — gestione lease scadute e riconciliazione sicura
+
+Il writer controlla il lease PostgreSQL mentre prepara i chunk e **subito prima** della pubblicazione del manifest cifrato. Il claim è serializzato sulla riga della replica per evitare overbooking del numero massimo di job. Le lease scadute passano allo stato **needs_reconciliation**: la riassegnazione automatica di job potenzialmente ancora in scrittura è DISABILITATA finché non esiste un fencing fisico verificato. Questo evita l'errore di attribuire la stessa operazione a un secondo pod mentre il precedente è ancora attivo; i job ancora in coda continuano a essere bilanciati automaticamente.
+
+Solo un amministratore dotato di autorizzazione di recupero indipendente può utilizzare POST /api/cluster/jobs/recover, con JSON:
+
+~~~json
+{"job_id":"backup-docs-001","previous_replica_id":"REPLICA_DEL_LEASE_SCADUTO",
+ "expected_attempts":1,"writer_terminated":true,
+ "encrypted_store_reconciled":true}
+~~~
+
+Usare `true` **soltanto** dopo aver constatato l'arresto del processo sul nodo precedente e aver verificato manifest, chunk, parità ed eventuali file orfani con procedura di audit. Il server rifiuta il recupero se la vecchia replica invia ancora heartbeat, se il job non è in quarantena oppure se l'identità del tentativo non coincide. La riassegnazione successiva avviene tramite il normale scheduler. **Non è ancora garantito failover totalmente automatico di job già in esecuzione né exactly-once fisico**; la prova di cancellazione dopo perdita di lease e di scrittura sotto partizione di rete resta un gate RC.
+

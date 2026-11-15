@@ -78,3 +78,17 @@ Full local/SSH/agent AFS dump and new-volume restore; incremental AFS chain time
 Agent local config has limits; server policy is set by authenticated admin POST /api/agents/admin/limits. Pull obtains limits from the approved agent poll; autonomous push first requests GET /api/agents/policy. The stricter of server and agent budgets applies. max_concurrent_jobs=1..256, threads_per_job=1..64, optional bytes/sec per stream, CPU/RAM percent and free RAM minimum; default 4 concurrent jobs and 4 per-job threads with optional caps unset.
 
 Parallelism is across distinct AFS volumes; one vos dump stream is indivisible. Bandwidth throttling and host admission are implemented cooperatively. Remote SSH host resource guarantees require additional approved remote instrumentation/cgroups. See [Kubernetes/cluster EN](CLUSTER_ORCHESTRATION_R039_EN.md) and [IT](CLUSTER_ORCHESTRATION_R039_IT.md).
+
+## r039 — approved executable profiles and process-wide concurrency
+
+Approving an agent device is not enough to authorize arbitrary host commands. On the agent host, create and review profiles/ID.json and run `multi-backup-agent preview --config PATH --profile ID` to obtain the exact displayed `profile_sha256` and typed vos plan. An authorized administrator separately calls **POST /api/agents/admin/profile** with admin session, CSRF and independent recovery authorization:
+
+~~~json
+{"agent_id":"afs-host-01","profile_id":"volume-test",
+ "profile_sha256":"REPLACE_WITH_ACTUAL_64_HEX_DIGIT_DIGEST","provider":"afs"}
+~~~
+
+The server pins this exact agent/profile/hash/provider binding; pull enqueue and push/pull uploads fail closed on missing, changed or revoked profiles. A preflight rejects unauthorized uploads before accepting large ciphertext bodies, and the receipt transaction validates the pin again. Every profile edit requires new approval.
+
+The local agent enforces max_concurrent_jobs across **independent CLI processes**, not only jobs in a single poll loop, using private disk-backed worker slots locked until the job/upload finishes. It rejects a new job when no slot is free. Do not clone a device identity or token across hosts.
+
