@@ -414,10 +414,15 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
     // A generic multi-plugin job requires streaming, verified commit and
     // restore preflight adapters, none of which are ready yet.
     let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready;
+    // Reflect the ACTUAL compiled generic dispatcher, not catalog roles.
+    // AFS uses separate typed volume CLI commands and cannot be generalized
+    // as a mounted-file backup or a POSIX directory restore.
     let preview_executable = match mode {
         Mode::Backup => destination.id == "posix" && matches!(source.id,
-            "posix" | "nfs" | "smb" | "gpfs" | "sshfs"),
-        Mode::Restore => source.id == "posix" && destination.id == "posix",
+            "posix" | "nfs" | "smb" | "gpfs" | "sshfs" |
+            "cephfs" | "glusterfs" | "lustre"),
+        Mode::Restore => source.id == "posix" && matches!(destination.id,
+            "posix" | "nfs" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
     };
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
@@ -485,6 +490,21 @@ mod tests {
                 assert!(!plan(Mode::Restore, source.id, target.id).unwrap().executable);
             }
         }
+    }
+    #[test]
+    fn actual_preview_pairs_match_the_native_dispatcher(){
+        for input in ["posix","nfs","smb","gpfs","sshfs",
+                      "cephfs","glusterfs","lustre"]{
+            assert!(plan(Mode::Backup,input,"posix").unwrap().preview_executable);
+        }
+        for output in ["posix","nfs","sshfs","cephfs","glusterfs","lustre"]{
+            assert!(plan(Mode::Restore,"posix",output).unwrap().preview_executable);
+        }
+        assert!(!plan(Mode::Backup,"afs","posix").unwrap().preview_executable,
+            "AFS volume commands are separate, not filesystem dispatcher");
+        assert!(!plan(Mode::Restore,"posix","afs").unwrap().preview_executable);
+        assert!(!plan(Mode::Backup,"github","posix").unwrap().preview_executable,
+            "Dedicated provider code is not generic executable capability");
     }
     #[test]
     fn preview_does_not_masquerade_as_qualified_plugin() {
