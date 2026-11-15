@@ -253,6 +253,16 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
     let form=match agents::validate_upload(&verified.metadata){
         Ok(v)=>v,Err(_)=>return error(StatusCode::BAD_REQUEST,"invalid_agent_upload_metadata")
     };
+    // Validate approved profile and active pull lease before accepting any
+    // large incoming body; a valid device must not upload arbitrary commands.
+    let precheck_db=db.clone();
+    let precheck_identity=verified.clone();
+    let precheck_form=form.clone();
+    match tokio::task::spawn_blocking(move||
+        agents::preflight_upload(&precheck_db,&precheck_identity,&precheck_form)).await{
+        Ok(Ok(true))=>{},
+        _=>return error(StatusCode::FORBIDDEN,"agent_profile_not_approved")
+    }
     const MAX_UPLOAD_BYTES:u64=200*1024*1024*1024;
     if form.encrypted_bytes>MAX_UPLOAD_BYTES {
         return error(StatusCode::PAYLOAD_TOO_LARGE,"agent_upload_too_large");
