@@ -349,12 +349,19 @@ mod tests{
         let mut left=[0u8;5];
         let mut right=[0u8;5];
         assert_eq!(a.read(&mut left).unwrap(),5);
+        let first:HostBudgetState=serde_json::from_slice(
+            &fs::read(directory.path().join(".host-upload-budget-v1.json"))
+                .unwrap()).unwrap();
+        assert_eq!(first.reserved_bytes,5);
         assert_eq!(b.read(&mut right).unwrap(),5);
         assert_eq!(&left,b"abcde");
         assert_eq!(&right,b"vwxyz");
         let stored=fs::read(directory.path().join(".host-upload-budget-v1.json")).unwrap();
         let state:HostBudgetState=serde_json::from_slice(&stored).unwrap();
-        assert_eq!(state.reserved_bytes,10);
+        // The CI runner may cross a UTC second boundary between reads:
+        // shared accounting must add within one window, reset across two.
+        assert_eq!(state.reserved_bytes,
+            if state.epoch_second==first.epoch_second {10}else{5});
     }
     #[test]fn malformed_or_future_host_budget_fails_closed(){
         let directory=private_tempdir();
