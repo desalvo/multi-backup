@@ -10,8 +10,9 @@ use multi_backup_core::{
 };
 use serde::Deserialize;
 use serde_json::{json,Value};
-use std::{error::Error,path::PathBuf,sync::{Arc,atomic::{AtomicBool,Ordering}},
-    thread,time::Duration};
+use std::{error::Error,path::PathBuf,
+    sync::{Arc,Mutex,mpsc,atomic::{AtomicBool,Ordering}},
+    thread,time::{Duration,Instant}};
 type Res<T>=Result<T,Box<dyn Error+Send+Sync>>;
 #[derive(Debug,Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,7 +29,8 @@ struct FilesystemSpec {
     #[serde(default)]gpfs_access:Option<String>
 }
 fn default_namespace()->String{"files".into()}
-fn run(lease:&Lease)->Res<Value>{
+fn run(lease:&Lease,live:&dyn Fn(bool)->Result<(),String>)->Res<Value>{
+    live(true)?;
     // SSH/agent delegated work is deliberately executed only via a
     // separately authorized agent dispatch route, not as a shell on a pod.
     if lease.source_transport!="server_local"{
@@ -47,37 +49,54 @@ fn run(lease:&Lease)->Res<Value>{
     }
     let access=profile.gpfs_access.as_deref().map(GpfsAccess::parse)
         .transpose()?;
-    let snapshot=plugin_executor::backup_with_mode(&lease.plugin_id,"posix",
+    let snapshot=plugin_executor::backup_with_mode_guard(&lease.plugin_id,"posix",
         &profile.source,&profile.store,&profile.identity,&profile.label,
         &profile.namespace,&profile.top_namespace,
         profile.snapshot_attested,access,profile.mode,
-        profile.parent_id.as_deref())?;
+        profile.parent_id.as_deref(),live)?;
     Ok(json!({"backup_id":snapshot.id,"label":snapshot.label,
         "logical_files":snapshot.entries.len(),"transport":"server_local",
         "replica_lease_attempt":lease.attempts}))
 }
 fn execute(db:Database,replica:String,lease:Lease){
-    let done=Arc::new(AtomicBool::new(false));
     let lost=Arc::new(AtomicBool::new(false));
     let cloned=db.clone();
     let job_id=lease.job_id.clone();
     let token=lease.token.clone();
     let id=replica.clone();
-    let done_heartbeat=done.clone();
     let lost_heartbeat=lost.clone();
+    let (stop,stop_receiver)=mpsc::channel::<()>();
     let renewal=thread::spawn(move||{
-        while !done_heartbeat.load(Ordering::Acquire){
-            thread::sleep(Duration::from_secs(20));
-            if done_heartbeat.load(Ordering::Acquire){break;}
+        while stop_receiver.recv_timeout(Duration::from_secs(20)).is_err(){
             if !matches!(cloned.renew(&id,&job_id,&token,120),Ok(true)){
                 lost_heartbeat.store(true,Ordering::Release);
                 break;
             }
         }
     });
-    let result=run(&lease);
-    done.store(true,Ordering::Release);
-    // No thread termination API: renewal wakes up within 20 seconds.
+    let check_db=db.clone();
+    let check_replica=replica.clone();
+    let check_job=lease.job_id.clone();
+    let check_token=lease.token.clone();
+    let checkpoint=Mutex::new(Instant::now()-Duration::from_secs(10));
+    let guard=|force:bool|->Result<(),String>{
+        if lost.load(Ordering::Acquire){
+            return Err("Lost cluster writer lease; stop before manifest publication".into());
+        }
+        let mut last=checkpoint.lock().map_err(|_|"Lease guard poisoned")?;
+        if force || last.elapsed()>Duration::from_secs(2){
+            let valid=check_db.is_current(&check_replica,&check_job,&check_token)
+                .map_err(|_|"Cluster database unreachable; refusing writes")?;
+            if !valid{
+                lost.store(true,Ordering::Release);
+                return Err("Writer lease no longer current".into());
+            }
+            *last=Instant::now();
+        }
+        Ok(())
+    };
+    let result=run(&lease,&guard);
+    let _=stop.send(());
     let _=renewal.join();
     // A lost lease may have been reassigned. Refuse to report success or
     // mutate another replica's state. The extra write fence for ciphertext
@@ -104,7 +123,13 @@ pub async fn spawn(db:Database,replica:String){
         timer.tick().await;
         let local=db.clone();
         let id=replica.clone();
-        let next=tokio::task::spawn_blocking(move||local.claim(&id,120)).await;
+        let next=tokio::task::spawn_blocking(move||{
+            let quarantined=local.quarantine_expired()?;
+            if quarantined>0{
+                eprintln!("Quarantined {quarantined} expired distributed jobs: reconciliation required before reuse");
+            }
+            local.claim(&id,120)
+        }).await;
         match next{
             Ok(Ok(Some(lease)))=>{
                 let db=db.clone();
@@ -126,7 +151,7 @@ mod tests{
             limits:serde_json::to_value(ExecutionLimits::default()).unwrap(),
             token:"t".into(),attempts:1
         };
-        assert!(run(&make("afs","ssh_agentless")).is_err());
-        assert!(run(&make("github","server_local")).is_err());
+        assert!(run(&make("afs","ssh_agentless"),&|_|Ok(())).is_err());
+        assert!(run(&make("github","server_local"),&|_|Ok(())).is_err());
     }
 }
