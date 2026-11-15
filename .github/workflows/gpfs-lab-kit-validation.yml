@@ -1,0 +1,29 @@
+name: Multi Backup - GPFS Developer lab kit static acceptance
+on:
+  pull_request:
+    paths:
+      - 'scripts/gpfs-lab/**'
+      - 'docs/GPFS_DEVELOPER_LAB_R042_IT.md'
+      - '.github/workflows/gpfs-lab-kit-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe-lab-kit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify only scripts and IBM licensing boundaries
+        run: |
+          set -euo pipefail
+          for script in scripts/gpfs-lab/*.sh; do bash -n "$script"; done
+          grep -F '12 TB' docs/GPFS_DEVELOPER_LAB_R042_IT.md >/dev/null
+          grep -F 'Developer Edition' docs/GPFS_DEVELOPER_LAB_R042_IT.md >/dev/null
+          if bash scripts/gpfs-lab/03-runner-preflight.sh /tmp /var/tmp ces-nfs >/dev/null 2>&1; then
+            echo "FAIL: fake GPFS CES mount accepted"; exit 1
+          fi
+          if bash scripts/gpfs-lab/03-runner-preflight.sh /tmp /var/tmp native >/dev/null 2>&1; then
+            echo "FAIL: native GPFS driver false claim accepted"; exit 1
+          fi
+          echo 'PASS GPFS vendor-safe lab script and fake mount rejection'
