@@ -332,3 +332,8 @@ New implementation: quota-aware agent job slots across independent CLI processes
 
 The example Deployment now materializes 0600 Secret copies for UID 10001 and sets hardened mode with distinct gateway and recovery credentials, HPA 2–10 pods, PDB and shared RWX. Production Gate source audits enforce these properties. **A YAML shape test is not a real Kubernetes install test.** Before RC, run live Pod startup, readiness, replica scale-up/down, OIDC login, agent HTTPS authentication, PG outage, shared-vs-node-local placement, old-writer fencing, rollback and encrypted recoveries on an actual cluster.
 
+
+## r039 PostgreSQL driver TLS incompatibility fixed (code preview)
+
+Exact URI parsing for sslmode=verify-full was added, matching postgres 0.19's Require wire mode to verified native-tls certificate chain and hostname checks with TLS >=1.2 and optional private CA file. A Kubernetes CA Secret now supplies the trust anchor to UID 10001 via private 0600 initContainer copy. Production Gate asserts the implementation. **Still mandatory:** real PG with valid/invalid certificates, wrong hostname, expired CA, interrupted TLS, multi-node failover; successful compilation alone is not TLS certification.
+

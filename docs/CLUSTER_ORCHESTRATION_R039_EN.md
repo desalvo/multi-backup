@@ -132,3 +132,8 @@ Kubernetes Secrets normally project root-owned 0400 files, which an unprivileged
 
 The example is a development skeleton. Deploy a verified ingress that strips all client-supplied privileged headers, enforce TLS/mTLS and network policies, and leave MULTI_BACKUP_CLUSTER_EXECUTOR=disabled until real multi-node data and write-fencing tests pass. HPA scales the API/control plane, not unsafe in-flight job reassignments.
 
+
+## r039 PostgreSQL full TLS verification (driver compatibility)
+
+The Rust postgres 0.19 client does not directly parse the libpq `sslmode=verify-full` enum. Multi Backup requires exactly one `sslmode=verify-full` query parameter in a structurally parsed postgresql:// URI, rejects duplicate/downgrade and unsafe host overrides, and safely normalizes only the transport's SSL mode to `require`. The native-tls adapter enforces TLS >=1.2 and **performs real certificate-chain and hostname verification**. For a private database CA set `MULTI_BACKUP_CLUSTER_TLS_CA_FILE=/run/secrets/db-ca.pem`; the example Kubernetes deployment copies the trusted `multi-backup-db-ca/db-ca.pem` secret to a UID 10001 private 0600 file. Never accept invalid certificates or hostnames, or silently fall back to plaintext.
+

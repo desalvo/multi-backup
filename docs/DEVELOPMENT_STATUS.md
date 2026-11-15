@@ -649,3 +649,8 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 - Added HPA resource-based horizontal scaling 2–10 replicas and PodDisruptionBudget with existing shared PostgreSQL control plane, storage RWX, readiness checks and startup-disabled backup executor. The control plane may autoscale; live writer failover remains quarantined until physical fencing is proven.
 - Production Gate now parses and checks actual YAML Deployment, Service, RWX PVC, HPA/PDB, initContainer and mandatory hardened settings. Added IT/EN operational instructions and certification blockers.
 - The last baseline green full CI before these changes was run 43655428169 on b3fe87d9 (30/30 jobs). Later focused Rust validation was green on intermediate r039 heads; **new current head still needs its own full CI and real field acceptance**. PR #11 remains draft; no merge, stable release or Docker push.
+
+## r039 PostgreSQL TLS correction — 2026-11-15
+
+- Fixed a significant HA startup incompatibility: postgres Rust 0.19 does not support sslmode=verify-full parsing directly. Implemented strict URI query parsing with duplicate/downgrade rejection, secure driver normalization to sslmode=require and explicit native-tls TLS>=1.2 verified certificate/hostname. Optional MULTI_BACKUP_CLUSTER_TLS_CA_FILE supports a trusted private CA. Added negative-case unit tests.
+- Updated Kubernetes preview with private multi-backup-db-ca Secret copy; Production Gate now checks CA env and TLS safe defaults. IT/EN operations and security documentation updated. Exact-head full CI and actual CA/cert failure tests required before RC.

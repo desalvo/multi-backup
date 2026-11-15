@@ -162,3 +162,8 @@ Il manifest `k8s/multi-backup-cluster-r039.preview.yaml` mostra Service, Deploym
 
 L'HPA scala le repliche dell'API, non abilita automaticamente lo spostamento di un writer che ha perso il lease. L'esecutore resta disabilitato fino a verifiche sul vero storage condiviso, fencing e recupero dei job. La prova K8s reale e l'installazione firmata rimangono necessarie prima della RC.
 
+
+## r039 — DSN PostgreSQL con verifica TLS reale
+
+**Correzione di compatibilità:** il crate postgres Rust 0.19 non implementa direttamente la stringa `sslmode=verify-full` come modalità libpq, ma supporta `require`. L'app richiede comunque la **DSN URI PostgreSQL con una e una sola query `sslmode=verify-full`**; la analizza con un parser URL strutturale, rifiuta duplicati, `disable`/`prefer`, parametri host/CA ingannevoli e quindi passa internamente `sslmode=require` al client PostgreSQL. Il connettore `native-tls` impone TLS almeno 1.2 e verifica **certificato, catena CA e nome host** senza bypass. Se il CA del PostgreSQL non è nel truststore di sistema, definire `MULTI_BACKUP_CLUSTER_TLS_CA_FILE=/run/secrets/db-ca.pem`, certificato PEM CA fidato. L'esempio Kubernetes copia anche `multi-backup-db-ca/db-ca.pem` nella directory privata 0600. Non disattivare verifiche TLS in produzione.
+
