@@ -701,3 +701,9 @@ Native database plugin IDs are now Preview for backup input and restore output o
 - Added private encrypted logical full-dump plugin commands for both, with remote TLS CA and secret-file requirements. Later SHA expands row-by-row checks and denied wrong-password publication; verify before marking latest CI pass.
 - Published authentic OpenAFS+MIT Kerberos provisioning workflow plus strict live lab acceptance script. Official Ansible local_install installs KDC/AFS servers/client; test requires actual Kerberos tickets and AFS tokens, VLDB calls, vos full/incremental, isolated new-volume restore and bytewise comparison. Workflow running/pending field outcome; live AFS claim remains BLOCKED until full successful job evidence.
 - Remain open: database WAL/binlog, PITR, physical full/incremental source snapshot, failover and multi-version upgrades; AFS production token/keytab, ACL, host power-loss tests and agent deployment.
+
+## r039 PostgreSQL WAL and MariaDB binlog real PITR CI
+- Created workflow `.github/workflows/database-pitr-integration.yml` and dedicated scripts for two real isolated database PITR restorations. Each must restore only committed transactions up to the target; missing post-target transactions are essential acceptance.
+- MariaDB 11.4 binlog position PITR PASS on run 43672237760: Rust FULL and age-encrypted binlog, native replay, 30 records, ID sum 465; ID 999 excluded. PostgreSQL physical base + WAL recovery CI has initial HBA issue and corrected fixture; await exact test evidence.
+- PostgreSQL physical staging and MariaDB plaintext binlog replay staging exist **inside disposable CI lab**; full unattended production PITR and log retention still incomplete.
+- IT/EN instructions in `docs/DATABASE_PITR_R039_IT.md` and `docs/DATABASE_PITR_R039_EN.md`.

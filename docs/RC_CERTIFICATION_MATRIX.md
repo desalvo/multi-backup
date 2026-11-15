@@ -368,3 +368,8 @@ or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
 - OpenAFS stateful virtual-cell compiled Rust acceptance PASS on earlier run 43669415521, 3/3 AFS integration tests.
 - Separate genuine OpenAFS+Kerberos/KDC/VLDB/volserver+mounted-client acceptance in `.github/workflows/afs-real-cell.yml`: pending real GitHub runner provisioning and full restore. **Not certified merely by creation of workflow**.
 - Still blocking signed release: physical lost-lease fencing, HA crash/failover tests, AFS field auth/ACL tests, database PITR and incremental consistency, independent signed installer acceptance.
+
+### r039 PITR CI qualification
+- MariaDB ROW binlog PITR on separate server: PASS run 43672237760 (30 records, sum IDs 465, excluded post-boundary ID 999). Does not establish multi-binlog retention/GTID/replay safety.
+- PostgreSQL basebackup + encrypted archived WAL + named recovery target acceptance: initially blocked by pg_hba replication rule; corrected CI pending fresh verified PASS. Production physical WAL/PITR remains blocked.
+- Both PITR scripts are manually orchestrated CI integration using native Rust encryption/restore, NOT certified full auto provider PITR or crash-consistent unattended no-plaintext operation.
