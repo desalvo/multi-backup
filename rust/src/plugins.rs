@@ -218,7 +218,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
         "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
         "Kerberos/delegation token, TLS and redirect allowlist; write only new paths, commit encrypted manifest last"),
-    PluginDescriptor::new("afs", "Andrew File System / OpenAFS", DataKind::DistributedFilesystem, PLAN, PLAN,
+    PluginDescriptor::new("afs", "Andrew File System / OpenAFS", DataKind::DistributedFilesystem, PREVIEW, PREVIEW,
         "AFS cell+volume IDs and VLDB inventory; read-only/backup volume snapshot, vos full/incremental dump chain and ACLs",
         "Operator-supplied OpenAFS client/tools under IBM Public License; preserve cell, mountpoints and ACLs; restore new volume only"),
     PluginDescriptor::new("alfresco", "Alfresco Content Services", DataKind::DocumentRepository, PLAN, PLAN,
@@ -579,10 +579,10 @@ mod tests {
             let d = find(id).unwrap();
             // GPFS CES has a strictly read-only mounted-source preview;
             // output and all other providers remain declarative only.
-            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre") {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.backup_output, Stage::Planned, "{id}");
-            assert_eq!(d.restore_input, Stage::Planned, "{id}");
-            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_output, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_input, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
