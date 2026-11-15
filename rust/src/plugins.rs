@@ -249,10 +249,12 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "VADP/CBT snapshot and config inventory", "Restore into a new VM and datastore; license/API checks required"),
     PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PLAN, NONE,
         "VM snapshot/engine API and volume exports", "Engine state, VM identity and disk snapshots are distinct scopes"),
-    PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PLAN, NONE,
-        "Transactional snapshot plus binlog position", "Logical/physical backup requires engine-specific consistent backup and PITR policy"),
-    PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PLAN, NONE,
-        "pg_basebackup/WAL or consistent logical snapshot", "PITR, role/grant restore and version compatibility require explicit acceptance"),
+    PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
+        "Rust MariaDB InnoDB transactional FULL logical dump and create-only restore",
+        "Requires client-installed mariadb-dump/mariadb, private credentials, TLS CA for remote; no binlog PITR, DDL snapshot certification or Oracle MySQL acceptance"),
+    PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PREVIEW, NONE,
+        "Rust PostgreSQL FULL pg_dump custom format and isolated pg_restore",
+        "Requires client-installed pg_dump/pg_restore, private credentials, TLS CA for remote; WAL/PITR and roles/extensions parity still open"),
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PLAN, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
@@ -344,6 +346,11 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             AccessGate::OAuthScopeReview =>
                 required_preflight.push("verify OAuth app consent, provider API restrictions and least-privilege drive/tenant scopes"),
             AccessGate::ExternalProtocolOrMountedClient => {}
+        }
+        if plugin.id == "postgresql" || plugin.id == "mysql" {
+            required_preflight.push("require transaction-consistent FULL dump with verified role privileges; native client version must match server compatibility");
+            required_preflight.push("require private credential file, verified TLS for remote databases, and destination NEW database that does not yet exist");
+            required_preflight.push("logical full backup only; WAL/binlog PITR, application quiescing and physical incremental backups are not certified");
         }
         if plugin.id == "afs" {
             required_preflight.push("verify AFS cell, VLDB volume ID, volume type, Kerberos tokens, ACLs and mountpoints; preserve full/incremental dump chain");
@@ -513,6 +520,14 @@ mod tests {
         assert_eq!(p.destination_stage, Stage::Preview);
         assert!(!p.executable);
         assert_eq!(find("postgresql").unwrap().kind, DataKind::Database);
+        for database in ["postgresql","mysql"] {
+            let d=find(database).unwrap();
+            assert_eq!(d.backup_input,Stage::Preview);
+            assert_eq!(d.restore_output,Stage::Preview);
+            assert_eq!(d.restore_input,Stage::Unsupported);
+            assert!(!plan(Mode::Backup,database,"posix").unwrap().preview_executable,
+                "Dedicated DB commands must not be misrepresented as generic executor");
+        }
         assert_eq!(find("rbd").unwrap().kind, DataKind::BlockDevice);
     }
     #[test]

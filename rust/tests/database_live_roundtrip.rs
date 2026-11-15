@@ -79,6 +79,9 @@ fn exercise(engine:&str){
     target["database"]=json!(dst);
     private(&profilepath,&serde_json::to_vec(&source).unwrap());
     private(&targetpath,&serde_json::to_vec(&target).unwrap());
+    let source_rows=if engine=="postgresql"{
+        pg(src,"SELECT id::text || '|' || name FROM inventory ORDER BY id")
+    }else{maria(src,"SELECT CONCAT(id,'|',name) FROM inventory ORDER BY id")};
     let output=cli(&["plugins","database-backup","--profile-json",strpath(&profilepath),
         "--root",strpath(&storepath),"--identity",strpath(&key),
         "--label","live-db-full","--json"],true);
@@ -102,6 +105,10 @@ fn exercise(engine:&str){
         pg(dst,"SELECT COUNT(*), SUM(id) FROM inventory")
     }else{maria(dst,"SELECT COUNT(*), SUM(id) FROM inventory")};
     assert_eq!(count,expected,"Database restore content mismatch");
+    let recovered_rows=if engine=="postgresql"{
+        pg(dst,"SELECT id::text || '|' || name FROM inventory ORDER BY id")
+    }else{maria(dst,"SELECT CONCAT(id,'|',name) FROM inventory ORDER BY id")};
+    assert_eq!(recovered_rows,source_rows,"Complete row-by-row recovery mismatch");
     cli(&["plugins","database-restore-new","--profile-json",strpath(&targetpath),
         "--root",strpath(&storepath),"--identity",strpath(&key),
         "--id",&id,"--confirm-target",&confirmation,"--json"],false);
@@ -110,7 +117,21 @@ fn exercise(engine:&str){
     }else{maria(dst,"SELECT COUNT(*), SUM(id) FROM inventory")};
     assert_eq!(again,expected,"Existing restore target changed after denied overwrite");
     assert!(store.verify(&key,&id).unwrap().healthy);
-    println!("PASSED real {engine} create-only encrypted roundtrip; 1000 rows verified");
+    // With an explicitly wrong credential, a live dump must fail closed
+    // and must not commit a second encrypted logical snapshot.
+    let invalid=dir.path().join("bad-credentials");
+    if engine=="postgresql"{
+        private(&invalid,b"127.0.0.1:5432:*:postgres:wrong_password\n");
+    }else{private(&invalid,b"[client]\npassword=wrong_password\n");}
+    let mut bad=source.clone();
+    bad["credentials_file"]=json!(invalid);
+    let badpath=dir.path().join("bad-profile.json");
+    private(&badpath,&serde_json::to_vec(&bad).unwrap());
+    cli(&["plugins","database-backup","--profile-json",strpath(&badpath),
+        "--root",strpath(&storepath),"--identity",strpath(&key),
+        "--label","bad-credential-must-not-commit","--json"],false);
+    assert_eq!(store.list(&key).unwrap().len(),1);
+    println!("PASSED real {engine} create-only encrypted roundtrip; 1000 rows verified byte-for-byte; invalid credentials fail closed");
 }
 #[test]fn real_postgres_full_restore(){
     if std::env::var("MULTI_BACKUP_LIVE_DATABASE_CI").ok().as_deref()!=Some("1"){return;}

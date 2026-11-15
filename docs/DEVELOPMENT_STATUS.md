@@ -691,3 +691,7 @@ Native Rust RestoreNewJob now optionally accepts Execution::SshAgentless with pi
 ## r039 native database logical adapters
 
 Added native Rust PostgreSQL and MariaDB full logical dump and restore-new stream adapters. Dump stdout is stored directly in encrypted age/zstd chunks; restore writes to a newly created target database, never drops existing data. Files holding credentials require 0600. Remote targets require private TLS CA files. **CI and E2E checks are not yet complete**. WAL/binlog PITR and physical incremental backups remain separate work.
+
+## r039 database live acceptance extension
+
+Native database plugin IDs are now Preview for backup input and restore output only, but generic pairing remains disabled. Live PostgreSQL 16 and MariaDB 11.4 1000-row restore tests passed in run 43670330802 (2/2). Expanded tests compare every ordered source/restored record and reject wrong credentials without publishing a manifest. New exact-head CI still required. WAL/binlog PITR and physical incremental support are NOT complete.

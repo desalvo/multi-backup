@@ -197,3 +197,7 @@ OpenAFS is NOT a POSIX mounted-tree adapter. Dedicated commands plugins afs-back
 ## r039+ AFS SSH restore output
 
 The AFS dedicated restore executor now supports NEW-volume recovery either directly on a local AFS host with authorized token, or over pinned public-key-only SSH agentless to a remote host that independently has a valid authorized AFS token. Typed full/incremental vos restore command never accepts arbitrary server-supplied shell, always checks age encrypted chain and refuses overwriting a pre-existing volume. Remote restore via an approved managed agent, keytab and privileged direct localauth are still not complete/certified.
+
+### r039 native PostgreSQL/MariaDB full logical previews
+
+The `postgresql` and `mysql` plugin IDs now expose `Preview` as backup inputs and restore outputs. This reflects **dedicated** `plugins database-backup` and `plugins database-restore-new` commands, NOT generic automatic pairing or readiness. PostgreSQL custom-format pg_dump + pg_restore and MariaDB InnoDB single-transaction mariadb-dump + mariadb are executable through Rust age/zstd streaming. The CLI uses explicit private 0600 credentials and CA-verified TLS for non-loopback targets, never drops existing databases, and refuses an invalid dump. Separate live service CI checks encrypted create-only recovery with 1000 rows per engine. Oracle MySQL interoperability, WAL/binlog PITR, physical incremental consistency, concurrency, extensions/roles and upgrade testing remain outside this preview.

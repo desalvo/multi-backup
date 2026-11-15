@@ -596,3 +596,7 @@ Confirm CI on the exact new commit SHA; keep PR #11 draft.
 ## r039 database adapters handoff
 
 New Rust `database.rs` plus `plugins database-backup|database-restore-new` CLI. Full dump via pg_dump custom and mariadb-dump transactional; restore to NEW database via pg_restore/mariadb. Use a separate GitHub Actions job with real DB service containers and negative cases, and do not certify until exact-sha green. Missing: incremental WAL/binlog PITR, physical hot backup, DDL races, agent dispatch, vendor compatibility.
+
+## r039 database preview catalog and stronger live tests
+
+PostgreSQL and MariaDB backup inputs plus restore outputs marked Preview; generic dispatcher remains disabled. The live DB test now compares all 1000 rows, rejects wrong password with no extra authenticated manifest. Earlier verified database live workflow 43670330802 passed; further changed SHA must pass again. No stable or general MySQL/PITR certification.
