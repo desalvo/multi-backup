@@ -25,13 +25,44 @@ pub struct Enrollment {
 pub struct AgentChange {pub agent_id:String}
 #[derive(Debug,serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ProfileApproval {
+    pub agent_id:String,
+    pub profile_id:String,
+    pub profile_sha256:String,
+    pub provider:String,
+}
+/// A profile must be separately reviewed before the agent can execute
+/// an autonomous push, or accept a pull lease for that exact profile hash.
+pub fn approve_profile(db:&Database,profile:&ProfileApproval)->Res<bool>{
+    if !wire::valid_id(&profile.agent_id)||
+       !wire::valid_id(&profile.profile_id)||
+       !valid_hash(&profile.profile_sha256)||
+       !wire::valid_id(&profile.provider) {
+        return Err(fail("Unsafe agent profile approval"));
+    }
+    let mut conn=db.connect()?;
+    let changed=conn.execute("INSERT INTO mb_agent_profiles
+       (agent_id,profile_id,profile_sha256,provider,approved,approved_at)
+       SELECT agent_id,$2,$3,$4,true,now() FROM mb_agent_registry
+       WHERE agent_id=$1 AND approved AND NOT revoked
+       ON CONFLICT(agent_id,profile_id)
+       DO UPDATE SET profile_sha256=EXCLUDED.profile_sha256,
+                     provider=EXCLUDED.provider,approved=true,
+                     approved_at=now()",
+       &[&profile.agent_id,&profile.profile_id,
+         &profile.profile_sha256,&profile.provider])?;
+    Ok(changed==1)
+}
+#[derive(Debug,serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PullJob{
     pub agent_id:String,pub profile_id:String,pub profile_sha256:String
 }
 #[derive(Debug,serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UploadManifest{
-    pub backup_id:String,pub profile_id:String,pub provider:String,
+    pub backup_id:String,pub profile_id:String,pub profile_sha256:String,
+    pub provider:String,
     pub cell:String,pub volume:String,pub encrypted_bytes:u64,
     pub recipient:String,
     #[serde(default)]pub pull_job_id:Option<String>,
@@ -105,8 +136,10 @@ pub fn enqueue_pull(db:&Database,job:&PullJob)->Res<String>{
     let id=hex::encode(rand::random::<[u8;32]>());
     let n=conn.execute("INSERT INTO mb_agent_pull_jobs
         (job_id,agent_id,profile_id,profile_sha256)
-        SELECT $1,agent_id,$3,$4 FROM mb_agent_registry
-        WHERE agent_id=$2 AND approved AND NOT revoked",
+        SELECT $1,r.agent_id,$3,$4 FROM mb_agent_registry r
+        JOIN mb_agent_profiles p ON p.agent_id=r.agent_id
+        WHERE r.agent_id=$2 AND r.approved AND NOT r.revoked
+          AND p.profile_id=$3 AND p.profile_sha256=$4 AND p.approved",
         &[&id,&job.agent_id,&job.profile_id,&job.profile_sha256])?;
     if n==0{return Err(fail("Agent is unapproved, unknown or revoked"));}
     Ok(id)
@@ -208,6 +241,7 @@ pub fn validate_upload(meta:&[u8])->Res<UploadManifest>{
     if meta.len()>wire::MAX_METADATA_BYTES{return Err(fail("Upload metadata oversized"));}
     let form:UploadManifest=serde_json::from_slice(meta)?;
     if !valid_hash(&form.backup_id)||!wire::valid_id(&form.profile_id)||
+        !valid_hash(&form.profile_sha256)||
         form.provider!="afs"||!wire::valid_id(&form.cell)||
         !wire::valid_id(&form.volume)||form.encrypted_bytes==0||
         !form.recipient.starts_with("age1")||form.recipient.len()>120||
@@ -226,20 +260,31 @@ pub fn commit_upload(db:&Database,identity:&Verified,form:&UploadManifest,
     }
     let mut conn=db.connect()?;
     let mut tx=conn.transaction()?;
+    // Revalidate approved pin under the SAME DB transaction as the receipt;
+    // a valid agent identity never authorizes an arbitrary local script.
+    let current=tx.query_opt("SELECT 1 FROM mb_agent_profiles p
+        JOIN mb_agent_registry a ON a.agent_id=p.agent_id
+        WHERE a.agent_id=$1 AND a.approved AND NOT a.revoked
+          AND p.profile_id=$2 AND p.profile_sha256=$3
+          AND p.provider=$4 AND p.approved
+        FOR SHARE OF p,a",
+        &[&identity.agent_id,&form.profile_id,
+          &form.profile_sha256,&form.provider])?;
+    if current.is_none(){return Err(fail("Agent profile is not approved"));}
     if let Some(job_id)=&form.pull_job_id{
         let changed=tx.execute("UPDATE mb_agent_pull_jobs SET state='success',
             lease_until=NULL WHERE job_id=$1 AND agent_id=$2 AND profile_id=$3
-            AND state='leased' AND lease_until>now()",
-            &[&job_id,&identity.agent_id,&form.profile_id])?;
+            AND profile_sha256=$4 AND state='leased' AND lease_until>now()",
+            &[&job_id,&identity.agent_id,&form.profile_id,&form.profile_sha256])?;
         if changed!=1{return Err(fail("Pull job lease expired or not approved"));}
     }
     tx.execute("INSERT INTO mb_agent_uploads
-        (backup_id,agent_id,owner_user,profile_id,cell,volume,
+        (backup_id,agent_id,owner_user,profile_id,profile_sha256,cell,volume,
          recipient,blob_path,encrypted_bytes,ciphertext_sha256)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         &[&form.backup_id,&identity.agent_id,&identity.owner_user,
-          &form.profile_id,&form.cell,&form.volume,&form.recipient,
-          &path,&(bytes as i64),&digest])?;
+          &form.profile_id,&form.profile_sha256,&form.cell,&form.volume,
+          &form.recipient,&path,&(bytes as i64),&digest])?;
     tx.commit()?;
     Ok(())
 }
