@@ -395,3 +395,5 @@ or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
 | Oracle Multi Backup backup/restore | Actual Oracle RMAN full/incremental encrypted backup, controlfile/SPFILE/archivelogs and restore/recovery on NEW isolated DB | **NOT IMPLEMENTED / NOT CERTIFIED**; RMAN validation alone cannot pass |
 
 See [r041 field acceptance and safety specification](LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md). These are separate from r040 Kubernetes pod/PG TLS readiness and cannot unblock stable publication by themselves.
+
+The hosted Rust fail-closed checks additionally execute inside the **unified Production Gate** (`.github/workflows/ci.yml`); failure blocks all downstream package/container publishing. This does not replace the separate Lustre or licensed Oracle real field gates.
