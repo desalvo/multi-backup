@@ -195,7 +195,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     limits.max_transfer_bytes_per_sec=Some(value.parse()?);
                 }
                 limits.validate()?;
-                let backup=afs_volume::backup_local_volume_to_store(
+                let backup=afs_volume::backup_volume_to_store(
                     &job,Path::new(required(&flags,"--root")?),
                     Path::new(required(&flags,"--identity")?),
                     required(&flags,"--label")?,&limits)?;
