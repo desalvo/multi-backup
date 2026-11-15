@@ -116,3 +116,9 @@ banda dell'host, il dump AFS locale, il server, più host distinti o più pod
 Kubernetes. Per questi serve una quota condivisa cross-node e, per una garanzia
 rigida su CPU/RAM/rete, cgroups/Job Objects o controlli di rete a livello OS.
 Non considerare questa funzionalità certificata senza test su host reali.
+
+## Laboratorio CI con cella OpenAFS e Kerberos autentici
+`/.github/workflows/afs-real-cell.yml` (path reale `.github/workflows/afs-real-cell.yml`) installa il laboratorio **vero** mediante la collezione Ansible openafs_contrib.openafs (playbook local_install). Il laboratorio prevede KDC MIT, principal admin e service keytab, VLDB/Protection DB, OpenAFS fileserver, mount /afs, token `kinit -k` e `aklog`.
+Il collaudo `scripts/test-real-afs-cell.sh` forza `vos` autentico e confronta byte per byte il contenuto del volume dopo full+incremental e restore su volume nuovo. Rifiuta token assenti, conferme errate, un volume di destinazione preesistente e backup di un volume inesistente.
+**Stato:** provisionamento e collaudo sul GitHub runner da verificare sul job esatto; il test simulato precedente NON sostituisce questo.
+Può richiedere intestazioni kernel disponibili e DKMS compatibile: se la CI fallisce durante l'installazione del modulo, occorre un runner dedicato con supporto OpenAFS; non bypassare con fake vos.

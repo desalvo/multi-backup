@@ -695,3 +695,9 @@ Added native Rust PostgreSQL and MariaDB full logical dump and restore-new strea
 ## r039 database live acceptance extension
 
 Native database plugin IDs are now Preview for backup input and restore output only, but generic pairing remains disabled. Live PostgreSQL 16 and MariaDB 11.4 1000-row restore tests passed in run 43670330802 (2/2). Expanded tests compare every ordered source/restored record and reject wrong credentials without publishing a manifest. New exact-head CI still required. WAL/binlog PITR and physical incremental support are NOT complete.
+
+## r039 new CI — authentic AFS and live database recovery
+- Published dedicated container CI for PostgreSQL 16/MariaDB 11.4. Run 43670330802 tested native Rust CLI with real SQL engine processes; 2/2 passed (each restored 1000 rows into NEW databases, rejected second restore).
+- Added private encrypted logical full-dump plugin commands for both, with remote TLS CA and secret-file requirements. Later SHA expands row-by-row checks and denied wrong-password publication; verify before marking latest CI pass.
+- Published authentic OpenAFS+MIT Kerberos provisioning workflow plus strict live lab acceptance script. Official Ansible local_install installs KDC/AFS servers/client; test requires actual Kerberos tickets and AFS tokens, VLDB calls, vos full/incremental, isolated new-volume restore and bytewise comparison. Workflow running/pending field outcome; live AFS claim remains BLOCKED until full successful job evidence.
+- Remain open: database WAL/binlog, PITR, physical full/incremental source snapshot, failover and multi-version upgrades; AFS production token/keytab, ACL, host power-loss tests and agent deployment.

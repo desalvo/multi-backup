@@ -362,3 +362,9 @@ production-certified network shaping. Remaining hard gates: actual
 multi-process throughput measurement on macOS/Windows/Linux, crash/restart
 and clock-step recovery procedures, SSH/source streaming, server node-level
 or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
+
+### r039 database and authentic OpenAFS release qualification
+- PostgreSQL 16 and MariaDB 11.4 real-container full logical backup + restored 1,000 rows per engine: first live CI run 43670330802 PASS (2/2). New SHA adds full row-by-row comparisons and wrong-credential fail-closed test; exact-head verification still required.
+- OpenAFS stateful virtual-cell compiled Rust acceptance PASS on earlier run 43669415521, 3/3 AFS integration tests.
+- Separate genuine OpenAFS+Kerberos/KDC/VLDB/volserver+mounted-client acceptance in `.github/workflows/afs-real-cell.yml`: pending real GitHub runner provisioning and full restore. **Not certified merely by creation of workflow**.
+- Still blocking signed release: physical lost-lease fencing, HA crash/failover tests, AFS field auth/ACL tests, database PITR and incremental consistency, independent signed installer acceptance.

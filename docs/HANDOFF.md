@@ -600,3 +600,9 @@ New Rust `database.rs` plus `plugins database-backup|database-restore-new` CLI. 
 ## r039 database preview catalog and stronger live tests
 
 PostgreSQL and MariaDB backup inputs plus restore outputs marked Preview; generic dispatcher remains disabled. The live DB test now compares all 1000 rows, rejects wrong password with no extra authenticated manifest. Earlier verified database live workflow 43670330802 passed; further changed SHA must pass again. No stable or general MySQL/PITR certification.
+
+## r039 latest — database real CI and AFS real-cell attempt
+- Current Rust DB preview `rust/src/database.rs`: PostgreSQL pg_dump custom, pg_restore into freshly created DB; MariaDB single-transaction/InnoDB mariadb-dump and create-only mariadb restore; age/zstd content-addressed full backup.
+- `rust/tests/database_live_roundtrip.rs`, workflow `.github/workflows/database-live-integration.yml`: real service containers Postgres16 + MariaDB11.4, first proven PASS run 43670330802, 2/2. Expanded negative credential checks/row-level byte comparison require later-head green run.
+- `scripts/test-real-afs-cell.sh` and `.github/workflows/afs-real-cell.yml`: require real OpenAFS Ansible local_install, MIT Kerberos KDC, token, mount, VLDB, volserver, vos dump/restore and byte-identical full+incremental restore. If hosted-runner DKMS fails, preserve red signal and move to prepared lab runner; NEVER substitute fake vos and label it authentic.
+- Keep PR #11 draft and stable disabled until latest SHA CI and independent production evidence. True DB PITR and AFS failover/keytab field certification remain unimplemented.

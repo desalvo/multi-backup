@@ -111,3 +111,7 @@ This applies to **agent HTTPS uploads**, not source AFS dump, arbitrary host
 network traffic, server transfers, independent hosts or Kubernetes-wide
 replicas. OS-level hard limits and a shared cross-node quota still require
 separate implementations and live acceptance.
+
+## Authentic Kerberos/OpenAFS CI lab
+`.github/workflows/afs-real-cell.yml` attempts to install a genuine local Kerberos KDC + OpenAFS database/file servers, client and test volumes using openafs_contrib.openafs.local_install Ansible playbook. `scripts/test-real-afs-cell.sh` requires real kinit/aklog/tokens, VLDB vos commands, mounted /afs, full and incremental dump, new-volume restore with byte-for-byte comparisons, overwrite refusal and non-existing volume rejection.
+**Pending exact-head CI:** provisioning and live restore are not certified until this job reports success. Linux DKMS/headers on hosted runners may be incompatible; use a suitably prepared isolated self-hosted lab if needed, never fake vos for production acceptance.
