@@ -382,3 +382,27 @@ or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
 - POSIX Rust full/incremental, 10MiB mixed-sized chunks, selective restore, wrong key, symlink/FIFO and corrupted ciphertext parity repair **PASS** at run 43678452447. No ACL/xattr, mtime/uid/gid snapshot fidelity certification.
 - Real SSH/SCP/SFTP protocol and FUSE SSHFS CI source scripts added; these are *in progress* until individual job PASS. SSH catalog direct provider still Planned, no claim of native SSH plugin implementation.
 - OpenAFS authentic KDC/VLDB/fileserver/restore field workflow now manual on a disposable self-hosted `openafs-ci` runner, with exact SHA, sentinel and verified OpenAFS DKMS, to avoid unsupported Azure kernel; no PASS evidence yet, mandatory field gate stays open.
+
+## r041 — Lustre and Oracle acceptance (2026-11-15)
+
+| Gate | Evidence needed | Status |
+|---|---|---|
+| Lustre mounted backend guard | Hosted CI rejects local directories as Lustre backup or restore mounts using compiled Rust CLI | Prepared; new CI result pending |
+| Lustre real full+incremental | Dedicated genuine RO MDT/OST snapshots, encrypted Rust backup/verify-chain, create-only independent Lustre RW restore, byte equality and deletion propagation | **NOT TESTED ON REAL LUSTRE**; self-hosted lab required |
+| Lustre metadata fidelity | Numeric UID/GID, file mode, mtime, ACL, user xattr and `lfs getstripe` from genuine Lustre snapshots and recovered files | **BLOCKED**: generic archive metadata/striping not yet proven |
+| Oracle generic executor safety | Oracle profile rejected by MySQL/PostgreSQL adapter, and Oracle backup/restore plugin plans remain non-executable | Prepared; hosted CI result pending |
+| Oracle genuine RMAN preflight | Approved licensed isolated database, authenticated RMAN `BACKUP VALIDATE CHECK LOGICAL DATABASE` and `RESTORE DATABASE VALIDATE` | **NOT EXECUTED**; approval/instance/backup pieces required |
+| Oracle Multi Backup backup/restore | Actual Oracle RMAN full/incremental encrypted backup, controlfile/SPFILE/archivelogs and restore/recovery on NEW isolated DB | **NOT IMPLEMENTED / NOT CERTIFIED**; RMAN validation alone cannot pass |
+
+See [r041 field acceptance and safety specification](LUSTRE_ORACLE_FIELD_ACCEPTANCE_R041.md). These are separate from r040 Kubernetes pod/PG TLS readiness and cannot unblock stable publication by themselves.
+
+The hosted Rust fail-closed checks additionally execute inside the **unified Production Gate** (`.github/workflows/ci.yml`); failure blocks all downstream package/container publishing. This does not replace the separate Lustre or licensed Oracle real field gates.
+
+## Real lab CI acceptance (15 November 2026)
+
+- **Identical tested source SHA**: `eb3dbf2f964686452fbacc865fd1e9e3be1fcd92`.
+- **Lustre genuine Rocky9 QEMU lab PASS**: [run 43761650658](https://github.com/desalvo/multi-backup/actions/runs/43761650658). Actual Lustre kernel, one live MDT, three live OST, native client, 2-OST file striping, file checksum verification and independent read-only client mount. Also [earlier independent PASS 43760867316](https://github.com/desalvo/multi-backup/actions/runs/43760867316). This is an authentic Lustre **infrastructure** acceptance, not a Rust encrypted Lustre restore or consistent MDT+OST snapshot certification.
+- **Oracle Database Free authentic RMAN PDB backup-piece roundtrip PASS**: [run 43761650595](https://github.com/desalvo/multi-backup/actions/runs/43761650595). In a disposable Oracle Free regular image, `FREEPDB1` runs in ARCHIVELOG, RMAN creates real PDB backup pieces, Multi Backup Rust generic POSIX adapter encrypts and verifies those pieces using age/zstd, restores them byte-for-byte, and RMAN runs `RESTORE PLUGGABLE DATABASE FREEPDB1 VALIDATE` against the recovered pieces. This does not perform an actual PDB restore and does not implement a native Oracle provider.
+- **Hosted provider guard PASS**: [run 43761650585](https://github.com/desalvo/multi-backup/actions/runs/43761650585). Full production CI [run 43761650615](https://github.com/desalvo/multi-backup/actions/runs/43761650615) is independent and must be separately verified at its final conclusion.
+- Previous failed CI attempts discovered and fixed actual constraints: rootless Podman GID mapping, QEMU/KVM ACL, outdated Lustre procfs check, unauthenticated GitHub releases throttling, Oracle readiness test, and RMAN-06817 requiring ARCHIVELOG for online PDB backup.
+- **Still release-blocking**: Lustre coordinated MDT+OST snapshots, actual native Rust encrypted Lustre full/incremental restore with mode/owner/ACL/xattr/mtime/striping verification, Oracle native RMAN adapter and complete full/archivelog/incremental restore onto an independent new database with PITR, and all other RC security/HA/installer gates. No stable release/merge authorization inferred from these smoke runs.

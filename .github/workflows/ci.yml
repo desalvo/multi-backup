@@ -86,6 +86,13 @@ jobs:
           cargo test --manifest-path rust/Cargo.toml --lib afs_volume
           cargo test --manifest-path rust/Cargo.toml --bin multi-backup-agent
           cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-agent
+      - name: Mandatory Rust Lustre and Oracle fail-closed safety acceptance
+        run: |
+          sudo apt-get install -y jq
+          bash -n scripts/test-real-lustre-roundtrip.sh
+          bash -n scripts/test-oracle-rman-lab.sh
+          bash -n scripts/test-lustre-oracle-guards.sh
+          bash scripts/test-lustre-oracle-guards.sh
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
