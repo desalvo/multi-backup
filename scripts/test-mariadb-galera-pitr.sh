@@ -52,6 +52,13 @@ wsrep_gtid_mode=ON
 wsrep_gtid_domain_id=7300
 EOF
 done
+# The official server uses mariadb.conf.d; verify applied options early.
+docker run --rm -v "$WORK/cnf/1.cnf:/etc/mysql/mariadb.conf.d/99-galera.cnf:ro"     "$IMAGE" --print-defaults > "$WORK/effective-options.txt"
+if ! grep -Eq -- '--wsrep[_-]on=ON' "$WORK/effective-options.txt"; then
+    echo "Galera configuration not loaded by mariadbd" >&2
+    cat "$WORK/effective-options.txt" >&2
+    exit 1
+fi
 mysql(){
     local port="$1"; shift
     MYSQL_PWD=galera_ci_password mariadb --protocol=tcp -h 127.0.0.1 \
@@ -64,6 +71,13 @@ status(){
 ready(){
     local port="$1" count="$2"
     for _ in $(seq 1 90); do
+        if mysql "$port" "SELECT 1" >/dev/null 2>&1; then
+            enabled=$(mysql "$port" "SHOW GLOBAL VARIABLES LIKE 'wsrep_on'" 2>/dev/null | cut -f2 || :)
+            if [ "$enabled" != ON ]; then
+                echo "MariaDB answers SQL but Galera wsrep_on is not ON" >&2
+                return 1
+            fi
+        fi
         if [ "$(status "$port" wsrep_cluster_size 2>/dev/null || :)" = "$count" ] &&
            [ "$(status "$port" wsrep_cluster_status 2>/dev/null || :)" = Primary ] &&
            [ "$(status "$port" wsrep_ready 2>/dev/null || :)" = ON ] &&
@@ -79,7 +93,7 @@ ready(){
 # Bootstrap first Primary Component, then join two real SST/IST members.
 docker run -d --name "$N1" --hostname "$N1" --network "$NET" \
     -e MARIADB_ROOT_PASSWORD=galera_ci_password -p 127.0.0.1:13316:3306 \
-    -v "$WORK/cnf/1.cnf:/etc/mysql/conf.d/galera.cnf:ro" \
+    -v "$WORK/cnf/1.cnf:/etc/mysql/mariadb.conf.d/99-galera.cnf:ro" \
     "$IMAGE" --wsrep-new-cluster >/dev/null
 ready 13316 1
 for index in 2 3; do
@@ -88,7 +102,7 @@ for index in 2 3; do
     docker run -d --name "$name" --hostname "$name" --network "$NET" \
         -e MARIADB_ROOT_PASSWORD=galera_ci_password \
         -p "127.0.0.1:$port:3306" \
-        -v "$WORK/cnf/$index.cnf:/etc/mysql/conf.d/galera.cnf:ro" "$IMAGE" >/dev/null
+        -v "$WORK/cnf/$index.cnf:/etc/mysql/mariadb.conf.d/99-galera.cnf:ro" "$IMAGE" >/dev/null
     ready "$port" "$index"
 done
 for port in 13316 13317 13318; do ready "$port" 3; done
