@@ -43,6 +43,30 @@ def validate():
     for evidence in ('agent_protocol','afs_volume','execution_policy',
                      'cluster_placement','check-documentation-consistency.py'):
         assert evidence in gate_steps, 'Agent/cluster Production Gate missing '+evidence
+    # Kubernetes example must actually start as unprivileged hardened Rust
+    # server; root-owned Secret projections with mode 0400 are unreadable to
+    # UID 10001 unless the initContainer installs owner-only copies.
+    manifest=list(yaml.safe_load_all(
+        (ROOT/'k8s/multi-backup-cluster-r039.preview.yaml').read_text('utf-8')))
+    resources={x.get('kind'):x for x in manifest if isinstance(x,dict)}
+    for kind in ('Deployment','Service','PersistentVolumeClaim',
+                 'HorizontalPodAutoscaler','PodDisruptionBudget'):
+        assert kind in resources, 'Incomplete Kubernetes HA example: '+kind
+    deploy=resources['Deployment']['spec']['template']['spec']
+    assert deploy.get('securityContext',{}).get('runAsUser')==10001
+    assert any(i.get('name')=='prepare-private-secrets'
+               for i in deploy.get('initContainers',[]))
+    server=next(c for c in deploy['containers'] if c['name']=='server')
+    env={x['name']:x for x in server['env']}
+    for key in ('MULTI_BACKUP_HARDENED_MODE',
+                'MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE',
+                'MULTI_BACKUP_RECOVERY_SECRET_FILE',
+                'MULTI_BACKUP_CLUSTER_DATABASE_URL',
+                'MULTI_BACKUP_AGENT_PROXY_SECRET_FILE',
+                'MULTI_BACKUP_REPLICA_ID'):
+        assert key in env, 'Missing hardened cluster setting: '+key
+    assert env['MULTI_BACKUP_HARDENED_MODE'].get('value')=='true'
+
     for source in ('rust/src/bin/multi-backup-agent.rs',
                    'rust/src/afs_volume.rs',
                    'rust/src/agent_protocol.rs',
