@@ -59,10 +59,10 @@ pg 15432 "INSERT INTO pitr_record VALUES (999, 'after-marker-must-not-recover')"
 WAL_FILE=$(pg 15432 "SELECT pg_walfile_name(pg_switch_wal())")
 test -n "$WAL_FILE"
 for _ in $(seq 1 60); do
-    if sudo sudo test -s "$WORK/wal/$WAL_FILE"; then break; fi
+    if sudo test -s "$WORK/wal/$WAL_FILE"; then break; fi
     sleep 2
 done
-test -s "$WORK/wal/$WAL_FILE"
+sudo test -s "$WORK/wal/$WAL_FILE"
 test "$(pg 15432 'SELECT count(*) FROM pitr_record')" = 31
 docker stop "$PRIMARY" >/dev/null
 # Preserve strict volserver ownership during capture: work from a private
