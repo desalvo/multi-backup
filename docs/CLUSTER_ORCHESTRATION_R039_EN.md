@@ -123,3 +123,12 @@ An administrator with separate recovery authorization may call POST /api/cluster
 
 Set the two attestation booleans to true ONLY after independently verifying the old writer has stopped and auditing any uncommitted chunks/manifests/parity. The server rejects recovery if the old replica still has a fresh heartbeat, or if job identity/attempt does not match quarantine. This fail-closed design does **not** yet provide fully automatic resume of in-progress backups or prove crash-proof exactly-once content commits. Physical writer fencing under network partitions remains a required RC gate.
 
+
+## r039 hardened Kubernetes installation and autoscaling example
+
+The sample manifest now includes a 3-pod Rust Deployment, shared verified RWX claim, readiness/liveness checks, CPU HPA 2–10 replicas and disruption budget. Hardened mode requires distinct private gateway and offline recovery secrets in addition to the agent HTTPS proxy attestation key, age identity and admin Argon2id password hash.
+
+Kubernetes Secrets normally project root-owned 0400 files, which an unprivileged Rust container running as UID 10001 cannot read. A dedicated short-lived initContainer copies these into an in-memory emptyDir with UID/GID 10001 and 0600 permissions before the Rust server starts. Required Secret names and keys: multi-backup-admin/admin-hash, multi-backup-age/age-identity, multi-backup-agent-proxy/agent-proxy, multi-backup-private-gate/private-gate, multi-backup-recovery/recovery. The last two MUST be different independently generated 64-hex-character secrets. Supply the PostgreSQL verify-full connection URL from multi-backup-db/postgresql-url-verify-full, with a valid CA/hostname chain.
+
+The example is a development skeleton. Deploy a verified ingress that strips all client-supplied privileged headers, enforce TLS/mTLS and network policies, and leave MULTI_BACKUP_CLUSTER_EXECUTOR=disabled until real multi-node data and write-fencing tests pass. HPA scales the API/control plane, not unsafe in-flight job reassignments.
+

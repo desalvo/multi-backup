@@ -153,3 +153,12 @@ Solo un amministratore dotato di autorizzazione di recupero indipendente può ut
 
 Usare `true` **soltanto** dopo aver constatato l'arresto del processo sul nodo precedente e aver verificato manifest, chunk, parità ed eventuali file orfani con procedura di audit. Il server rifiuta il recupero se la vecchia replica invia ancora heartbeat, se il job non è in quarantena oppure se l'identità del tentativo non coincide. La riassegnazione successiva avviene tramite il normale scheduler. **Non è ancora garantito failover totalmente automatico di job già in esecuzione né exactly-once fisico**; la prova di cancellazione dopo perdita di lease e di scrittura sotto partizione di rete resta un gate RC.
 
+
+## r039 — esempio Kubernetes eseguibile come utente non privilegiato
+
+Il manifest `k8s/multi-backup-cluster-r039.preview.yaml` mostra Service, Deployment con 3 repliche, PVC realmente RWX, readiness/liveness, HPA 2–10 repliche e PodDisruptionBudget. Il backend è in modalità hardened, con credenziali indipendenti per private gateway, autorizzazione recovery e attestazione del proxy HTTPS agente.
+
+**Preparazione segreti:** le proiezioni Kubernetes Secret con permessi 0400 appartengono di norma a root, mentre il server Rust utilizza UID 10001 e rifiuta file gruppo/mondo leggibili. Un initContainer temporaneo crea copie owner-only 0600 su un emptyDir in memoria e le assegna a UID/GID 10001 prima dell'avvio del container. Configurare cinque Secret distinti: multi-backup-admin (admin-hash), multi-backup-agent-proxy (agent-proxy), multi-backup-age (age-identity), multi-backup-private-gate (private-gate) e multi-backup-recovery (recovery). I due ultimi contengono **due token diversi**, ciascuno di 64 caratteri esadecimali casuali. Non committare alcun token o DSN reale; proteggere le credenziali DB su Secret, usare certificato PostgreSQL sslmode=verify-full e un Ingress che rimuove/sostituisce le attestazioni HTTPS.
+
+L'HPA scala le repliche dell'API, non abilita automaticamente lo spostamento di un writer che ha perso il lease. L'esecutore resta disabilitato fino a verifiche sul vero storage condiviso, fencing e recupero dei job. La prova K8s reale e l'installazione firmata rimangono necessarie prima della RC.
+

@@ -327,3 +327,8 @@ Read [r039 IT](CLUSTER_ORCHESTRATION_R039_IT.md) and [r039 EN](CLUSTER_ORCHESTRA
 New implementation: quota-aware agent job slots across independent CLI processes; separately reviewed and SHA-256 pinned profiles; admin recovery authorization for profile approval; server-side preflight before age payload upload; native chunk writer checks its live PG lease per file/chunk and at manifest publication, replica admission is serialized, and expired distributed jobs are quarantined. Controlled recovery additionally requires explicit writer stopped + encrypted-store audited attestations and stale original-replica heartbeat.
 
 **NOT CERTIFIED:** automatic redistribution of in-flight jobs with physical write fencing, distributed GC safety after lost lease, HA failover acceptance with two real Kubernetes pods and shared data, agent push/pull under long transfers and disconnections, exact AFS incremental restore on a real cell, hard CPU/memory limits on remote SSH host, OIDC pending-login state sharing, global bandwidth caps, generic cloud input/output pairs. A passing Rust test is not a substitute for those operational checks.
+
+## r039 hardened Kubernetes deployment test requirement
+
+The example Deployment now materializes 0600 Secret copies for UID 10001 and sets hardened mode with distinct gateway and recovery credentials, HPA 2–10 pods, PDB and shared RWX. Production Gate source audits enforce these properties. **A YAML shape test is not a real Kubernetes install test.** Before RC, run live Pod startup, readiness, replica scale-up/down, OIDC login, agent HTTPS authentication, PG outage, shared-vs-node-local placement, old-writer fencing, rollback and encrypted recoveries on an actual cluster.
+
