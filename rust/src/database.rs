@@ -29,6 +29,9 @@ pub struct Profile {
     pub database:String,
     pub credentials_file:PathBuf,
     #[serde(default)] pub tls_ca_file:Option<PathBuf>,
+    /// Optional real Galera membership preflight, enforced before/after dump.
+    /// This does not replace consistency proofs for concurrent DDL.
+    #[serde(default)] pub galera_expected_nodes:Option<u16>,
 }
 fn ident(s:&str)->bool {
     !s.is_empty() && s.len()<=63 &&
@@ -57,10 +60,46 @@ impl Profile {
                  c==b'.'||c==b'-'){
             return Err("Unsafe database identity, endpoint or port".into());
         }
+        if let Some(count)=self.galera_expected_nodes {
+            if self.engine!=Engine::Mysql || !(2..=64).contains(&count){
+                return Err("Galera membership guard requires MariaDB and 2..64 nodes".into());
+            }
+        }
         regular_private(&self.credentials_file)?;
         if let Some(ca)=&self.tls_ca_file {regular_private(ca)?;}
         else if self.host!="localhost" && self.host!="127.0.0.1"{
             return Err("Remote database requires pinned TLS CA trust".into());
+        }
+        Ok(())
+    }
+    /// Only a genuine Galera Synced Primary member at the expected cluster
+    /// size can publish a snapshot under an explicit Galera profile.
+    fn check_galera(&self)->Result<(),String>{
+        let Some(expected)=self.galera_expected_nodes else{return Ok(());};
+        let mut cmd=self.command("mariadb");
+        self.connection(&mut cmd);
+        cmd.args(["--batch","--skip-column-names",
+                  "--execute=SHOW GLOBAL STATUS LIKE 'wsrep_%'"]);
+        let out=cmd.stdout(Stdio::piped()).stderr(Stdio::null())
+            .output().map_err(|e|e.to_string())?;
+        if !out.status.success()||out.stdout.len()>65536{
+            return Err("Galera wsrep health query failed".into());
+        }
+        let contents=String::from_utf8(out.stdout)
+            .map_err(|_|"Galera status returned invalid UTF-8")?;
+        let field=|key:&str|->Option<&str>{
+            contents.lines().find_map(|line|{
+                let (name,value)=line.split_once('\t')?;
+                if name==key {Some(value)} else {None}
+            })
+        };
+        if field("wsrep_cluster_status")!=Some("Primary") ||
+           field("wsrep_ready")!=Some("ON") ||
+           field("wsrep_local_state_comment")!=Some("Synced") ||
+           field("wsrep_cluster_size").and_then(|s|s.parse::<u16>().ok())!=Some(expected){
+            return Err(format!(
+                "Galera backup refused: expected {expected} Synced nodes, Primary and ready"
+            ));
         }
         Ok(())
     }
@@ -116,6 +155,7 @@ fn must_succeed(mut cmd:Command,name:&str)->Result<(),String>{
 pub fn backup(profile:&Profile,root:&Path,identity:&Path,label:&str,
               limits:&ExecutionLimits)->Result<LogicalBackup,String>{
     profile.validate()?;limits.validate()?;limits.check_host()?;
+    profile.check_galera()?;
     let mut cmd=match profile.engine {
         Engine::Postgresql=>{
             let mut c=profile.command("pg_dump");profile.connection(&mut c);
@@ -140,8 +180,12 @@ pub fn backup(profile:&Profile,root:&Path,identity:&Path,label:&str,
                         profile.database,profile.engine.suffix());
     let result=store.backup_stream(identity,label,"",&logical,&mut reader,
         BackupKind::Full,None,||{
-            if child.wait().map_err(|e|e.to_string())?.success(){Ok(())}
-            else{Err("Database dump exited nonzero; incomplete data rejected".into())}
+            if child.wait().map_err(|e|e.to_string())?.success(){
+                profile.check_galera().map_err(|e|
+                    format!("Galera membership changed during backup: {e}"))
+            } else {
+                Err("Database dump exited nonzero; incomplete data rejected".into())
+            }
         });
     let snapshot=match result{
         Ok(s)=>s,
@@ -157,6 +201,9 @@ pub fn backup(profile:&Profile,root:&Path,identity:&Path,label:&str,
 pub fn restore_new(profile:&Profile,root:&Path,identity:&Path,id:&str,
                    confirmation:&str,limits:&ExecutionLimits)->Result<u64,String>{
     profile.validate()?;limits.validate()?;limits.check_host()?;
+    if profile.galera_expected_nodes.is_some(){
+        return Err("Restore into a Galera cluster is not approved; use an isolated standalone destination".into());
+    }
     if confirmation!=profile.confirmation(){
         return Err("Destination confirmation differs from new target".into());
     }
