@@ -586,3 +586,9 @@ network QoS, a cross-host/pod cap or remote SSH CPU/RAM enforcement.
 Physical lost-lease manifest fencing, multi-node bandwidth reservations,
 live AFS restore, actual installer and Kubernetes failover remain RC blockers.
 Confirm CI on the exact new commit SHA; keep PR #11 draft.
+
+
+## r039 — OpenAFS virtual-cell test
+- Simulated `vos` full/incremental and fresh-volume restore locally (131082 + 1500 bytes), including rejection of existing target and partial dump. The standalone fake command passed six checks.
+- Added integration test `afs_virtual_cell_refuses_overwrite_and_partial_dump` that runs compiled Rust CLI, real age/zstd encrypted backup and verify, ordered chain restore, no-overwrite and partial-producer rejection. Exact-head CI must confirm the Rust test.
+- GitHub run 43668284081 previously failed three test fixtures because `tempdir()` did not enforce 0700; fixed fixtures without weakening runtime security. Real OpenAFS cell/Kerberos/ACL/SSH acceptance remains required.

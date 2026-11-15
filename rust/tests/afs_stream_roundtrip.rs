@@ -168,3 +168,129 @@ fn failed_stream_producer_never_commits_a_backup(){
     assert!(result.is_err());
     assert!(store.list(&key).unwrap().is_empty());
 }
+
+
+/// Stateful virtual AFS cell: the fake vos process persists restored volumes
+/// and honors dump full/-time and restore abort/incremental semantics. The
+/// compiled Rust CLI, age, zstd, manifest chain and parity remain real.
+#[test]
+fn afs_virtual_cell_refuses_overwrite_and_partial_dump(){
+    let temp=tempdir().unwrap();
+    let root=temp.path();
+    let cell=root.join("cell");
+    fs::create_dir_all(cell.join("source")).unwrap();
+    fs::create_dir_all(cell.join("restored")).unwrap();
+    let fakedir=root.join("bin");
+    fs::create_dir(&fakedir).unwrap();
+    let vos=fakedir.join("vos");
+    fs::write(&vos,r#"#!/bin/sh
+set -eu
+mode=$1; shift
+volume=''; overwrite=''; increment='no'
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -id|-name) volume=$2; shift 2;;
+    -overwrite) overwrite=$2; shift 2;;
+    -time) increment=yes; shift 2;;
+    -cell|-server|-partition) shift 2;;
+    *) exit 82;;
+  esac
+done
+case "$volume" in ''|*[!A-Za-z0-9._-]*) exit 83;; esac
+case "$mode" in
+  dump)
+    if [ "$AFS_TEST_FAIL_DUMP" = 1 ]; then printf 'partial-dump'; exit 71; fi
+    if [ "$increment" = yes ]; then cat "$AFS_TEST_CELL/source/$volume.delta";
+    else cat "$AFS_TEST_CELL/source/$volume.full"; fi;;
+  restore)
+    dest="$AFS_TEST_CELL/restored/$volume.dat"
+    case "$overwrite" in
+      abort)
+        if [ -e "$dest" ]; then exit 73; fi
+        ( set -C; cat > "$dest" ) || exit 74;;
+      incremental)
+        if [ ! -f "$dest" ]; then exit 75; fi
+        cat >> "$dest";;
+      *) exit 76;;
+    esac;;
+  *) exit 77;;
+esac
+"#).unwrap();
+    fs::set_permissions(&vos,fs::Permissions::from_mode(0o700)).unwrap();
+    let mut full=b"AFS full\0\xff".to_vec();
+    for _ in 0..512 {full.extend(0u8..=255);}
+    let delta=b"\0AFS-increment\xff".repeat(100);
+    fs::write(cell.join("source/user.original.full"),&full).unwrap();
+    fs::write(cell.join("source/user.original.delta"),&delta).unwrap();
+    fs::write(cell.join("restored/production.volume.dat"),b"original-production").unwrap();
+    let key=root.join("age-identity");
+    let result=Command::new("age-keygen").args(["-o",string(&key)])
+        .output().unwrap();
+    assert!(result.status.success());
+    let raw=fs::read_to_string(&key).unwrap();
+    let recipient=raw.lines().find_map(|x|x.strip_prefix("# public key: "))
+        .unwrap().trim();
+    let storepath=root.join("store");
+    Store::init(&storepath,recipient,DEFAULT_CHUNK).unwrap();
+    let jobfile=root.join("job.json");
+    let targetfile=root.join("target.json");
+    fs::write(&targetfile,serde_json::to_vec(&json!({
+        "cell":"example.org","volume":"new.recovered",
+        "server":"afs.example.org","partition":"/vicepa",
+        "auth":{"type":"existing_token"}
+    })).unwrap()).unwrap();
+    let exec=|args:&[&str],fail:bool|->Output{
+        let path=std::env::var("PATH").unwrap_or_default();
+        Command::new(env!("CARGO_BIN_EXE_multi-backup-native"))
+            .env("PATH",format!("{}:{path}",fakedir.display()))
+            .env("AFS_TEST_CELL",&cell)
+            .env("AFS_TEST_FAIL_DUMP",if fail {"1"} else {"0"})
+            .args(args).output().unwrap()
+    };
+    let job=json!({"id":"volume-job","cell":"example.org","volume":"user.original",
+        "auth":{"type":"existing_token"},"execution":{"type":"local"},
+        "mode":{"kind":"full"}});
+    fs::write(&jobfile,serde_json::to_vec(&job).unwrap()).unwrap();
+    let backup_args=["plugins","afs-backup","--job-json",string(&jobfile),
+        "--root",string(&storepath),"--identity",string(&key),
+        "--label","virtual-afs","--json"];
+    let result=exec(&backup_args,false);
+    assert!(result.status.success(),"full: {}",String::from_utf8_lossy(&result.stderr));
+    let fullid:Value=serde_json::from_slice(&result.stdout).unwrap();
+    let id=fullid["id"].as_str().unwrap().to_owned();
+    let store=Store::open(&storepath,&key).unwrap();
+    assert!(store.verify(&key,&id).unwrap().healthy);
+    let mut incr=job.clone();
+    incr["mode"]=json!({"kind":"incremental",
+        "since":"11/15/2026 01:00","parent_backup_id":id});
+    fs::write(&jobfile,serde_json::to_vec(&incr).unwrap()).unwrap();
+    let result=exec(&backup_args,false);
+    assert!(result.status.success(),"incremental: {}",String::from_utf8_lossy(&result.stderr));
+    let value:Value=serde_json::from_slice(&result.stdout).unwrap();
+    let current=value["id"].as_str().unwrap().to_owned();
+    assert!(store.verify(&key,&current).unwrap().healthy);
+    let restore_args=["plugins","afs-restore-new","--target-json",string(&targetfile),
+        "--root",string(&storepath),"--identity",string(&key),
+        "--id",&current,"--confirm-target",
+        "example.org:afs.example.org:/vicepa:new.recovered","--json"];
+    let wrong=exec(&["plugins","afs-restore-new","--target-json",string(&targetfile),
+        "--root",string(&storepath),"--identity",string(&key),
+        "--id",&current,"--confirm-target","wrong","--json"],false);
+    assert!(!wrong.status.success());
+    assert!(!cell.join("restored/new.recovered.dat").exists());
+    let result=exec(&restore_args,false);
+    assert!(result.status.success(),"restore: {}",String::from_utf8_lossy(&result.stderr));
+    let restored:Value=serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(restored["restored_dumps"],2);
+    full.extend_from_slice(&delta);
+    assert_eq!(fs::read(cell.join("restored/new.recovered.dat")).unwrap(),full);
+    assert!(!exec(&restore_args,false).status.success());
+    assert_eq!(fs::read(cell.join("restored/new.recovered.dat")).unwrap(),full);
+    assert_eq!(fs::read(cell.join("restored/production.volume.dat")).unwrap(),
+        b"original-production");
+    fs::write(&jobfile,serde_json::to_vec(&job).unwrap()).unwrap();
+    assert!(!exec(&backup_args,true).status.success());
+    assert_eq!(store.list(&key).unwrap().len(),2);
+    assert!(store.verify(&key,&id).unwrap().healthy);
+    assert!(store.verify(&key,&current).unwrap().healthy);
+}

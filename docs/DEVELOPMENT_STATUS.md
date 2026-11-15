@@ -681,3 +681,9 @@ Native Rust RestoreNewJob now optionally accepts Execution::SshAgentless with pi
   CPU/RAM/network controls are still not complete or qualified.
 - New exact-head PR #11 full CI and actual multi-process throughput tests
   are required before accepting this behavior as production ready.
+
+
+## r039 — OpenAFS virtual-cell test
+- Simulated `vos` full/incremental and fresh-volume restore locally (131082 + 1500 bytes), including rejection of existing target and partial dump. The standalone fake command passed six checks.
+- Added integration test `afs_virtual_cell_refuses_overwrite_and_partial_dump` that runs compiled Rust CLI, real age/zstd encrypted backup and verify, ordered chain restore, no-overwrite and partial-producer rejection. Exact-head CI must confirm the Rust test.
+- GitHub run 43668284081 previously failed three test fixtures because `tempdir()` did not enforce 0700; fixed fixtures without weakening runtime security. Real OpenAFS cell/Kerberos/ACL/SSH acceptance remains required.

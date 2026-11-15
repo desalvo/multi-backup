@@ -296,6 +296,15 @@ impl<R:Read> Read for ThrottledReader<R>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    fn private_tempdir()->tempfile::TempDir{
+        let directory=tempfile::tempdir().unwrap();
+        #[cfg(unix)]{
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(directory.path(),
+                fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        directory
+    }
     #[test]fn limits_are_intersected_not_relaxed(){
         let server=ExecutionLimits{max_concurrent_jobs:4,threads_per_job:8,
             max_transfer_bytes_per_sec:Some(1024*1024),
@@ -331,7 +340,7 @@ mod tests{
     }
 
     #[test]fn independent_readers_share_same_host_budget_file(){
-        let directory=tempfile::tempdir().unwrap();
+        let directory=private_tempdir();
         let limits=ExecutionLimits::default();
         let mut a=ThrottledReader::new(&b"abcde"[..],limits.clone()).unwrap()
             .with_host_upload_budget(directory.path(),8192).unwrap();
@@ -348,7 +357,7 @@ mod tests{
         assert_eq!(state.reserved_bytes,10);
     }
     #[test]fn malformed_or_future_host_budget_fails_closed(){
-        let directory=tempfile::tempdir().unwrap();
+        let directory=private_tempdir();
         let budget=SharedHostBudget::new(directory.path(),2048).unwrap();
         fs::write(&budget.state_file,b"not valid json").unwrap();
         assert!(budget.reserve(1).is_err());
@@ -361,7 +370,7 @@ mod tests{
     #[cfg(unix)]
     #[test]fn reject_symlink_host_budget_state(){
         use std::os::unix::fs::symlink;
-        let directory=tempfile::tempdir().unwrap();
+        let directory=private_tempdir();
         let victim=directory.path().join("victim");
         fs::write(&victim,b"unchanged").unwrap();
         let link=directory.path().join(".host-upload-budget-v1.json");
