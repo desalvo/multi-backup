@@ -37,6 +37,7 @@ struct AgentProfile {
 struct UploadManifest<'a> {
     backup_id:&'a str,
     profile_id:&'a str,
+    profile_sha256:&'a str,
     provider:&'static str,
     cell:&'a str,
     volume:&'a str,
@@ -274,8 +275,14 @@ fn push(config:&Config,profile_id:&str,force:bool,limits:&ExecutionLimits,
     };
     let encrypted=age_encrypt_to_spool(config,&p,&effective)?;
     let id=hex::encode(rand::random::<[u8;32]>());
+    // The server approves the exact bytes of this locally installed profile,
+    // not merely the agent identity or a human-readable profile name.
+    let profile_body=fs::read(config.profiles_dir.join(format!("{profile_id}.json")))
+        .map_err(err)?;
+    let profile_sha256=wire::hex_sha(&profile_body);
     let size=fs::metadata(&encrypted).map_err(err)?.len();
-    let manifest=UploadManifest{backup_id:&id,profile_id:&p.id,provider:"afs",
+    let manifest=UploadManifest{backup_id:&id,profile_id:&p.id,
+        profile_sha256:&profile_sha256,provider:"afs",
         cell:&p.job.cell,volume:&p.job.volume,encrypted_bytes:size,
         recipient:&p.recipient,pull_job_id};
     let meta=serde_json::to_vec(&manifest).map_err(err)?;
