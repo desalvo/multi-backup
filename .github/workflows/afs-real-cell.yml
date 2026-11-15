@@ -1,0 +1,57 @@
+name: Multi Backup - authentic OpenAFS and Kerberos cell
+on:
+  pull_request:
+    paths:
+      - 'rust/src/afs_volume.rs'
+      - 'rust/src/chunk_store.rs'
+      - 'scripts/test-real-afs-cell.sh'
+      - '.github/workflows/afs-real-cell.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authentic-afs-kdc-volume-restore:
+    name: OpenAFS VLDB/volserver + Kerberos KDC + encrypted Rust restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify OpenAFS kernel-module prerequisites and native clients
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq git python3-pip python3-venv build-essential \
+            dkms krb5-user krb5-config linux-headers-$(uname -r)
+          test -d /lib/modules/$(uname -r)/build
+      - name: Install OpenAFS official community provisioning roles
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/mb-afs-ansible
+          /tmp/mb-afs-ansible/bin/pip install 'ansible-core>=2.17,<2.19'
+          /tmp/mb-afs-ansible/bin/ansible-galaxy collection install \
+            git+https://github.com/openafs-contrib/ansible-openafs.git
+      - name: Provision genuine KDC, OpenAFS database/fileservers and client
+        run: |
+          set -euo pipefail
+          /tmp/mb-afs-ansible/bin/ansible-playbook openafs_contrib.openafs.local_install \
+            -i 'localhost,' -c local \
+            -e afs_cell=example.com \
+            -e afs_realm=EXAMPLE.COM \
+            -e afs_install_method=managed \
+            -e afs_module_install_method=dkms
+          # Do not accept a fake vos command, empty token or absent AFS mount.
+          command -v vos
+          command -v kinit
+          command -v aklog
+          command -v tokens
+          command -v fs
+          mount | grep -i 'afs'
+          test -d /afs/example.com/test
+      - name: Build native Rust backup engine
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Mandatory authentic AFS/Kerberos encrypted full+incremental restore
+        run: bash scripts/test-real-afs-cell.sh
+      - name: Live AFS acceptance conclusion
+        if: success()
+        run: |
+          echo "Real Kerberos KDC, AFS token, VLDB, volserver and mounted client passed full+incremental encrypted restore" >> "$GITHUB_STEP_SUMMARY"
