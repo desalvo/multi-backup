@@ -29,7 +29,7 @@ jobs:
           python3 -m venv /tmp/mb-afs-ansible
           /tmp/mb-afs-ansible/bin/pip install 'ansible-core>=2.17,<2.19'
           /tmp/mb-afs-ansible/bin/ansible-galaxy collection install \
-            git+https://github.com/openafs-contrib/ansible-openafs.git
+            git+https://github.com/openafs-contrib/ansible-openafs.git,11fa2a5bbb27d4b44d297c5105f7dd9bc6347190
       - name: Provision genuine KDC, OpenAFS database/fileservers and client
         run: |
           set -euo pipefail
