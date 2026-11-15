@@ -763,8 +763,22 @@ impl Store {
                     s.members.iter().any(|m| m.id==item.id))
                     .ok_or("Corrupt chunk has no parity protection")?;
                 let mut shards = Vec::with_capacity(crate::parity::TOTAL);
-                for member in &protection.members {
-                    shards.push(fs::read(self.chunk_path(&member.id)?).ok());
+                // The Reed-Solomon stripe authenticates zero-PADDED age
+                // ciphertexts. A short valid member is not an erasure:
+                // check its recorded original length, then pad to shard_size.
+                // Previously all differently sized chunks were treated as
+                // missing shards, defeating repair for normal POSIX trees.
+                for (position,member) in protection.members.iter().enumerate() {
+                    let ciphertext=fs::read(self.chunk_path(&member.id)?).ok()
+                        .and_then(|mut bytes|{
+                            if bytes.len()!=protection.stripe.info[position].length ||
+                               bytes.len()>protection.stripe.shard_size {
+                                return None;
+                            }
+                            bytes.resize(protection.stripe.shard_size,0);
+                            Some(bytes)
+                        });
+                    shards.push(ciphertext);
                 }
                 while shards.len()<crate::parity::DATA {shards.push(Some(vec![0;
                     protection.stripe.shard_size]));}

@@ -39,7 +39,7 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthenticationMethods publickey
 StrictModes yes
-UsePAM no
+UsePAM yes
 X11Forwarding no
 AllowTcpForwarding no
 AllowAgentForwarding no
@@ -72,7 +72,11 @@ for n in $(seq 1 40); do
     if ssh -F "$WORK/ssh_config" mbtest "true" >/dev/null 2>&1; then break; fi
     sleep 1
 done
-ssh -F "$WORK/ssh_config" mbtest 'true'
+if ! ssh -F "$WORK/ssh_config" mbtest 'true'; then
+    echo 'OpenSSH test KDC/account/authorized_keys failure:' >&2
+    sudo tail -80 "$WORK/sshd.log" >&2 || :
+    exit 1
+fi
 # Every path uses a real sshd process and mandatory pinned ED25519 host key.
 printf 'SSH/SCP/SFTP protocol binary data \x00\xff\x7f\n' > "$WORK/source.dat"
 dd if=/dev/urandom of="$WORK/random.dat" bs=1M count=2 status=none
