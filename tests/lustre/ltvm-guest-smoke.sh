@@ -2,7 +2,9 @@
 # This executes INSIDE a disposable QEMU guest with genuine Lustre kernel modules.
 set -euo pipefail
 umask 077
-test -r /proc/fs/lustre/version || { echo "FAIL: Lustre kernel subsystem absent" >&2; exit 1; }
+# Modern Lustre versions need not expose /proc/fs/lustre/version.
+# Require an actual loaded kernel module and then an actual Lustre client mount.
+lsmod | awk '$1 == "lustre" { found=1 } END { exit !found }' || { echo "FAIL: no loaded Lustre kernel module" >&2; exit 1; }
 command -v lfs >/dev/null
 CLIENT=$(findmnt -rn -t lustre -o SOURCE,TARGET | awk '$1 ~ /:\// { print $2; exit }')
 test -n "$CLIENT" && test -d "$CLIENT" || { echo "FAIL: real Lustre client mount missing" >&2; exit 1; }
