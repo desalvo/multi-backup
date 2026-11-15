@@ -295,6 +295,15 @@ mod tests{
         assert!(validate_upload(br#"{}"#).is_err());
         assert!(validate_public_key("broken").is_err());
     }
+    #[test]fn uploaded_source_profile_cannot_be_unsigned(){
+        let raw=serde_json::to_vec(&json!({
+            "backup_id":"b".repeat(64),"profile_id":"volume-one",
+            "profile_sha256":"not-a-digest","provider":"afs",
+            "cell":"example.org","volume":"user.test",
+            "encrypted_bytes":123,"recipient":"age1validrecipient"
+        })).unwrap();
+        assert!(validate_upload(&raw).is_err());
+    }
     #[test]fn unknown_agent_identity_is_not_a_valid_enrollment(){
         assert!(!wire::valid_id("../../tmp"));
         assert!(!wire::valid_user("user name"));
