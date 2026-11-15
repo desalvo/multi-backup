@@ -14,8 +14,24 @@ case "$ATTEMPT" in *[!0-9]*|'') echo 'Invalid run attempt' >&2; exit 2;; esac
 NEW_VOLUME="mbrestore${RUN_SUFFIX}${ATTEMPT}"
 test "${#NEW_VOLUME}" -le 22
 ROOT_DIR=$(mktemp -d)
-trap 'rm -rf "$ROOT_DIR"' EXIT
 umask 077
+# Only this run's temporary AFS RW source mount is removed on exit.
+# The actual AFS test volume, files, restored volume and keytabs are preserved.
+SOURCE_MOUNT=""
+SOURCE_MOUNT_CREATED=0
+cleanup() {
+  rc=$?
+  trap - EXIT
+  if [ "$SOURCE_MOUNT_CREATED" = 1 ]; then
+    if ! fs rmmount -dir "$SOURCE_MOUNT" >/dev/null 2>&1; then
+      echo "ERROR: could not remove this run's AFS source mount: $SOURCE_MOUNT" >&2
+      [ "$rc" -ne 0 ] || rc=1
+    fi
+  fi
+  rm -rf -- "$ROOT_DIR"
+  exit "$rc"
+}
+trap cleanup EXIT
 CLI=rust/target/release/multi-backup-native
 test -x "$CLI"
 command -v vos
@@ -34,8 +50,24 @@ tokens | grep -F "$CELL"
 # Real fileserver endpoints and VLDB are mandatory (no simulated binaries).
 vos listvol -server "$SERVER" -partition /vicepa -cell "$CELL" | grep -F "$VOLUME"
 vos examine "$VOLUME" -cell "$CELL"
-# Seed a real AFS volume through the mounted client after Kerberos+aklog.
-BASE=/afs/example.com/test
+# /afs/<cell> selects the released RO path when an RO replica exists.
+# The genuine RW root.cell path is /afs/.<cell>. A per-run mount with -rw
+# MUST be used for the source volume to seed and update real RW contents.
+SOURCE_PARENT="/afs/.$CELL"
+test -d "$SOURCE_PARENT" || {
+  echo "Missing root.cell read-write mount: $SOURCE_PARENT" >&2
+  exit 1
+}
+SOURCE_MOUNT="$SOURCE_PARENT/mb-source-$RUN_SUFFIX-$ATTEMPT"
+if [ -e "$SOURCE_MOUNT" ]; then
+  echo "Refusing to reuse existing AFS mountpoint $SOURCE_MOUNT" >&2
+  exit 1
+fi
+fs mkmount -dir "$SOURCE_MOUNT" -vol "$VOLUME" -cell "$CELL" -rw
+SOURCE_MOUNT_CREATED=1
+fs lsmount -dir "$SOURCE_MOUNT"
+BASE="$SOURCE_MOUNT"
+test -d "$BASE"
 printf 'OpenAFS real-cell integration, source data\n' > "$BASE/mb-backup-data.txt"
 printf 'AFS full payload %s\n' "$(date -u +%s)" >> "$BASE/mb-backup-data.txt"
 SINCE=$(date -u +'%m/%d/%Y %H:%M')
@@ -75,16 +107,23 @@ CONFIRM="$CELL:$SERVER:/vicepa:$NEW_VOLUME"
   --confirm-target "$CONFIRM" --json > "$ROOT_DIR/restore.json"
 test "$(jq -r '.restored_dumps' "$ROOT_DIR/restore.json")" = 2
 vos examine "$NEW_VOLUME" -cell "$CELL" | grep -F "$NEW_VOLUME"
-# The mountpoint is new and isolated; never overwrite root.cell or source.
-fs mkmount -dir "/afs/$CELL/$NEW_VOLUME" -vol "$NEW_VOLUME" -cell "$CELL"
-cmp "$BASE/mb-backup-data.txt" "/afs/$CELL/$NEW_VOLUME/mb-backup-data.txt"
-cmp "$BASE/mb-new-after-full.txt" "/afs/$CELL/$NEW_VOLUME/mb-new-after-full.txt"
+# Use the RW root.cell directory, not /afs/<cell>, which can be RO.
+# This target has a new volume name per run+attempt; no existing mount is reused.
+RESTORE_MOUNT="$SOURCE_PARENT/$NEW_VOLUME"
+if [ -e "$RESTORE_MOUNT" ]; then
+  echo "Refusing to overwrite existing AFS restore mount: $RESTORE_MOUNT" >&2
+  exit 1
+fi
+fs mkmount -dir "$RESTORE_MOUNT" -vol "$NEW_VOLUME" -cell "$CELL" -rw
+fs lsmount -dir "$RESTORE_MOUNT"
+cmp "$BASE/mb-backup-data.txt" "$RESTORE_MOUNT/mb-backup-data.txt"
+cmp "$BASE/mb-new-after-full.txt" "$RESTORE_MOUNT/mb-new-after-full.txt"
 if "$CLI" plugins afs-restore-new --target-json "$ROOT_DIR/target.json" \
   --root "$ROOT_DIR/store" --identity "$ROOT_DIR/identity" --id "$INC_ID" \
   --confirm-target "$CONFIRM"; then
     echo "SECURITY FAIL: existing AFS volume overwritten" >&2; exit 1
 fi
-cmp "$BASE/mb-backup-data.txt" "/afs/$CELL/$NEW_VOLUME/mb-backup-data.txt"
+cmp "$BASE/mb-backup-data.txt" "$RESTORE_MOUNT/mb-backup-data.txt"
 # Prove that invalid real VLDB volume returns nonzero and publishes no backup.
 jq '.volume="volume_does_not_exist_987654"' "$ROOT_DIR/job.json" > "$ROOT_DIR/missing.json"
 BEFORE=$("$CLI" storage list --root "$ROOT_DIR/store" --identity "$ROOT_DIR/identity" --json | jq 'length')

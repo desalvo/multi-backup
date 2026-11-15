@@ -23,6 +23,11 @@ jobs:
           bash -n scripts/bootstrap-openafs-runner-vm.sh
           bash -n scripts/register-openafs-runner-once.sh
           bash -n scripts/test-real-afs-cell.sh
+          grep -q 'SOURCE_PARENT="/afs/.' scripts/test-real-afs-cell.sh
+          grep -q 'fs mkmount -dir "$SOURCE_MOUNT" -vol "$VOLUME" -cell "$CELL" -rw' scripts/test-real-afs-cell.sh
+          grep -q 'fs mkmount -dir "$RESTORE_MOUNT" -vol "$NEW_VOLUME" -cell "$CELL" -rw' scripts/test-real-afs-cell.sh
+          grep -q 'fs rmmount -dir "$SOURCE_MOUNT"' scripts/test-real-afs-cell.sh
+          if grep -q 'BASE=/afs/example.com/test' scripts/test-real-afs-cell.sh; then echo "::error::RO OpenAFS path must never be used to seed AFS test data"; exit 1; fi
           python3 -m py_compile scripts/patch-openafs-ansible-debian-facts.py
           python3 -m py_compile scripts/patch-openafs-ansible-local-facts-access.py
           curl --fail --location --retry 3 --silent --show-error -o /tmp/local_install.yaml https://raw.githubusercontent.com/openafs-contrib/ansible-openafs/11fa2a5bbb27d4b44d297c5105f7dd9bc6347190/playbooks/local_install.yaml
