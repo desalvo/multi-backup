@@ -8,7 +8,7 @@ on:
       expected_sha:
         description: "Exact approved PR #11 SHA (pre-filled; do not change unless the trusted workflow pin changes)"
         required: true
-        default: 191bfe3b21e2a86b917635a8ef57fb3e0c4d84bf
+        default: 6594b1fd199b4a92ceac93bcbd255b34ef20a34a
         type: string
       confirmation:
         description: "Enter DISPOSABLE-AFS-APPROVED to affirm isolated sacrificial VM"
@@ -22,7 +22,7 @@ jobs:
     if: github.actor == 'desalvo'
     runs-on: ubuntu-24.04
     env:
-      PINNED_SHA: 191bfe3b21e2a86b917635a8ef57fb3e0c4d84bf
+      PINNED_SHA: 6594b1fd199b4a92ceac93bcbd255b34ef20a34a
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       LAB_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -45,7 +45,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, openafs-ci]
     timeout-minutes: 120
     env:
-      PINNED_SHA: 191bfe3b21e2a86b917635a8ef57fb3e0c4d84bf
+      PINNED_SHA: 6594b1fd199b4a92ceac93bcbd255b34ef20a34a
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       LAB_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -86,7 +86,7 @@ jobs:
           printf 'OpenAFS VM checked: %s\n' "$(uname -r)"
       - uses: actions/checkout@v4
         with:
-          ref: 191bfe3b21e2a86b917635a8ef57fb3e0c4d84bf
+          ref: 6594b1fd199b4a92ceac93bcbd255b34ef20a34a
           persist-credentials: false
       - name: Verify immutable checked-out PR source and Rust toolchain
         run: |
