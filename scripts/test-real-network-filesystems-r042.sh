@@ -50,8 +50,9 @@ smb)
   cat > "$WORK/smb.conf" <<EOF
 [global]
   server role = standalone server
-  map to guest = Bad User
-  guest account = $(id -un)
+  security = user
+  map to guest = Never
+  passdb backend = tdbsam
   interfaces = lo
   bind interfaces only = yes
   server min protocol = SMB3_00
@@ -67,18 +68,23 @@ smb)
 [test]
   path = $ROOT
   read only = no
-  guest ok = yes
-  guest only = yes
+  guest ok = no
+  valid users = $(id -un)
   force user = $(id -un)
 EOF
   testparm -s "$WORK/smb.conf" >/dev/null
+  SMB_PASSWORD=$(openssl rand -hex 24)
+  printf '%s\n%s\n' "$SMB_PASSWORD" "$SMB_PASSWORD" | sudo smbpasswd -a -s -c "$WORK/smb.conf" "$(id -un)" >/dev/null
+  printf 'username=%s\npassword=%s\n' "$(id -un)" "$SMB_PASSWORD" > "$WORK/smb-credentials"
+  chmod 0600 "$WORK/smb-credentials"
+  unset SMB_PASSWORD
   sudo smbd -D -s "$WORK/smb.conf"
   for n in $(seq 1 20); do
     if sudo ss -lnt | grep -q '127.0.0.1:445'; then break; fi
     sleep 1
   done
-  mount_ro() { sudo mount -t cifs //127.0.0.1/test "$RO" -o guest,vers=3.0,ro,noperm,file_mode=0644,dir_mode=0755,uid="$(id -u)",gid="$(id -g)"; }
-  mount_rw() { sudo mount -t cifs //127.0.0.1/test "$RW" -o guest,vers=3.0,rw,noperm,file_mode=0644,dir_mode=0755,uid="$(id -u)",gid="$(id -g)"; }
+  mount_ro() { sudo mount -t cifs //127.0.0.1/test "$RO" -o "credentials=$WORK/smb-credentials,vers=3.0,ro,noperm,file_mode=0644,dir_mode=0755,uid="$(id -u)",gid=$(id -g)"; }
+  mount_rw() { sudo mount -t cifs //127.0.0.1/test "$RW" -o "credentials=$WORK/smb-credentials,vers=3.0,rw,noperm,file_mode=0644,dir_mode=0755,uid="$(id -u)",gid=$(id -g)"; }
   expected=cifs
   ;;
 glusterfs)
