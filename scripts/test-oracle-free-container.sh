@@ -18,7 +18,7 @@ cleanup() {
 }
 trap cleanup EXIT
 PASSWORD=$(openssl rand -hex 24)
-docker run -d --name "$NAME" --network none --shm-size 1g \
+docker run -d --name "$NAME" --shm-size 1g \
   -e ORACLE_PASSWORD="$PASSWORD" "$IMAGE" >/dev/null
 unset PASSWORD
 READY=false
@@ -28,7 +28,13 @@ for attempt in $(seq 1 70); do
     READY=true
     break
   fi
-  test "$(docker inspect -f '{{.State.Running}}' "$NAME")" = true || { echo "FAIL: Oracle container stopped before readiness" >&2; exit 1; }
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$NAME")" != true ]]; then
+    echo "FAIL: Oracle container stopped before readiness" >&2
+    docker inspect -f 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$NAME" >&2 || true
+    # Print only broadly recognizable failure lines, not SQL or credentials.
+    docker logs "$NAME" 2>&1 | grep -Ei '(^|[[:space:]])(error|failed|fatal|ORA-|TNS-|out of memory|permission denied|missing file|cannot)' | tail -25 >&2 || true
+    exit 1
+  fi
   sleep 10
 done
 test "$READY" = true || { echo "FAIL: Oracle did not become ready" >&2; exit 1; }
