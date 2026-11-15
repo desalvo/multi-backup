@@ -81,6 +81,20 @@ pub async fn revoke(State(state):State<AppState>,headers:HeaderMap,
         _=>error(StatusCode::BAD_REQUEST,"device_revocation_rejected")
     }
 }
+pub async fn approve_profile(State(state):State<AppState>,headers:HeaderMap,
+               Json(profile):Json<agents::ProfileApproval>)->Response{
+    let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
+    // Adding or replacing a remote runnable command/profile is privileged;
+    // a valid agent token alone cannot authorize a new executable.
+    if !state.0.security.recovery_ok(&headers){
+        return error(StatusCode::FORBIDDEN,"profile_approval_requires_recovery_authorization");
+    }
+    match tokio::task::spawn_blocking(move||
+        agents::approve_profile(&db,&profile)).await{
+        Ok(Ok(true))=>response(StatusCode::OK,json!({"profile_approved":true})),
+        _=>error(StatusCode::BAD_REQUEST,"agent_profile_approval_rejected")
+    }
+}
 pub async fn enqueue_pull(State(state):State<AppState>,headers:HeaderMap,
                     Json(body):Json<agents::PullJob>)->Response{
     let db=match admin(&state,&headers,true){Ok(v)=>v,Err(r)=>return r};
