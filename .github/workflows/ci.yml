@@ -109,9 +109,53 @@ jobs:
       - name: Exercise private gateway and recovery boundary in a running OCI image
         run: bash scripts/test-server-gateway-container.sh multi-backup:test
 
+  kubernetes-real-cluster:
+    name: Real Kubernetes multi-node control plane and PostgreSQL TLS acceptance
+    needs: [production-gate, rust-server-validation]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install upstream kind and kubectl
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/kubectl https://dl.k8s.io/release/v1.32.3/bin/linux/amd64/kubectl
+          chmod 0755 /tmp/kind /tmp/kubectl
+          sudo mv /tmp/kind /tmp/kubectl /usr/local/bin/
+          kind version
+          kubectl version --client
+      - name: Boot actual Kubernetes control plane with two worker nodes
+        run: |
+          kind create cluster --name multi-backup-ci \
+            --config tests/kubernetes/kind-config.yaml --wait 240s
+          kubectl wait --for=condition=Ready nodes --all --timeout=180s
+          test "$(kubectl get nodes --no-headers | wc -l)" -eq 3
+      - name: Build the exact PR Rust OCI image and load it into kind
+        run: |
+          docker build --tag multi-backup:ci-kind .
+          kind load docker-image multi-backup:ci-kind --name multi-backup-ci
+      - name: Test two live Rust pods, PostgreSQL verify-full, service security and failover
+        run: bash tests/kubernetes/test-kind-cluster.sh
+      - name: Capture Kubernetes failure diagnostics (no Secret values)
+        if: failure()
+        shell: bash
+        run: |
+          kubectl -n multi-backup-ci get pods,deployments,services -o wide || true
+          kubectl -n multi-backup-ci get events --sort-by=.lastTimestamp || true
+          kubectl -n multi-backup-ci describe deployment mb-ci-server || true
+          kubectl -n multi-backup-ci logs -l app=mb-ci-server --all-containers=true --tail=150 || true
+          kubectl -n multi-backup-ci logs -l app=mb-ci-postgres --all-containers=true --tail=150 || true
+      - name: Tear down isolated Kubernetes cluster
+        if: always()
+        run: kind delete cluster --name multi-backup-ci || true
+
   publish-container:
     name: Push Multi Backup OCI image to Docker Hub
-    needs: [production-gate, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
+    needs: [production-gate, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
     runs-on: ubuntu-24.04
     if: >-
       github.event_name != 'pull_request' &&
@@ -563,7 +607,7 @@ jobs:
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)
-    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
+    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&

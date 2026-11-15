@@ -1,0 +1,144 @@
+# Disposable CI fixtures only. Never reuse these Secrets or ephemeral volumes in production.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-cluster
+spec:
+  selector: {app: mb-ci-postgres}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-ci-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mb-ci-postgres}
+  template:
+    metadata:
+      labels: {app: mb-ci-postgres}
+    spec:
+      initContainers:
+        - name: prepare-postgres-tls
+          image: busybox:1.36
+          command: [sh, -ec]
+          args: ["cp /tls-input/server.crt /tls-runtime/server.crt; cp /tls-input/server.key /tls-runtime/server.key; chown 999:999 /tls-runtime/*; chmod 0600 /tls-runtime/server.key; chmod 0644 /tls-runtime/server.crt"]
+          volumeMounts:
+            - {name: tls-input, mountPath: /tls-input, readOnly: true}
+            - {name: tls-runtime, mountPath: /tls-runtime}
+      containers:
+        - name: postgres
+          image: postgres:16
+          args: ["-c", "ssl=on", "-c", "ssl_cert_file=/tls-runtime/server.crt", "-c", "ssl_key_file=/tls-runtime/server.key"]
+          env:
+            - {name: POSTGRES_DB, value: multi_backup}
+            - {name: POSTGRES_USER, value: mbuser}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: mb-ci-postgres, key: password}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -U, mbuser, -d, multi_backup]}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: tls-runtime, mountPath: /tls-runtime, readOnly: true}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: tls-input, secret: {secretName: mb-ci-db-tls}}
+        - {name: tls-runtime, emptyDir: {medium: Memory}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mb-ci-server
+spec:
+  type: ClusterIP
+  selector: {app: mb-ci-server}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-ci-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: mb-ci-server}
+  template:
+    metadata:
+      labels: {app: mb-ci-server}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {app: mb-ci-server}
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: prepare-private-secrets
+          image: busybox:1.36
+          command: [sh, -ec]
+          args: ["cp /source/* /private/; chown 10001:10001 /private/*; chmod 0600 /private/*"]
+          securityContext: {runAsUser: 0, runAsNonRoot: false}
+          volumeMounts:
+            - {name: source, mountPath: /source, readOnly: true}
+            - {name: private, mountPath: /private}
+      containers:
+        - name: server
+          image: multi-backup:ci-kind
+          imagePullPolicy: Never
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: MULTI_BACKUP_ADMIN_USER, value: ciadmin}
+            - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: "https://backup.example.invalid"}
+            - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: /run/secrets/admin-hash}
+            - {name: MULTI_BACKUP_HARDENED_MODE, value: "true"}
+            - {name: MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE, value: /run/secrets/private-gate}
+            - {name: MULTI_BACKUP_RECOVERY_SECRET_FILE, value: /run/secrets/recovery-secret}
+            - {name: MULTI_BACKUP_CLUSTER_TLS_CA_FILE, value: /run/secrets/db-ca.pem}
+            - name: MULTI_BACKUP_CLUSTER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: mb-ci-app, key: dsn}
+            - name: MULTI_BACKUP_REPLICA_ID
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - {name: MULTI_BACKUP_REPLICA_MAX_JOBS, value: "1"}
+            - {name: MULTI_BACKUP_CLUSTER_EXECUTOR, value: disabled}
+            - {name: MULTI_BACKUP_DATA_ROOT, value: /data/backups}
+            - {name: MULTI_BACKUP_EXPORT_ROOT, value: /data/exports}
+            - {name: MULTI_BACKUP_AUDIT_LOG, value: /data/audit/events.jsonl}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts:
+            - {name: private, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: temp, mountPath: /tmp}
+      volumes:
+        - {name: source, secret: {secretName: mb-ci-app}}
+        - {name: private, emptyDir: {medium: Memory}}
+        - {name: data, emptyDir: {}}
+        - {name: temp, emptyDir: {}}

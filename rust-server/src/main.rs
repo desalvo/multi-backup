@@ -87,7 +87,7 @@ fn oidc_cookie_state(headers:&HeaderMap)->Option<String>{
     }else{None}
 }
 
-fn session(headers:&HeaderMap,state:&AppConfig)->Option<(String,Session)> {
+async fn session(headers:&HeaderMap,state:&AppConfig)->Option<(String,Session)> {
     let cookie=headers.get(header::COOKIE)?.to_str().ok()?;
     let token=cookie.split(';').find_map(|part|
         part.trim().strip_prefix("mb_session="))?;
@@ -98,13 +98,18 @@ fn session(headers:&HeaderMap,state:&AppConfig)->Option<(String,Session)> {
     // including logout/revocation. An in-memory token on another pod never
     // substitutes for a missing shared session.
     if let Some(db)=&state.cluster{
-        return db.get_session(token).ok().flatten().map(|(user,csrf)|
-            (token.to_owned(),Session{user,csrf,
-                until:Instant::now()+Duration::from_secs(60)}));
+        // Never call synchronous postgres::Client inside a Tokio HTTP task:
+        // postgres 0.19 spins its own runtime and panics on nested entry.
+        let db=db.clone();
+        let lookup=token.to_owned();
+        return tokio::task::spawn_blocking(move||db.get_session(&lookup))
+            .await.ok().and_then(Result::ok).flatten().map(|(user,csrf)|
+                (token.to_owned(),Session{user,csrf,
+                    until:Instant::now()+Duration::from_secs(60)}));
     }
     let mut sessions=state.sessions.lock().ok()?;
     sessions.retain(|_,session|session.until>Instant::now());
-    sessions.get(token).cloned().map(|s|(token.to_string(),s))
+    sessions.get(token).cloned().map(|s|(token.to_owned(),s))
 }
 fn same_origin(headers:&HeaderMap,state:&AppConfig)->bool {
     headers.get(header::ORIGIN).and_then(|x|x.to_str().ok())==Some(state.origin.as_str())
@@ -189,7 +194,13 @@ async fn do_login(State(state):State<AppState>,headers:HeaderMap,
     let csrf=random_token();
     if let Some(db)=&state.0.cluster {
         // Shared session write must succeed before publishing the cookie.
-        if db.put_session(&token,&login.username,&csrf).is_err() {
+        let db=db.clone();
+        let write_token=token.clone();
+        let write_user=login.username.clone();
+        let write_csrf=csrf.clone();
+        if !matches!(tokio::task::spawn_blocking(move||
+                db.put_session(&write_token,&write_user,&write_csrf)).await,
+                Ok(Ok(()))) {
             return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
         }
     }
@@ -222,7 +233,13 @@ async fn oidc_start(State(state):State<AppState>)->Response{
     if let Some(db)=&state.0.cluster{
         // All replicas must recognize the SAME outstanding PKCE challenge.
         // Failure to commit is fatal; never fall back to replica-local state.
-        if db.put_oidc_pending(&csrf,&pending.verifier,&pending.nonce).is_err(){
+        let db=db.clone();
+        let challenge=csrf.clone();
+        let verifier=pending.verifier.clone();
+        let nonce=pending.nonce.clone();
+        if !matches!(tokio::task::spawn_blocking(move||
+                db.put_oidc_pending(&challenge,&verifier,&nonce)).await,
+                Ok(Ok(()))) {
             return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
         }
     }else{
@@ -258,12 +275,15 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     let pending=if let Some(db)=&state.0.cluster{
         // Atomic DELETE..RETURNING enforces one-time consumption even when
         // callbacks race through different pods behind the load balancer.
-        match db.take_oidc_pending(&state_param){
-            Ok(Some((verifier,nonce)))=>Some(Pending{
+        let db=db.clone();
+        let challenge=state_param.clone();
+        match tokio::task::spawn_blocking(move||
+                db.take_oidc_pending(&challenge)).await{
+            Ok(Ok(Some((verifier,nonce))))=>Some(Pending{
                 verifier,nonce,created:Instant::now()
             }),
-            Ok(None)=>None,
-            Err(_)=>return secure_headers(StatusCode::SERVICE_UNAVAILABLE)
+            Ok(Ok(None))=>None,
+            _=>return secure_headers(StatusCode::SERVICE_UNAVAILABLE)
         }
     }else{
         let Ok(mut entries)=state.0.pending_oidc.lock() else {
@@ -285,7 +305,13 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     let cookie_id=random_token();
     let csrf=random_token();
     if let Some(db)=&state.0.cluster{
-        if db.put_session(&cookie_id,&format!("oidc:{subject}"),&csrf).is_err(){
+        let db=db.clone();
+        let token=cookie_id.clone();
+        let user=format!("oidc:{subject}");
+        let session_csrf=csrf.clone();
+        if !matches!(tokio::task::spawn_blocking(move||
+                db.put_session(&token,&user,&session_csrf)).await,
+                Ok(Ok(()))) {
             return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
         }
     }
@@ -311,7 +337,7 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
 }
 
 async fn dashboard(State(state):State<AppState>,headers:HeaderMap)->Response {
-    if let Some((_,auth))=session(&headers,&state.0) {
+    if let Some((_,auth))=session(&headers,&state.0).await {
         let page=include_str!("../public/index.html").replace("CSRF_TOKEN", &auth.csrf);
         secure_headers(Html(page))
     } else {secure_headers(Redirect::to("/login"))}
@@ -321,7 +347,7 @@ fn unauthorized()->(StatusCode,Json<Value>) {
 }
 async fn backups(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)> {
-    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
     if !state.0.security.can_browse(&auth.user,&state.0.name) {
         return Err((StatusCode::FORBIDDEN,Json(json!({"error":"access_denied"}))));
     }
@@ -338,7 +364,7 @@ async fn backups(State(state):State<AppState>,headers:HeaderMap)
 }
 async fn export(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<Export>)
     ->Result<Json<Value>,(StatusCode,Json<Value>)> {
-    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
     if !same_origin(&headers,&state.0) ||
        headers.get("x-csrf-token").and_then(|x|x.to_str().ok())!=Some(auth.csrf.as_str()) {
         return Err((StatusCode::FORBIDDEN,Json(json!({"error":"csrf_rejected"}))));
@@ -386,7 +412,7 @@ fn paginate_audit(rows:Vec<Value>,filter:&AuditFilter)->(usize,Vec<Value>){
 }
 async fn security_status(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)>{
-    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
     if auth.user!=state.0.name {
         return Err((StatusCode::FORBIDDEN,
             Json(json!({"error":"admin_required"}))));
@@ -403,7 +429,7 @@ async fn security_status(State(state):State<AppState>,headers:HeaderMap)
 async fn audit_list(State(state):State<AppState>,headers:HeaderMap,
     axum::extract::Query(filter):axum::extract::Query<AuditFilter>)
     ->Result<Json<Value>,(StatusCode,Json<Value>)>{
-    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
     if auth.user!=state.0.name{
         return Err((StatusCode::FORBIDDEN,Json(json!({"error":"admin_required"}))));
     }
@@ -439,13 +465,13 @@ async fn audit_list(State(state):State<AppState>,headers:HeaderMap,
 
 async fn smtp_status(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)>{
-    if session(&headers,&state.0).is_none(){return Err(unauthorized());}
+    if session(&headers,&state.0).await.is_none(){return Err(unauthorized());}
     Ok(Json(json!({"configured":state.0.smtp.is_some(),
         "tls":state.0.smtp.as_ref().map(|v|v.protocol())})))
 }
 async fn smtp_test(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)>{
-    let auth=session(&headers,&state.0).ok_or_else(unauthorized)?.1;
+    let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
     if !same_origin(&headers,&state.0)||
         headers.get("x-csrf-token").and_then(|s|s.to_str().ok())!=Some(auth.csrf.as_str()){
         return Err((StatusCode::FORBIDDEN,Json(json!({"error":"csrf_rejected"}))));
@@ -480,11 +506,14 @@ async fn smtp_test(State(state):State<AppState>,headers:HeaderMap)
 }
 
 async fn logout(State(state):State<AppState>,headers:HeaderMap)->Response {
-    if let Some((token,s))=session(&headers,&state.0) {
+    if let Some((token,s))=session(&headers,&state.0).await {
         if same_origin(&headers,&state.0) &&
             headers.get("x-csrf-token").and_then(|x|x.to_str().ok())==Some(s.csrf.as_str()) {
             if let Some(db)=&state.0.cluster{
-                if db.delete_session(&token).is_err() {
+                let db=db.clone();
+                let to_delete=token.clone();
+                if !matches!(tokio::task::spawn_blocking(move||
+                        db.delete_session(&to_delete)).await, Ok(Ok(()))) {
                     return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
                 }
             }
@@ -529,7 +558,11 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
-    let cluster=cluster::Database::configured()?;
+    // The postgres 0.19 synchronous client internally blocks on a Tokio
+    // runtime. Running it on the async server thread would attempt to
+    // nest a runtime and panic in every clustered Kubernetes Pod.
+    // All synchronous cluster bootstrap I/O must use blocking workers.
+    let cluster=tokio::task::spawn_blocking(cluster::Database::configured).await??;
     let agent_proxy_key=std::env::var_os("MULTI_BACKUP_AGENT_PROXY_SECRET_FILE")
         .map(|location|->Result<Zeroizing<String>,Box<dyn std::error::Error+Send+Sync>>{
             let path=PathBuf::from(location);
@@ -562,7 +595,13 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         let accessible=std::env::var("MULTI_BACKUP_CLUSTER_STORAGE_IDS")
             .unwrap_or_default().split(',').filter(|s|!s.is_empty())
             .map(str::to_owned).collect::<Vec<_>>();
-        db.heartbeat_replica(&replica,budget,&accessible)?;
+        // Initial replica registration is synchronous PostgreSQL I/O too.
+        // Fail startup if registration fails; never silently run unregistered.
+        let initial_db=db.clone();
+        let initial_id=replica.clone();
+        let initial_stores=accessible.clone();
+        tokio::task::spawn_blocking(move||
+            initial_db.heartbeat_replica(&initial_id,budget,&initial_stores)).await??;
         if std::env::var("MULTI_BACKUP_CLUSTER_EXECUTOR").ok().as_deref()==Some("enabled"){
             // Explicit opt-in only: shared filesystem jobs can be processed by
             // any replica. Local filesystems stay pinned to their owner.
