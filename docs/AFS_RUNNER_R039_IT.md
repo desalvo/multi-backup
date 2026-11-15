@@ -58,3 +58,10 @@ The **same** `openafs_volume: Unable to locate viceetcdir directory` remained af
 The updated pinned upstream `local_install.yaml` is patched at the **boundary between client checkpoint 3 and volume checkpoint 4**: it sets `/etc/ansible/facts.d/openafs.fact` to root-owned, runner-group readable **0640** (not world-readable) and runs a non-root Python assertion checking the fact JSON and actual AFS `cacheinfo` path. The patch refuses unknown upstream playbooks and is tested against the exact upstream commit `11fa2a5b` in static CI.
 
 Preserve the Debian 12 Proxmox VM, KDC, OpenAFS client and kernel, and shared runner binary archive cache. Still register a new ephemeral runner per CI job; the main workflow remains owner-only, SHA-pinned, with `afs-active` lease cleanup. Do not claim a working real volume recovery or certification until the field run reaches green.
+
+
+## CI 43732486690: EACCES on OpenAFS fact parent directories (15 November 2026)
+
+The actual Linux runner/Ansible acceptance failed **at the new diagnostic**, not while building OpenAFS: PermissionError [Errno 13] reading '/etc/ansible/facts.d/openafs.fact' as mb-afs-runner, despite the file being group-readable 0640. The registering process has restrictive umask 077; one or both ancestor directories, '/etc/ansible' and '/etc/ansible/facts.d', may therefore be root-only and prevent path traversal. The earlier upstream openafs_volume module was hiding EACCES behind 'Unable to locate viceetcdir directory'.
+
+The exact upstream `local_install.yaml` patch is now more complete: after checkpoint 3, make both fact directories root-owned/group mb-afs-runner, mode **0710** (group execute/traverse but no listing; other denied); set '/etc/ansible/facts.d/openafs.fact' to root:mb-afs-runner **0640**; also make real '/etc/openafs/cacheinfo' root:mb-afs-runner **0640**, and require a real non-root open/read before touching volumes. No keytab permissions changed, no world read access. The static CI checks the patched pinned playbook. Debian VM stays available with an ephemeral GitHub runner session for every CI job. A genuine AFS full/incremental/Rust recovery PASS is still pending.

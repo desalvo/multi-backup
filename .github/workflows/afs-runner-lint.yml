@@ -29,6 +29,9 @@ jobs:
           python3 scripts/patch-openafs-ansible-local-facts-access.py /tmp/local_install.yaml
           python3 scripts/patch-openafs-ansible-local-facts-access.py /tmp/local_install.yaml
           grep -q 'mode: "0640"' /tmp/local_install.yaml
+          grep -q 'mode: "0710"' /tmp/local_install.yaml
+          grep -q -- '- /etc/ansible/facts.d' /tmp/local_install.yaml
+          grep -q 'Grant runner-group read-only access to real AFS client cacheinfo' /tmp/local_install.yaml
           grep -q 'Prove the non-root AFS volume module can read' /tmp/local_install.yaml
           grep -q 'afs-active' scripts/register-openafs-runner-once.sh
           grep -q 'viceetcdir' scripts/patch-openafs-ansible-debian-facts.py
