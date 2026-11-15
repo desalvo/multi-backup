@@ -654,3 +654,12 @@ The v1 Store exports a complete unified logical backup to a new encrypted tar.gz
 
 - Fixed a significant HA startup incompatibility: postgres Rust 0.19 does not support sslmode=verify-full parsing directly. Implemented strict URI query parsing with duplicate/downgrade rejection, secure driver normalization to sslmode=require and explicit native-tls TLS>=1.2 verified certificate/hostname. Optional MULTI_BACKUP_CLUSTER_TLS_CA_FILE supports a trusted private CA. Added negative-case unit tests.
 - Updated Kubernetes preview with private multi-backup-db-ca Secret copy; Production Gate now checks CA env and TLS safe defaults. IT/EN operations and security documentation updated. Exact-head full CI and actual CA/cert failure tests required before RC.
+
+## r039+ Rust native plugin executor progress — 2026-11-15
+
+- 8 executable preview filesystem backup sources: posix, nfs, smb, sshfs, gpfs CES, cephfs, glusterfs, lustre -> age/zstd protected POSIX chunks. Linux remote mounts must be exact RO mounts and operators attest snapshots; mount type is not snapshot/ACL proof.
+- 6 executable preview verified filesystem restores: POSIX store -> NEW directory on posix, nfs, sshfs, cephfs, glusterfs or lustre, with exact RW mount gating. GPFS CES output remains unimplemented.
+- Added Store::backup_stream(Read,finalizer): direct deduplicated encrypted chunk streaming, no raw source plaintext staging; a failing upstream producer prevents manifest publication and leaves only encrypted GC-eligible orphan chunks.
+- Added OpenAFS dedicated vos dump full/incremental streaming local/SSH-agentless source and explicit new-volume full/incremental chain restore with -overwrite abort on full; authentication uses valid local token. CLI: plugins afs-backup, afs-restore-plan, afs-restore-new. Full-chain age/parity verification and confirmation required.
+- New rust/tests/afs_stream_roundtrip.rs invokes compiled native Rust CLI, real age-keygen and FAKE vos child, covering encrypted full+incremental streams, ordered restore, wrong confirmation and producer failure. Mandatory Production Gate now executes this test. Native plugin planner preview flags synchronized with executable pairs.
+- Documentation updated in docs/PLUGIN_EXECUTORS_R039_IT.md and EN; all features are PREVIEW not certified. Open blockers: real AFS site/keytab/localauth/VLDB/ACL testing; true CephFS/Gluster/Lustre mounted metadata/failover tests; generic cloud/DB/VM provider adapters and distinct source/target credentials; signed packages and HA physical write fencing. No RC.
