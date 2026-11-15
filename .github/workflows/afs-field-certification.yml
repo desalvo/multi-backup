@@ -1,0 +1,93 @@
+name: Multi Backup - OpenAFS dedicated field certification (approved SHA only)
+# Separate trusted workflow on default branch: PR #11 need not be merged.
+# It NEVER runs on pull_request or pull_request_target. Only the repository
+# owner may dispatch the fixed reviewed commit on a single-use isolated VM.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact 40-character SHA of approved PR #11 revision"
+        required: true
+        type: string
+      confirmation:
+        description: "Enter DISPOSABLE-AFS-APPROVED to affirm isolated sacrificial VM"
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  authentic-openafs:
+    name: Real Kerberos, VLDB, volserver, encrypted Rust FULL+incremental restore
+    if: github.actor == 'desalvo'
+    runs-on: [self-hosted, linux, x64, openafs-ci]
+    timeout-minutes: 120
+    env:
+      PINNED_SHA: 4754e5a53c422a76f498126c137944d64215afbe
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      LAB_CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Enforce reviewed exact source and disposable single-use VM BEFORE checkout
+        run: |
+          set -euo pipefail
+          test "$LAB_CONFIRMATION" = DISPOSABLE-AFS-APPROVED
+          test "$EXPECTED_SHA" = "$PINNED_SHA"
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -un)" = mb-afs-runner
+          test "$(id -u)" -ne 0
+          test "$(uname -m)" = x86_64
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 22.04
+          case "$(uname -r)" in
+            5.15.*-generic) ;;
+            *) echo "::error::Expected supported Ubuntu GA kernel 5.15-generic"; exit 1;;
+          esac
+          sudo -n true
+          test "$(sudo -n cat /etc/multi-backup-ci/allow-disposable-afs)" = DEDICATED_DISPOSABLE_OPENAFS_CELL_VM
+          if sudo -n test -e /var/lib/multi-backup-ci/afs-run-used; then
+            echo "::error::VM has previously executed an AFS job; destroy and re-create"; exit 1
+          fi
+          sudo -n install -d -m 0700 /var/lib/multi-backup-ci
+          sudo -n touch /var/lib/multi-backup-ci/afs-run-used
+          test -d "/lib/modules/$(uname -r)/build"
+          sudo -n modprobe openafs
+          grep -q '^openafs ' /proc/modules
+          printf 'OpenAFS VM checked: %s\n' "$(uname -r)"
+      - uses: actions/checkout@v4
+        with:
+          ref: 4754e5a53c422a76f498126c137944d64215afbe
+          persist-credentials: false
+      - name: Verify immutable checked-out PR source and Rust toolchain
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SHA"
+          command -v cargo
+          command -v rustc
+          command -v age
+          command -v kinit
+          command -v jq
+      - name: Install SHA-pinned real OpenAFS/Kerberos provisioning collection
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/mb-afs-ansible"
+          "$RUNNER_TEMP/mb-afs-ansible/bin/pip" install 'ansible-core>=2.17,<2.18'
+          "$RUNNER_TEMP/mb-afs-ansible/bin/ansible-galaxy" collection install \
+            git+https://github.com/openafs-contrib/ansible-openafs.git,11fa2a5bbb27d4b44d297c5105f7dd9bc6347190
+      - name: Deploy genuine isolated KDC and OpenAFS local test cell
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/mb-afs-ansible/bin/ansible-playbook" openafs_contrib.openafs.local_install \
+            -i 'localhost,' -c local -e afs_cell=example.com -e afs_realm=EXAMPLE.COM \
+            -e afs_install_method=managed -e afs_module_install_method=dkms
+          for exe in vos fs tokens kinit aklog; do command -v "$exe"; done
+          mount | grep -i afs
+          test -d /afs/example.com/test
+      - name: Build actual encrypted Rust backup/restore CLI
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Run real OpenAFS full + incremental + new-volume recovery acceptance
+        run: bash scripts/test-real-afs-cell.sh
+      - name: Record genuine cell, source pin and acceptance result
+        run: |
+          echo "PASS real Kerberos KDC/AFS token/VLDB/volserver + encrypted FULL/incremental and new-volume byte-identical restore" >> "$GITHUB_STEP_SUMMARY"
+          echo "Immutable reviewed source SHA: $PINNED_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Sacrificial self-hosted VM must now be destroyed; ephemeral runner does NOT wipe keytabs." >> "$GITHUB_STEP_SUMMARY"
