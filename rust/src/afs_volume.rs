@@ -167,14 +167,18 @@ pub fn spawn_local(job:&VolumeJob)->Result<std::process::Child,String>{
         .stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
         .map_err(|e|e.to_string())
 }
-pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
-    let plan=plan(job)?;
-    let Execution::SshAgentless{host,user,identity,known_hosts,..}=&job.execution else{
-        return Err("SSH execution requires an explicit SSH transport".into())
+/// A single pinned transport builder is shared by AFS backup and restore.
+/// User ssh_config, ProxyCommand, ProxyJump, password and forwarding are
+/// explicitly disabled. Remote content must be a typed vos argument plan.
+fn ssh_command_for(transport:&Execution,remote:&str)->Result<Command,String>{
+    let Execution::SshAgentless{host,user,identity,known_hosts,..}=transport else{
+        return Err("Not an agentless SSH transport".into());
     };
-    if matches!(&job.auth,Authentication::Keytab{..}){
-        return Err("Remote keytab execution requires a separately approved remote credential profile".into());
+    if !valid(host,253,host_char)||!valid(user,64,username){
+        return Err("Invalid SSH target".into());
     }
+    validate_regular(identity)?;
+    validate_regular(known_hosts)?;
     let mut cmd=Command::new("ssh");
     cmd.args(["-T","-F","none",
               "-o","BatchMode=yes","-o","StrictHostKeyChecking=yes",
@@ -188,7 +192,18 @@ pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
     cmd.arg(format!("UserKnownHostsFile={}",known_hosts.display()));
     cmd.arg("-i").arg(identity);
     cmd.arg("--").arg(format!("{user}@{host}"));
-    cmd.arg(ssh_remote_command(&plan));
+    cmd.arg(remote);
+    Ok(cmd)
+}
+pub fn spawn_ssh(job:&VolumeJob)->Result<std::process::Child,String>{
+    let plan=plan(job)?;
+    let Execution::SshAgentless{host,user,identity,known_hosts,..}=&job.execution else{
+        return Err("SSH execution requires an explicit SSH transport".into())
+    };
+    if matches!(&job.auth,Authentication::Keytab{..}){
+        return Err("Remote keytab execution requires a separately approved remote credential profile".into());
+    }
+    let cmd=ssh_command_for(&job.execution,&ssh_remote_command(&plan))?;
     // stderr must never be piped without a draining worker: remote vos can
     // emit enough diagnostics to deadlock the stdout backup stream.
     cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
@@ -303,12 +318,14 @@ pub struct RestoreNewJob{
     pub server:String,
     pub partition:String,
     pub auth:Authentication,
+    #[serde(default)]pub execution:Option<Execution>,
 }
 #[derive(Debug,Clone,Serialize)]
 pub struct RestorePlan{
     pub executable:String,
     pub arguments:Vec<String>,
     pub new_volume_only:bool,
+    pub transport:String,
     pub confirmation:String,
 }
 pub fn plan_restore_new(target:&RestoreNewJob)->Result<RestorePlan,String>{
@@ -324,6 +341,18 @@ pub fn plan_restore_new(target:&RestoreNewJob)->Result<RestorePlan,String>{
     if !matches!(&target.auth,Authentication::ExistingToken){
         return Err("Native restore requires an independently approved existing AFS token; managed keytab/localauth execution is not yet certified".into());
     }
+    let transport=match target.execution.as_ref(){
+        None|Some(Execution::Local)=>"local",
+        Some(Execution::SshAgentless{host,user,identity,known_hosts,..})=>{
+            if !valid(host,253,host_char)||!valid(user,64,username){
+                return Err("Unsafe AFS restore SSH host/identity".into());
+            }
+            validate_regular(identity)?;validate_regular(known_hosts)?;
+            "ssh-agentless"
+        }
+        Some(Execution::ManagedAgent{..})=>
+            return Err("Agent-driven restore needs an independently approved agent restore profile".into()),
+    };
     // AFS "abort" never overwrites an existing VLDB volume. No fixed -id
     // is supplied, so the VLDB allocates a new volume ID.
     let args=vec!["restore".into(),"-server".into(),target.server.clone(),
@@ -331,7 +360,8 @@ pub fn plan_restore_new(target:&RestoreNewJob)->Result<RestorePlan,String>{
         target.volume.clone(),"-cell".into(),target.cell.clone(),
         "-overwrite".into(),"abort".into()];
     Ok(RestorePlan{executable:"vos".into(),arguments:args,
-        new_volume_only:true,confirmation:format!("{}:{}:{}:{}",
+        new_volume_only:true,transport:transport.into(),
+        confirmation:format!("{}:{}:{}:{}",
            target.cell,target.server,target.partition,target.volume)})
 }
 /// Restores one authenticated AFS full dump followed by its increments in
@@ -378,8 +408,22 @@ pub fn restore_new_chain_from_store(
             let last=args.last_mut().ok_or("Invalid restore arguments")?;
             *last="incremental".into();
         }
-        let mut child=Command::new(&plan.executable).args(&args)
-            .stdin(Stdio::piped()).stdout(Stdio::inherit())
+        // With SSH agentless the exact typed vos command is quote-escaped
+        // and executed under pinned SSH host identity, not a server-supplied
+        // shell snippet. The TLS/SSH transport is responsible for ciphertext
+        // confidentiality in transit; no plaintext dump is staged on disk.
+        let mut cmd=if let Some(exec@Execution::SshAgentless{..})=&target.execution{
+            let remote=std::iter::once(plan.executable.as_str())
+                .chain(args.iter().map(String::as_str))
+                .map(shell_quote).collect::<Vec<_>>().join(" ");
+            ssh_command_for(exec,&remote)?
+        }else{
+            Command::new(&plan.executable)
+        };
+        if !matches!(&target.execution,Some(Execution::SshAgentless{..})){
+            cmd.args(&args);
+        }
+        let mut child=cmd.stdin(Stdio::piped()).stdout(Stdio::inherit())
             .stderr(Stdio::inherit()).spawn().map_err(|e|e.to_string())?;
         let mut input=child.stdin.take().ok_or("vos restore stdin absent")?;
         let mut output=crate::execution_policy::ThrottledWriter::new(
@@ -419,7 +463,7 @@ mod tests{
         let mut target=RestoreNewJob{
             cell:"example.org".into(),volume:"new.restored".into(),
             server:"afs1.example.org".into(),partition:"/vicepa".into(),
-            auth:Authentication::ExistingToken
+            auth:Authentication::ExistingToken,execution:None
         };
         let p=plan_restore_new(&target).unwrap();
         assert!(p.new_volume_only);
