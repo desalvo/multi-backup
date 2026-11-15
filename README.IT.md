@@ -1,5 +1,15 @@
 # Multi Backup
 
+### r039+ Plugin Rust eseguibili (anteprima non certificata)
+
+Disponibili otto sorgenti generiche verso POSIX cifrato, ora anche CephFS, GlusterFS e Lustre con mount Linux RO, e sei restore verso directory nuova POSIX/NFS/SSHFS/CephFS/GlusterFS/Lustre su mount RW. Il plugin AFS separato realizza dump full/incremental diretti da vos a chunk age/zstd, da host locale o SSH agentless autenticato, e restore della catena verificata su volume AFS NUOVO, con conferma obbligatoria. Documentazione [IT](docs/PLUGIN_EXECUTORS_R039_IT.md) e [EN](docs/PLUGIN_EXECUTORS_R039_EN.md). Senza test su veri server AFS e mount cluster, keytab/localauth, ACL e failover non sono ancora certificati.
+
+
+## r039 — Agenti Rust, policy host, server Kubernetes
+
+Nuove procedure: [cluster e parallelizzazione](docs/CLUSTER_ORCHESTRATION_R039_IT.md), [agenti AFS](docs/AGENTS_AFS_R039_IT.md), [guida EN](docs/CLUSTER_ORCHESTRATION_R039_EN.md). Il codice gestisce più job, banda e soglie CPU/RAM cooperative, assegnazioni fra repliche solo su storage condiviso e affinità ai filesystem locali. La PR #11 è una anteprima, NON una release candidate certificata.
+
+
 ## Documentazione corrente Rust r038
 
 Leggere il [manuale operativo italiano](docs/OPERATIONS_R038_IT.md), [l'indice documentale](docs/DOCUMENTATION_INDEX_R038.md) e [l'inventario delle funzionalità](docs/FEATURE_INVENTORY_R038.md). I PDF storici r018 con screenshot Python/Tk non attestano la nuova GUI Rust. Le funzionalità della PR #10, incluso il repack automatico delle parità 8+2, non sono ancora una RC certificata.
@@ -111,3 +121,5 @@ i dati di rete e le credenziali non vanno mai pubblicati nel repository.
 Il PDF viene generato/cifrato localmente con AES-256 e password scelta
 dall'operatore; GitHub conserva al massimo il PDF cifrato, dopo un controllo
 di crittografia. L'originale e il generatore privato restano offline.
+
+**AFS SSH agentless restore (anteprima):** la destinazione AFS può essere un host SSH remoto autenticato con chiave pinned e token AFS già autorizzato, mantenendo il controllo del nuovo volume e -overwrite abort. Vedi [manuale plugin](docs/PLUGIN_EXECUTORS_R039_IT.md). Richiesti test reali prima della RC.

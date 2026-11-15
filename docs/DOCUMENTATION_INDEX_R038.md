@@ -1,5 +1,15 @@
 # Multi Backup — r038 documentation index and coverage audit
 
+## Latest native provider manuals (r039+, 15 November 2026)
+
+Updated executable adapter procedures are [PLUGIN_EXECUTORS_R039_IT.md](PLUGIN_EXECUTORS_R039_IT.md) and [PLUGIN_EXECUTORS_R039_EN.md](PLUGIN_EXECUTORS_R039_EN.md). They cover the exact 8 mounted/posix input, 6 mounted/posix output preview pairs, dedicated AFS volume dump streaming, verified new-volume full+incremental restore, example JSON/CLI commands, failure policy and still-open RC evidence. Historic r038 manual sections remain for their own baseline; current source capabilities are reflected in this r039+ overlay.
+
+
+## R039 — ultimo aggiornamento documentale (15 novembre 2026)
+
+La r038 è la base funzionale Rust; le **modifiche correnti** ad AFS, agenti, limiti di risorse e Kubernetes sono documentate in [CLUSTER_ORCHESTRATION_R039_IT.md](CLUSTER_ORCHESTRATION_R039_IT.md), [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHESTRATION_R039_EN.md), [AGENTS_AFS_R039_IT.md](AGENTS_AFS_R039_IT.md), [AGENTS_AFS_R039_EN.md](AGENTS_AFS_R039_EN.md). Esempio deployment: [Kubernetes preview](../k8s/multi-backup-cluster-r039.preview.yaml). Consultare i gate in RC_CERTIFICATION_MATRIX.md. I documenti r038 sotto mantengono la provenienza ma non definiscono la completezza r039.
+
+
 **Audit date:** 2026-11-14. **Current engineering branch:** PR #10,
 `feature/r038-rust-primary-plugin-executor`. Status: **Rust development
 preview; not a published RC**. This page is the point of entry for users,

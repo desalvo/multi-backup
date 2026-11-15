@@ -25,6 +25,82 @@ def validate():
     flow=load('.github/workflows/ci.yml')
     native=load('.github/workflows/build-native.yml')
     jobs=flow['jobs']; assert 'production-gate' in jobs
+    # r039 native agent builds are release-critical across all supported OSes.
+    for agent_job in ('rust-agent-macos','rust-agent-windows',
+                      'rust-agent-debian','rust-agent-rpm'):
+        assert agent_job in jobs, 'Missing native agent build matrix: '+agent_job
+        assert 'production-gate' in jobs[agent_job].get('needs',[]), (
+            'Agent installation must remain gated by security: '+agent_job)
+    agent_macos=str(jobs['rust-agent-macos'])
+    agent_windows=str(jobs['rust-agent-windows'])
+    agent_debian=str(jobs['rust-agent-debian'])
+    agent_rpm=str(jobs['rust-agent-rpm'])
+    assert all(v in agent_macos for v in ('arm64','x86_64','package-rust-agent-unix.sh'))
+    assert all(v in agent_windows for v in ('x64','package-rust-agent-windows.ps1'))
+    assert all(v in agent_debian for v in ('12','13','amd64','arm64'))
+    assert all(v in agent_rpm for v in ('rocky','alma','8','9','10'))
+    gate_steps=str(jobs['production-gate']['steps'])
+    for evidence in ('agent_protocol','afs_volume','execution_policy',
+                     'cluster_placement','check-documentation-consistency.py'):
+        assert evidence in gate_steps, 'Agent/cluster Production Gate missing '+evidence
+    # Kubernetes example must actually start as unprivileged hardened Rust
+    # server; root-owned Secret projections with mode 0400 are unreadable to
+    # UID 10001 unless the initContainer installs owner-only copies.
+    manifest=list(yaml.safe_load_all(
+        (ROOT/'k8s/multi-backup-cluster-r039.preview.yaml').read_text('utf-8')))
+    resources={x.get('kind'):x for x in manifest if isinstance(x,dict)}
+    for kind in ('Deployment','Service','PersistentVolumeClaim',
+                 'HorizontalPodAutoscaler','PodDisruptionBudget'):
+        assert kind in resources, 'Incomplete Kubernetes HA example: '+kind
+    deploy=resources['Deployment']['spec']['template']['spec']
+    assert deploy.get('securityContext',{}).get('runAsUser')==10001
+    assert any(i.get('name')=='prepare-private-secrets'
+               for i in deploy.get('initContainers',[]))
+    server=next(c for c in deploy['containers'] if c['name']=='server')
+    env={x['name']:x for x in server['env']}
+    for key in ('MULTI_BACKUP_HARDENED_MODE',
+                'MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE',
+                'MULTI_BACKUP_RECOVERY_SECRET_FILE',
+                'MULTI_BACKUP_CLUSTER_DATABASE_URL',
+                'MULTI_BACKUP_CLUSTER_TLS_CA_FILE',
+                'MULTI_BACKUP_AGENT_PROXY_SECRET_FILE',
+                'MULTI_BACKUP_REPLICA_ID'):
+        assert key in env, 'Missing hardened cluster setting: '+key
+    assert env['MULTI_BACKUP_HARDENED_MODE'].get('value')=='true'
+    pg_source=(ROOT/'rust-server/src/cluster.rs').read_text('utf-8')
+    for required in ('fn strict_tls_dsn', 'postgres.get_ssl_mode()',
+                     'danger_accept_invalid_certs(false)',
+                     'danger_accept_invalid_hostnames(false)',
+                     'Protocol::Tlsv12','MULTI_BACKUP_CLUSTER_TLS_CA_FILE'):
+        assert required in pg_source, 'PG verified TLS protection missing: '+required
+
+    gate_steps=str(jobs['production-gate'].get('steps',[]))
+    for cmd in ("--test afs_stream_roundtrip",
+                "--test plugin_dispatch_roundtrip"):
+        assert cmd in gate_steps, 'Compiled native provider acceptance missing: '+cmd
+    for doc in ("docs/PLUGIN_EXECUTORS_R039_IT.md",
+                "docs/PLUGIN_EXECUTORS_R039_EN.md"):
+        assert (ROOT/doc).is_file(), 'Missing bilingual native provider guide: '+doc
+    for marker in ("backup_volume_to_store","restore_new_chain_from_store",
+                   '"cephfs"','"glusterfs"','"lustre"'):
+        source=(ROOT/'rust/src/afs_volume.rs').read_text('utf-8')+(
+            ROOT/'rust/src/plugin_executor.rs').read_text('utf-8')
+        assert marker in source, 'Missing compiled AFS/mount adapter: '+marker
+    for source in ('rust/src/bin/multi-backup-agent.rs',
+                   'rust/src/afs_volume.rs',
+                   'rust/src/agent_protocol.rs',
+                   'rust/src/execution_policy.rs',
+                   'rust/src/cluster_placement.rs',
+                   'rust-server/src/cluster.rs',
+                   'rust-server/src/cluster_worker.rs',
+                   'rust-server/src/agent_registry.rs',
+                   'rust-server/src/agent_api.rs',
+                   'docs/AGENTS_AFS_R039_IT.md',
+                   'docs/AGENTS_AFS_R039_EN.md',
+                   'docs/CLUSTER_ORCHESTRATION_R039_IT.md',
+                   'docs/CLUSTER_ORCHESTRATION_R039_EN.md'):
+        assert (ROOT/source).is_file(), 'Missing native agent/cluster source or manual: '+source
+
     assert (ROOT/'scripts/check-confidential-artifacts.py').is_file()
     assert (ROOT/'docs/PRIVATE_ARCHITECTURE_WORKFLOW.md').is_file()
     assert 'native-release' in jobs

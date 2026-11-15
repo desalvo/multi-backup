@@ -527,3 +527,165 @@ authorize destination access. Signed stable release remains blocked.
 PR #10 branch feature/r038-rust-primary-plugin-executor. Documenti autorevoli: docs/DOCUMENTATION_INDEX_R038.md, docs/FEATURE_INVENTORY_R038.md, docs/OPERATIONS_R038_IT.md, docs/OPERATIONS_R038_EN.md; sempre aggiornare anche DEVELOPMENT_STATUS.md, RC_CERTIFICATION_MATRIX.md e documenti tecnici. scripts/check-documentation-consistency.py è il gate automatico. Il generatore PDF include appendice Rust e avvisa che screenshot Tk r018 sono storici.
 
 Repack automatico 8+2 nella GC: parità nuova creata e verificata, indice autenticato supersedes pubblicato ultimo, vecchia stripe conservata durante grace del successore. I frammenti preparati senza commit vengono considerati orfani dopo grace. GC preview non modifica. Il purge conserva chunk e parità; protezioni sui discendenti bloccano riscritture implicite. Non dichiarare certificato senza CI dell'ultimo SHA, power-loss fault injection, restore su dati reali, installer firmati e rollback. Compatibilità degli archivi Python facoltativa, non bloccante.
+
+## r039 handoff — multi-agent and multi-replica requirements (2026-11-15)
+
+Branch feature/r039-afs-agent-packages PR #11, base feature/r038-rust-primary-plugin-executor PR #10. User requires per-volume AFS local/token/keytab; SSH agentless with key, remote keytab or server localauth; authorized pull and autonomous push agents; global agent authorization (ID, user, token, Ed25519, TLS), per-host thread/bandwidth/CPU/RAM caps, server/agent configured limits, and horizontal Kubernetes replica balancing with shared database and strict local storage affinity.
+
+Code added: rust/src/{afs_volume,agent_protocol,execution_policy,cluster_placement}.rs, rust/src/bin/multi-backup-agent.rs, rust-server/src/{cluster,cluster_worker,agent_registry,agent_api}.rs, shared server sessions/readiness, native installer scripts/spec and CI jobs. Backend PostgreSQL TLS verify-full, registered shared/node_local stores, SKIP LOCKED and lease tokens; optional executor currently supports only server_local POSIX/NFS/SMB/SSHFS/GPFS sources. AFS single dump cannot be split, but independent volumes can run concurrently in an agent.
+
+Critical RELEASE BLOCKER: job lease prevents stale status updates, NOT physical age manifest writes after lease lost. Must implement persistent fencing/transactional retries and prove crash/reassignment without duplicate or corrupt backup. CPU/RAM checks currently cooperative, remote SSH load not actually enforceable. Need tests with real AFS and agents, cluster PG/Ingress TLS, OIDC state migration, shared UI inventory/local restore routing, package install/sign/rollback. No release until these are qualified. Keep r039 IT/EN operations guides, feature inventory, development status, handoff and RC matrix synchronized on every change.
+
+## r039 latest — common HA web UI, docs and exact-CI caution (2026-11-15)
+
+Rust web UI now includes an admin-only shared cluster/agent/queue panel in rust-server/public/{index.html,app.js,app.css}; both GET /api/cluster/status and GET /api/agents/admin/list use PostgreSQL-backed state and are safe to show on all replicas. This is a read-only overview, not a complete UI administration wizard.
+
+Bilingual operator manuals docs/CLUSTER_ORCHESTRATION_R039_{IT,EN}.md and docs/AGENTS_AFS_R039_{IT,EN}.md are the current r039 sources. docs/FEATURE_INVENTORY_R038.md records an r039 preview overlay and docs/DOCUMENTATION_INDEX_R038.md links those, while r038 manuals preserve earlier stages. Both scripts/check-production-gate.py and scripts/check-documentation-consistency.py now enforce r039 source/docs/matrix contracts.
+
+Do not confuse passing earlier SHA r039 CI (e.g. run 43655180432 head 97f3786e) with certification of later changes. Obtain CI status for exact latest PR #11 SHA. Open core blockers remain lost-lease *write* fencing, real mounted multi-replica failover/PG, AFS keytab/localauth and live full/incremental restore, agent approval and TLS proxy production hardening, hard remote resource limits, global aggregate network rate caps, native package signing/upgrade, OIDC pending state shared across replicas and local filesystem restore routing. No merge or stable release without independent tests and updated matrix.
+
+## r039 hardening handoff (2026-11-15) — latest PR #11
+
+New code since r039 initial: rust/src/chunk_store.rs adds backup_in_namespace_mode_guard, plugin_executor.rs adds backup_with_mode_guard. cluster_worker.rs stops publication after loss of PostgreSQL lease, checks every file/chunk and immediately before final manifest, quarantine_expired instead of unsafe reclaim. cluster.rs serializes per-replica admission and exposes needs_reconciliation and attested offline-only recover_quarantined. rust-server agent_api exposes POST /api/cluster/jobs/recover (recovery authorization required) and POST /api/agents/admin/profile (recovery authorization required); agent_registry pins profile hash, provider, agent ID, checks prior to upload and in receipt transaction. Agent preview returns digest and actual command plan. Agent CLI has filesystem-worker slot locks cross process.
+
+CRITICAL: there is still no fully automatic verified physical write fence under network partition, so currently a job with expired lease is quarantined until manual shutdown+encrypted-store audit. This is intentional to avoid duplicate writers. "Complete" RC still requires real cluster failover, source/restore AFS real cell, trusted proxy, agent package live installation, global resource/throughput tests, secondary/HA lifecycle, OIDC pending state and local restore cross-pod path. Do not merge PR #11 or publish stable installers until exact-head full CI is green AND external acceptance evidence exists. All documentation must be updated alongside code; prior r038/r039 reference docs retained.
+
+## r039 current Kubernetes security handoff (2026-11-15)
+
+The prior Kubernetes preview lacked MULTI_BACKUP_HARDENED_MODE=true, private-gate/recovery secret files and a way for UID 10001 to read root-owned Secret volumes. This was corrected in k8s/multi-backup-cluster-r039.preview.yaml: initContainer copies admin-hash, agent-proxy, age identity, private-gate and recovery tokens to RAM-backed private volume with ownership UID 10001 and mode 0600. Browser/agent gateway secrets are independent; do not expose raw HTTP Pod port. Added HPA min2/max10 CPU and PDB. scripts/check-production-gate.py now audits these YAML properties; docs/CLUSTER_ORCHESTRATION_R039_{IT,EN}.md and docs/SECURITY.md contain precise setup.
+
+DRAFT PR #11 contains all this. Check the latest-head full CI, not just previous base green run 43655428169 at b3fe87d9. User wants completion, but do not misrepresent unsolved live AFS restore, remote SSH hard resource limits, physical lost-lease write fencing, manual quarantine recovery, signed native installers and real Kubernetes multi-pod chaos tests as certified. r038 source PR #10 is also draft: stacked history means neither PR should be blindly squash-merged or tagged stable without review of base and current CI.
+
+## r039 PostgreSQL SSL driver hardening (2026-11-15)
+
+Important finding: the postgres crate 0.19 parses sslmode=require, NOT libpq verify-full. Previously checking a substring sslmode=verify-full could allow a spoofed DSN and fail startup. rust-server/src/cluster.rs now structurally validates a PostgreSQL URL, requires exactly one sslmode=verify-full query pair, rejects duplicate/conflicting modes and disallowed host overrides, rewrites SSL transport to require and builds native_tls with TLS >=1.2 and explicit cert+hostname checks. A trusted PEM CA can be passed in MULTI_BACKUP_CLUSTER_TLS_CA_FILE. Kubernetes example now includes multi-backup-db-ca/db-ca.pem materialized as UID 10001 mode0600. Do not regress this with a raw string contains() assertion. Check unit test postgresql_tls_mode_is_structurally_enforced and exact-head Production Gate; live PG tests remain outstanding.
+
+## r039+ Rust native executors continuation — 2026-11-15
+
+Active feature/r039-afs-agent-packages PR #11 still draft on PR #10 r038. Generic Rust dispatcher now supports 8 source-to-encrypted-POSIX paths (posix,nfs,smb,sshfs,gpfs,cephfs,glusterfs,lustre) and 6 encrypted-POSIX-to-fresh-directory outputs (posix,nfs,sshfs,cephfs,glusterfs,lustre). Remote filesystem input must be the exact Linux RO mount and user snapshot-attested; mounted output must be exact Linux RW mount; metadata fidelity remains unverified. The plan preview_executable flags match the implementation, but executable=false and 0/682 production certified generic pairs remain correct.
+
+rust/src/chunk_store.rs has backup_stream(opaque Read, producer-finalizer) committing age/zstd chunks + 8/2 parity manifest only after actual provider exits successfully. rust/src/afs_volume.rs implements typed per-volume vos dump streaming local or SSH-agentless, and full/incremental vos restore only to explicit NEW target with overwrite abort on full, followed by ordered increments in the same invocation. rust/src/bin/multi-backup-native.rs CLI commands plugins afs-backup, afs-restore-plan, afs-restore-new. Test rust/tests/afs_stream_roundtrip.rs uses real age/compiled Rust CLI and FAKE vos; gate added .github/workflows/ci.yml. Additional core mount/protection tests protect fake filesystem denials. Managed agents still separate approved push/pull pipeline.
+
+Source manuals docs/PLUGIN_EXECUTORS_R039_IT.md and EN. Release blockers include live OpenAFS full/incremental recovery in a cell, AFS timestamps/ACL/VLDB/keytab and direct privileged localauth, authentic mounted CephFS/Gluster/Lustre tests and metadata preservation, full 32-provider functionality, OAuth target recredentialing, HA writer fencing, distributed GC, signed native installers, real Kubernetes failure drills. No main merge, signed RC or stable Docker merely because CI passes. Always update docs and handoff with next changes.
+
+## r039+ latest SSH restore handoff (2026-11-15)
+
+rust/src/afs_volume.rs: RestoreNewJob.execution is an optional Execution; if absent, local authorized token. If ssh_agentless, validate pinned SSH key/known_hosts and authorized remote token, use the same ssh_command_for builder for vos dump and vos restore, enforcing no config/proxy/forwarding/password/interactive auth. Only typed vos arguments are shell-quoted for remote OpenSSH; new-volume confirmation and full/-overwrite abort plus subsequent ordered increments are unchanged. rust/tests/afs_stream_roundtrip.rs has fake ssh+vos branch; real host/AFS cell test remains RC blocker. Manuals docs/PLUGIN_EXECUTORS_R039_{IT,EN}.md cover this. Verify exact newest PR #11 SHA CI, not an intermediate previously green run.
+
+## r039 continuation — aggregate per-host upload ceiling (2026-11-15)
+
+Rust agent now optionally accepts `max_host_transfer_bytes_per_sec`
+in private agent configuration. Every agent HTTPS upload uses a shared
+filesystem-locked, private on-host rate counter in its spool directory,
+independent of the server's per-transfer limit. Invalid/corrupt state fails
+closed; unset field preserves existing behavior. Regression tests cover
+cross-reader accumulation, unsafe symlinks and corrupted/future state.
+
+**Unresolved:** this is cooperative agent-host upload throttling, not
+network QoS, a cross-host/pod cap or remote SSH CPU/RAM enforcement.
+Physical lost-lease manifest fencing, multi-node bandwidth reservations,
+live AFS restore, actual installer and Kubernetes failover remain RC blockers.
+Confirm CI on the exact new commit SHA; keep PR #11 draft.
+
+
+## r039 — OpenAFS virtual-cell test
+- Simulated `vos` full/incremental and fresh-volume restore locally (131082 + 1500 bytes), including rejection of existing target and partial dump. The standalone fake command passed six checks.
+- Added integration test `afs_virtual_cell_refuses_overwrite_and_partial_dump` that runs compiled Rust CLI, real age/zstd encrypted backup and verify, ordered chain restore, no-overwrite and partial-producer rejection. Exact-head CI must confirm the Rust test.
+- GitHub run 43668284081 previously failed three test fixtures because `tempdir()` did not enforce 0700; fixed fixtures without weakening runtime security. Real OpenAFS cell/Kerberos/ACL/SSH acceptance remains required.
+
+## r039 database adapters handoff
+
+New Rust `database.rs` plus `plugins database-backup|database-restore-new` CLI. Full dump via pg_dump custom and mariadb-dump transactional; restore to NEW database via pg_restore/mariadb. Use a separate GitHub Actions job with real DB service containers and negative cases, and do not certify until exact-sha green. Missing: incremental WAL/binlog PITR, physical hot backup, DDL races, agent dispatch, vendor compatibility.
+
+## r039 database preview catalog and stronger live tests
+
+PostgreSQL and MariaDB backup inputs plus restore outputs marked Preview; generic dispatcher remains disabled. The live DB test now compares all 1000 rows, rejects wrong password with no extra authenticated manifest. Earlier verified database live workflow 43670330802 passed; further changed SHA must pass again. No stable or general MySQL/PITR certification.
+
+## r039 latest — database real CI and AFS real-cell attempt
+- Current Rust DB preview `rust/src/database.rs`: PostgreSQL pg_dump custom, pg_restore into freshly created DB; MariaDB single-transaction/InnoDB mariadb-dump and create-only mariadb restore; age/zstd content-addressed full backup.
+- `rust/tests/database_live_roundtrip.rs`, workflow `.github/workflows/database-live-integration.yml`: real service containers Postgres16 + MariaDB11.4, first proven PASS run 43670330802, 2/2. Expanded negative credential checks/row-level byte comparison require later-head green run.
+- `scripts/test-real-afs-cell.sh` and `.github/workflows/afs-real-cell.yml`: require real OpenAFS Ansible local_install, MIT Kerberos KDC, token, mount, VLDB, volserver, vos dump/restore and byte-identical full+incremental restore. If hosted-runner DKMS fails, preserve red signal and move to prepared lab runner; NEVER substitute fake vos and label it authentic.
+- Keep PR #11 draft and stable disabled until latest SHA CI and independent production evidence. True DB PITR and AFS failover/keytab field certification remain unimplemented.
+
+## r039 PITR acceptance — real vendor recovery labs
+New `.github/workflows/database-pitr-integration.yml`: two independent jobs. `scripts/test-postgresql-wal-pitr.sh` uses PostgreSQL 16 actual pg_basebackup/WAL, encrypts base + WAL via Rust native archive, replays WAL to named restore point on isolated cluster and checks 30/465 excluding 999. `scripts/test-mariadb-binlog-pitr.sh` uses Rust logical full, durable ROW binlog from server, Rust age encrypted archive, actual binlog replay on isolated recovery server and checks same records and overwrite rejection. MariaDB verified PASS run 43672237760, PostgreSQL initial attempt failed missing pg_hba replication host and was fixed; full latest-SHA proof still required. Refer to docs/DATABASE_PITR_R039_IT.md and EN; NO production claim for complete native PITR orchestration, physical no-plaintext staging, WAL retention, GTID, multi-file gaps.
+
+## r039 Galera 4 acceptance handoff, 2026-11-15
+- PASS workflow `.github/workflows/database-galera-integration.yml`, run 43673606744 at commit 37e5de3943b76f453fe5448d251f64db7d80afa5. Real MariaDB 11.4 Galera 4 with `ci/galera/Dockerfile` and `scripts/test-mariadb-galera-pitr.sh`, no fake wsrep: 3 Synced Primary nodes, multi-master writes 30 records, kill node3 and write 10 more under quorum2, rejoin3, native Rust FULL from node2, deliberate 2-node safety rejection with no manifest, and replicated remote write-sets from nodes1/3 recovered via node2 binlog to isolated fourth server, exactly 60/1830 and excluded 999.
+- Rust `Profile::galera_expected_nodes:Option<u16>` validates Primary/Synced/ready and exact member count both before and after dump; never restore into an explicitly Galera target. See `docs/DATABASE_GALERA_R039_IT.md` / EN.
+- Runtime subtleties: Galera config is NON-secret and must be readable by UID mysql in containers; source creds remain 0600. Actual MariaDB config loaded from mariadb.conf.d; `--print-defaults` checks wsrep option. Do not confuse a running standalone mysqld with an actual Galera member.
+- Still preview: no HA physical failover fencing, multi-file GTID/continuous log capture, network partitions, production SSL/SST, unattended binlog PITR. Keep PR #11 DRAFT; no stable promotion or merge solely on this single-cluster lab test.
+
+## r039 actual POSIX/SSH/AFS CI handoff (15 November 2026)
+- POSIX Rust native full+incremental filesystem E2E **PASS**, run 43678452447 at SHA 497e20f9. Source script `scripts/test-posix-real-roundtrip.sh` and workflow `.github/workflows/posix-real-integration.yml`. Identified and fixed `chunk_store::Store::repair` zero-padding of age ciphertext for RS stripes with mixed ciphertext lengths; 10MiB multichunk corruption/repair now passes. This does not preserve owner/mtime/xattr/ACL.
+- Genuine OpenSSH (SSH, SCP over SFTP, legacy SCP, SFTP), pinned host keys and wrong-key negatives in `scripts/test-real-ssh-sshfs.sh`; SSHFS source RO + mountinfo type check + Rust E2E backup + SSHFS RW restore. SSH/SCP/SFTP transport is NOT the catalog `ssh` plugin; that plugin remains Planned. SSHFS requires /dev/fuse.
+- Changed AFS CI to manual exact-SHA attested dedicated disposable self-hosted runner label `openafs-ci`; never execute privileged untrusted PR changes automatically. Required sentinel /etc/multi-backup-ci/allow-disposable-afs; see docs/ACCEPTANCE_POSIX_SSH_AFS_R039_IT.md. No real AFS PASS yet, no stable release or merge on simulated AFS evidence.
+
+
+## r039 dedicated AFS runner Debian 12 platform update (15 Nov 2026)
+- Debian 12 Bookworm x86_64 with stock Linux 6.1.x-amd64 is now the **preferred** disposable lab VM. Retained Ubuntu 22.04 GA 5.15.x-generic compatibility. The bootstrap checks exact OS/kernel, selects libicu72 on Debian vs libicu70 Ubuntu, tests matching headers, installs distro OpenAFS DKMS, and requires actual modprobe before allowing an ephemeral GitHub runner. No unsupported kernel or production data allowed.
+- Added policy-gate lint for Debian 12; see docs/AFS_RUNNER_R039_IT.md and main-only approved exact-SHA dispatcher. **Still not field certified** until true Kerberos/VLDB/volserver/new volume restoration succeeds on user's isolated VM. Other agent/HA/installers remain separate gates.
+
+
+## CI 43730251286 and reusable Proxmox lab — 15 November 2026
+
+The real Debian 12 job completed Kerberos and the OpenAFS server/client mount, then Ansible failed creating root.afs/root.cell/test with 'Unable to locate viceetcdir directory'. Cause: upstream SHA-pinned collection infers viceetcdir from the cacheinfo manual page, missing in Debian 12 facts. New scripts/patch-openafs-ansible-debian-facts.py adds /etc/openafs only when a REAL /etc/openafs/cacheinfo exists. All volume and vos operations remain real, not simulated.
+
+Keep Debian 12 VM, OpenAFS, Kerberos and Rust on the ISOLATED Proxmox network. GitHub runner remains per-job ephemeral; register fresh each time with a NEW short-lived GitHub token. The registration script reuses verified official runner archive after checking SHA256, uses exclusive flock, creates and removes each runner session/workspace, preserving the VM. The trusted workflow uses a per-job active lease and cleanup; after an abrupt termination inspect the VM and logs before manual lease recovery. Do not grant it production network or administrative credentials.
+
+Previous afs-run-used marker is retired; current job guard uses afs-active. Restore volume name uses GitHub run ID/attempt to avoid overwriting old test volumes. To retry from mb-afs-runner after verifying no runner process is active, git pull --ff-only in ~/multi-backup and run bash scripts/register-openafs-runner-once.sh. New VM bootstrap is NOT required. Still not AFS-certified until real full/incremental/new volume byte comparison is green.
+
+
+## CI 43731741639: true root cause of `viceetcdir` (15 Nov 2026)
+
+The **same** `openafs_volume: Unable to locate viceetcdir directory` remained after fixing Debian install path discovery. Log showed `PASS: real OpenAFS viceetcdir fact already present` while running that check under `sudo`. The pinned upstream volume task is **unprivileged**; facts were created under `become: true` on a runner started with `umask 077`. Root can therefore read the file while the unprivileged volume module cannot; its broad `except Exception` masks EACCES as a missing directory.
+
+The updated pinned upstream `local_install.yaml` is patched at the **boundary between client checkpoint 3 and volume checkpoint 4**: it sets `/etc/ansible/facts.d/openafs.fact` to root-owned, runner-group readable **0640** (not world-readable) and runs a non-root Python assertion checking the fact JSON and actual AFS `cacheinfo` path. The patch refuses unknown upstream playbooks and is tested against the exact upstream commit `11fa2a5b` in static CI.
+
+Preserve the Debian 12 Proxmox VM, KDC, OpenAFS client and kernel, and shared runner binary archive cache. Still register a new ephemeral runner per CI job; the main workflow remains owner-only, SHA-pinned, with `afs-active` lease cleanup. Do not claim a working real volume recovery or certification until the field run reaches green.
+
+
+## CI 43732486690: EACCES on OpenAFS fact parent directories (15 November 2026)
+
+The actual Linux runner/Ansible acceptance failed **at the new diagnostic**, not while building OpenAFS: PermissionError [Errno 13] reading '/etc/ansible/facts.d/openafs.fact' as mb-afs-runner, despite the file being group-readable 0640. The registering process has restrictive umask 077; one or both ancestor directories, '/etc/ansible' and '/etc/ansible/facts.d', may therefore be root-only and prevent path traversal. The earlier upstream openafs_volume module was hiding EACCES behind 'Unable to locate viceetcdir directory'.
+
+The exact upstream `local_install.yaml` patch is now more complete: after checkpoint 3, make both fact directories root-owned/group mb-afs-runner, mode **0710** (group execute/traverse but no listing; other denied); set '/etc/ansible/facts.d/openafs.fact' to root:mb-afs-runner **0640**; also make real '/etc/openafs/cacheinfo' root:mb-afs-runner **0640**, and require a real non-root open/read before touching volumes. No keytab permissions changed, no world read access. The static CI checks the patched pinned playbook. Debian VM stays available with an ephemeral GitHub runner session for every CI job. A genuine AFS full/incremental/Rust recovery PASS is still pending.
+
+
+## 2026-11-15: Real AFS run 43744237757 reached Rust test; RO mountpoint correction
+
+- The genuine Debian 12 run [43744237757](https://github.com/desalvo/multi-backup/actions/runs/43744237757) PASSED SHA/permissions, real Kerberos KDC and AFS token, VLDB/fileserver, root.afs/root.cell/test volumes, and Rust release build. FAILED while writing seed data: `/afs/example.com/test/mb-backup-data.txt: Read-only file system`. The tested AFS volume includes RO and RW copies, and the un-dotted `/afs/example.com` path resolves via RO root.cell/test. This is a test fixture mountpoint error, NOT kernel/DKMS failure.
+- The real acceptance script now establishes a unique source mountpoint under `/afs/.example.com` with explicit `fs mkmount -rw` targeting real volume `test`, logs `fs lsmount`, and writes/compares against that mount. The newly restored volume is also mounted with `-rw` under the cell RW root. Mountpoint collisions refuse overwrite. The temporary source mountpoint is removed on exit; real test contents and restored volumes remain available for inspection.
+- The isolated Proxmox Debian 12 VM remains reusable, with a fresh ephemeral GitHub runner and run lease; full+incremental encrypted backup and restore remain **NOT YET field-certified** until actual live PASS.
+
+
+## Real OpenAFS CI #43745205761: authenticated admin missing i/a on RW root.cell
+
+- CI #43745205761 passed real KDC+admin rxkad token, VLDB/volserver, Ansible volumes and Rust release; it FAILED at `fs mkmount -rw /afs/.example.com/mb-source-<run>-<attempt>`: `You don't have the required access rights`. This is a genuine OpenAFS ACL problem. The previous failed RO-path write has already been corrected.
+- `fs mkmount` explicitly requires BOTH `i` (insert) and `a` (administer) permissions on the ACL of the parent directory. The Ansible local install config currently grants broad read ACL on root.cell; while the admin has implicit a via system:administrators, it may not have insert. Within THIS isolated `example.com` test cell ONLY, the acceptance script prints parent ACL and `fs getcalleraccess`, adds `system:administrators all` to `/afs/.example.com` (preserves other ACL entries, no world-write), prints effective rights and then creates the unique -rw source mountpoint. This is not an authorization model for a production AFS cell.
+- Proxmox Debian 12 VM and tools retained; the GitHub runner remains ephemeral/one-job, SHA-pinned main-only dispatcher. A true encrypted full/incremental Rust restore with byte-identical check remains UNCERTIFIED pending live PASS.
+
+
+## OpenAFS field CI 43745989687: wrong `fs listacl` switch (15 Nov 2026)
+- The real KDC/OpenAFS provisioning and Rust release build succeeded. The acceptance script stopped at diagnostics, BEFORE the ACL change or RW mount: `fs: Unrecognized or ambiguous switch '-dir'; type 'fs help listacl' for detailed help`.
+- Fix both `fs listacl -dir` invocations to **`fs listacl -path`**, the actual documented OpenAFS CLI syntax. Retain `fs setacl -dir` (correct) and `fs getcalleraccess -path` (correct). Add static-lint rejection of invalid `listacl -dir`; no relaxation of restricted lab cell guard or security checks.
+- Reusable Debian 12 VM and ephemeral runner policy preserved. Lab real AFS full/incremental/restore still NOT certified.
+
+
+## Field OpenAFS CI 43746542514: genuine full + incremental PASS; vos progress breaks JSON restore result
+
+- [Workflow run 43746542514](https://github.com/desalvo/multi-backup/actions/runs/43746542514) **failed overall** but completed the genuine Kerberos/OpenAFS lab, RW source mount, ACL repair, Rust release build, true age/zstd encrypted full backup with integrity verification, incremental dump and full-chain verification. `--confirm-target wrong` was rejected as designed.
+- Restore was started for a fresh target volume; its child `vos restore` printed `Volume does not exist; Will perform a full restore` to **stdout**. The outer Rust CLI used `--json` and wrote JSON to the same stream, yielding `jq: parse error: Invalid numeric literal`. The CLI command returned exit 0, but we **cannot call restore certified** because the field test stopped before checking restored count, existence, byte identity and duplicate-reject.
+- Rust `afs_volume::restore_new_chain_from_store` now captures the child `vos`/SSH stdout in a piped background drain and streams its messages to **stderr** while the parent CLI retains clean machine-readable stdout. The reader is joined/checked after the restore process exits, without unbounded capture or deadlock with live encrypted-dump stdin streaming. Adds a Rust test that verifies the relay and excludes simulated vos from real field CI. The static AFS workflow additionally compiles/tests the helper. No source archive, restored volume or credential is overwritten.
+- Persistent isolated Debian 12 Proxmox VM remains reusable. GitHub runner still one-shot ephemeral; trusted main SHA pin/lease cleanup unchanged. Next live test is required for end-to-end full+incremental→restore byte-for-byte acceptance and negative tests.
+
+
+## r039 real OpenAFS PASS; PG16 agents/HA field tests added (2026-11-15)
+OpenAFS actual KDC/VLDB, token, encrypted Rust FULL+incremental and new-volume byte-identical restore is PASS at Actions 43747477666 on d80675f; invalid confirmation, overwrite and absent source are also rejected. Newly added isolated authentic PostgreSQL 16 acceptance tests in rust-server/src/live_pg_acceptance.rs validate agent admin approval, Ed25519 signature+token, replay, approved profile pull and upload receipt/revocation, plus two replica DB node_local/shared placement, capacity, expired lease quarantine, stale writer fencing and explicit recovery attestations. Workflow agent-cluster-live-pg.yml must pass before marking tests verified. This is not real ingress/TLS upload, encrypted spool data transfer, or Kubernetes pod failover; those are separate RC gates. Maintain PR #10/#11 draft, no signed release.
+
+
+
+## SQL concurrency qualification closed — source 1d71bbb (15 November 2026)
+- Real PostgreSQL 16 acceptance run 43750032081 revealed that a single-statement SELECT FOR UPDATE inside the claim CTE could read a stale READ COMMITTED snapshot and overbook a replica (capacity=1, concurrent accepted=2). We added an actual 8-worker contention test plus eight concurrent identical nonce commits.
+- Rust server fixes the race with one transaction and two SQL statements: lock the owning replica row first, then get a fresh capacity snapshot to claim a queued job; commit both atomically. No scheduling bypass and no weaker storage/lease authorization.
+- Genuine PG16 tests PASS 3/3 on exact SHA 1d71bbb6998f115097a28b25ddbbdca1e22a7070 in runs https://github.com/desalvo/multi-backup/actions/runs/43750377598 and https://github.com/desalvo/multi-backup/actions/runs/43750382563. Rust focused, POSIX, SSH/SSHFS, database/SQL PITR, Galera, static AFS runner also PASS on this exact source. Main production CI for exact source https://github.com/desalvo/multi-backup/actions/runs/43750382603 still PENDING at audit; signed RC remains blocked by real provider credentials, Kubernetes physical writer fencing, security and signing.

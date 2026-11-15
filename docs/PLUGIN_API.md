@@ -298,3 +298,17 @@ is explicitly optional and no longer a promotion gate.
 Per ogni plugin autenticato l'identità dell'account sorgente è sola provenienza: il restore verso altro utente richiede autorizzazione indipendente dell'account di destinazione. GitHub crea un nuovo repository su un proprietario target autorizzato; Dropbox verifica l'account del token WRITE per il nuovo file. I restore remoti parziali generici e le combinazioni cloud-to-cloud NON sono certificati.
 
 La destinazione POSIX Rust supporta FULL/INCREMENTAL, purge con rebase, verifica catena completa e GC separata con repack automatico 8+2. Non implica che gli altri plugin catalogati siano adapter eseguibili. Leggere [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md) e [OPERATIONS_R038_EN.md](OPERATIONS_R038_EN.md).
+
+## r039 — Common source transport & cluster contract
+
+Every plugin input can declare server_local, ssh_agentless, managed_agent_pull or managed_agent_push plus ExecutionLimits. This declares a source preparation/dispatch mode, NOT an executable adapter. For AFS a volume-specific vos dump local or pinned SSH plan and managed-agent preview exist; the generic server replica worker currently executes only server_local POSIX/NFS/SMB/SSHFS/GPFS CES filesystem input.
+
+Budget fields: max_concurrent_jobs, threads_per_job, max_transfer_bytes_per_sec, max_host_cpu_percent, max_host_memory_percent, min_free_memory_bytes. Pull and autonomous push must apply stricter server/agent limits. Single-volume AFS dumps cannot be split into threads; concurrent independent volumes may execute on different eligible nodes. Node_local storage is assigned only to its registered owner replica; truly shared storage may be scheduled across eligible replicas with PG-backed leases. Writes after lost lease are not yet fenced and thus not certified. Procedure in [cluster r039 EN](CLUSTER_ORCHESTRATION_R039_EN.md).
+
+## r039+ direct provider byte streams and exact mounted filesystem adapters
+
+For trusted native source adapters, Store::backup_stream(identity,label,top_namespace,logical_path,source,kind,parent,finish) reads a provider Read stream into encrypted age/zstd deduplicated chunks and 8+2 parity. The finalizer MUST confirm successful upstream command/provider completion BEFORE an encrypted manifest can be published; if producer fails only unreferenced encrypted chunks remain subject to separate guarded GC. No plaintext dump staging is required.
+
+The generic executor currently supports exactly 8 filesystem input plugins to POSIX and 6 restore destinations from POSIX, never all catalog entries. For Linux mounted sources, the path must be an exact RO mount with supported type and operator snapshot attestation; for mounted output, destination must be a non-existing immediate child of an exact matching RW mount. The type and permissions of the mount do not prove source snapshot consistency, ACL/xattr/stripe fidelity or shared storage ownership.
+
+AFS uses a separate typed vos volume adapter with existing-token local/pinned SSH dump and age stream backend, and a confirmed new-volume vos restore chain; it MUST NOT be called via a generic POSIX filesystem source. See [AFS and mounted provider operators IT](PLUGIN_EXECUTORS_R039_IT.md) and [EN](PLUGIN_EXECUTORS_R039_EN.md).

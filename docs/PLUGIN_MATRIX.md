@@ -183,3 +183,25 @@ Five executable **development-preview backup pairs** now have a Rust code path: 
 
 Per ogni plugin che usa login, il restore deve poter indicare un utente di destinazione distinto da quello originale, autorizzato con credenziali proprie. Le implementazioni Rust dedicate attuali permettono un nuovo repository GitHub o un file Dropbox su un altro account, senza certificare ancora il restore parziale universale. Lo storage POSIX impiega FULL/INCREMENTAL, purge con rebase e GC con repack automatico delle parità 8+2. Questo non aumenta il numero dei plugin genericamente certificati: 0/682. Fonte [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md).
 
+
+## r039 — Cross-plugin source execution (not provider certification)
+
+Source execution options are server_local / ssh_agentless / managed_agent_pull / managed_agent_push for *all future* input plugins. The AFS plugin has typed local/pinned SSH dump plans and a bounded parallel-volume agent preview; this does not enable arbitrary plugins over SSH or scripts without explicit adapters. Generic replica execution remains limited to already implemented filesystem inputs in server_local mode. PostgreSQL storage visibility shared/node_local controls replica placement; no cloud destination writer becomes certified merely through registration. [Orchestration IT](CLUSTER_ORCHESTRATION_R039_IT.md).
+
+## r039+ compiled mounted and OpenAFS execution paths (preview)
+
+Generic Rust filesystem backup input -> encrypted POSIX output: **posix, nfs, smb, sshfs, gpfs CES, cephfs, glusterfs, lustre** (8). Generic verified POSIX store -> restore output as NEW directory: **posix, nfs, sshfs, cephfs, glusterfs, lustre** (6). Input remote mounts must match exact Linux RO filesystem flags and attested source snapshot. Output mounted paths require exact Linux RW mount and must not exist yet. GPFS CES output is not implemented; neither are native backend ACL/xattr/stripe semantics.
+
+OpenAFS is NOT a POSIX mounted-tree adapter. Dedicated commands plugins afs-backup/afs-restore-plan/afs-restore-new stream a specific volume's vos dump directly into age/zstd encrypted/parity-protected chunks and restore a verified ordered full/incremental chain only onto a NEW AFS volume (overwrite abort full, incremental only in same invocation). Existing-token local/SSH-agentless producer supported, approved agents have independent push/pull path; live keytab/localauth and external cell recovery still missing. Planner executable=false and 0/682 certified generic pairs remain correct. [IT instructions](PLUGIN_EXECUTORS_R039_IT.md), [EN instructions](PLUGIN_EXECUTORS_R039_EN.md).
+
+## r039+ AFS SSH restore output
+
+The AFS dedicated restore executor now supports NEW-volume recovery either directly on a local AFS host with authorized token, or over pinned public-key-only SSH agentless to a remote host that independently has a valid authorized AFS token. Typed full/incremental vos restore command never accepts arbitrary server-supplied shell, always checks age encrypted chain and refuses overwriting a pre-existing volume. Remote restore via an approved managed agent, keytab and privileged direct localauth are still not complete/certified.
+
+### r039 native PostgreSQL/MariaDB full logical previews
+
+The `postgresql` and `mysql` plugin IDs now expose `Preview` as backup inputs and restore outputs. This reflects **dedicated** `plugins database-backup` and `plugins database-restore-new` commands, NOT generic automatic pairing or readiness. PostgreSQL custom-format pg_dump + pg_restore and MariaDB InnoDB single-transaction mariadb-dump + mariadb are executable through Rust age/zstd streaming. The CLI uses explicit private 0600 credentials and CA-verified TLS for non-loopback targets, never drops existing databases, and refuses an invalid dump. Separate live service CI checks encrypted create-only recovery with 1000 rows per engine. Oracle MySQL interoperability, WAL/binlog PITR, physical incremental consistency, concurrency, extensions/roles and upgrade testing remain outside this preview.
+
+### r039 MariaDB/Galera plugin preview
+- `mysql` includes native full logical MariaDB backup + create-only standalone recovery. For a real Galera source, `galera_expected_nodes` opt-in Rust profile guard requires a Primary, Synced, ready component of exactly that size before and after the dump, with fail-closed behavior. Never treat it as distributed lease fencing or a certified global quiesce.
+- Genuine three-node MariaDB 11.4 Galera4 integration CI passed on run 43673606744 (failover/rejoin + cross-member binary-log PITR to independent server). PITR replay is still harness-orchestrated, and encrypted binlog continuous ingestion not yet native production feature. See docs/DATABASE_GALERA_R039_IT.md / EN.

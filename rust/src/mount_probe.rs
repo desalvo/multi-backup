@@ -56,8 +56,8 @@ fn parse_mountinfo(raw:&str)->Vec<MountEvidence>{
 /// authenticate SSH host keys, verify the GPFS backend or prove consistency.
 pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
     ->Result<MountEvidence,String>{
-    if !matches!(plugin,"gpfs"|"sshfs"|"nfs"|"smb"){
-        return Err("Only nfs, smb, gpfs and sshfs mount types are supported".into());
+    if !matches!(plugin,"gpfs"|"sshfs"|"nfs"|"smb"|"cephfs"|"glusterfs"|"lustre"){
+        return Err("Unsupported filesystem source; use nfs/smb/gpfs/sshfs/cephfs/glusterfs/lustre".into());
     }
     if plugin=="gpfs"&&access.is_none(){
         return Err("GPFS requires explicit ces-nfs or ces-smb mode".into());
@@ -87,6 +87,12 @@ pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
             ("sshfs",None)=>&["fuse.sshfs"],
             ("nfs",None)=>&["nfs","nfs4"],
             ("smb",None)=>&["cifs","smb3"],
+            // Native CephFS and the operator-installed FUSE client. Neither
+            // proves snapshot consistency or validates the backing cluster.
+            ("cephfs",None)=>&["ceph","fuse.ceph-fuse"],
+            // Only the explicitly mounted client, never direct brick access.
+            ("glusterfs",None)=>&["fuse.glusterfs"],
+            ("lustre",None)=>&["lustre"],
             _=>return Err("Unsupported mount protocol".into()),
         };
         let mut entry=parse_mountinfo(&mountinfo).into_iter().find(|item|
@@ -122,6 +128,9 @@ mod tests{
         assert!(probe("posix",tmp.path(),None).is_err());
         assert!(probe("nfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
         assert!(probe("smb",tmp.path(),Some(GpfsAccess::CesSmb)).is_err());
+        for plugin in ["cephfs","glusterfs","lustre"] {
+            assert!(probe(plugin,tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
+        }
     }
     #[cfg(target_os="linux")]
     #[test]
@@ -132,5 +141,8 @@ mod tests{
         assert!(probe("sshfs",tmp.path(),None).is_err());
         assert!(probe("nfs",tmp.path(),None).is_err());
         assert!(probe("smb",tmp.path(),None).is_err());
+        for plugin in ["cephfs","glusterfs","lustre"] {
+            assert!(probe(plugin,tmp.path(),None).is_err());
+        }
     }
 }

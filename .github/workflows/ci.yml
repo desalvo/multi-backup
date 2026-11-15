@@ -77,8 +77,15 @@ jobs:
           # Legacy Python archive interoperability is optional, not an RC blocker.
           # Native functional recovery is mandatory instead.
           cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test afs_stream_roundtrip
           cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
           cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --lib execution_policy
+          cargo test --manifest-path rust/Cargo.toml --lib cluster_placement
+          cargo test --manifest-path rust/Cargo.toml --lib agent_protocol
+          cargo test --manifest-path rust/Cargo.toml --lib afs_volume
+          cargo test --manifest-path rust/Cargo.toml --bin multi-backup-agent
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-agent
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
@@ -351,6 +358,131 @@ jobs:
         with:
           name: rust-only-debian-${{ matrix.version }}-${{ matrix.arch }}-deb-preview
           path: packages/*
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-macos:
+    name: Rust Agent macOS ${{ matrix.arch }} PKG
+    needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and build native agent PKG
+        env:
+          AGENT_FORMAT: pkg
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+        run: bash scripts/package-rust-agent-unix.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-macos-${{ matrix.arch }}-preview
+          path: packages/multi-backup-agent-preview-macos-${{ matrix.arch }}.pkg
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-windows:
+    name: Rust Agent Windows x64 EXE
+    needs: [production-gate]
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and build agent installer
+        shell: pwsh
+        run: ./scripts/package-rust-agent-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-windows-x64-preview
+          path: |
+            installers/multi-backup-agent-preview-windows-x64.exe
+            installers/checksums-agent-windows-x64.txt
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-debian:
+    name: Rust Agent Debian ${{ matrix.version }} ${{ matrix.arch }} DEB
+    needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {version: 12, suite: bookworm, arch: amd64, runner: ubuntu-24.04}
+          - {version: 12, suite: bookworm, arch: arm64, runner: ubuntu-24.04-arm}
+          - {version: 13, suite: trixie, arch: amd64, runner: ubuntu-24.04}
+          - {version: 13, suite: trixie, arch: arm64, runner: ubuntu-24.04-arm}
+    container:
+      image: debian:${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies and compile native agent DEB
+        shell: bash
+        env:
+          AGENT_FORMAT: deb
+          DEBIAN_VERSION: ${{ matrix.version }}
+          DEBIAN_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl git age build-essential pkg-config dpkg-dev libssl-dev
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          bash scripts/package-rust-agent-unix.sh
+          apt-get install -y ./packages/*.deb
+          multi-backup-agent --version | grep -F r039
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-debian-${{ matrix.version }}-${{ matrix.arch }}-preview
+          path: packages/multi-backup-agent*.deb
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-rpm:
+    name: Rust Agent ${{ matrix.distro }} EL${{ matrix.el }} RPM
+    needs: [production-gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rocky, el: 8, image: 'rockylinux/rockylinux:8'}
+          - {distro: rocky, el: 9, image: 'rockylinux/rockylinux:9'}
+          - {distro: rocky, el: 10, image: 'rockylinux/rockylinux:10'}
+          - {distro: alma, el: 8, image: 'almalinux:8'}
+          - {distro: alma, el: 9, image: 'almalinux:9'}
+          - {distro: alma, el: 10, image: 'almalinux:10'}
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native agent on target Enterprise Linux
+        shell: bash
+        env:
+          AGENT_FORMAT: rpm
+          AGENT_DISTRO: ${{ matrix.distro }}
+          AGENT_EL: ${{ matrix.el }}
+        run: |
+          set -euo pipefail
+          dnf install -y dnf-plugins-core
+          dnf config-manager --set-enabled crb || dnf config-manager --set-enabled powertools || true
+          dnf install -y rpm-build gcc gcc-c++ make findutils tar gzip git pkgconf-pkg-config systemd-rpm-macros openssl-devel
+          command -v curl >/dev/null || dnf install -y curl-minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          bash scripts/package-rust-agent-unix.sh
+          test -n "$(find packages -maxdepth 1 -name '*.rpm' -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-${{ matrix.distro }}-el${{ matrix.el }}-preview
+          path: packages/*.rpm
           retention-days: 14
           if-no-files-found: error
 

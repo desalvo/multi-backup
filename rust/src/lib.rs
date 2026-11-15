@@ -23,6 +23,11 @@ pub mod backup_chain;
 pub mod account_restore;
 pub mod scheduler;
 pub mod mount_probe;
+pub mod afs_volume;
+pub mod database;
+pub mod agent_protocol;
+pub mod execution_policy;
+pub mod cluster_placement;
 
 use std::collections::HashSet;
 

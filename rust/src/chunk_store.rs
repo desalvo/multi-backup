@@ -223,6 +223,20 @@ impl Store {
                                top_namespace:&str,sources:&[Source],
                                kind:BackupKind,parent_id:Option<&str>)
         ->Res<LogicalBackup> {
+        self.backup_in_namespace_mode_guard(identity,label,top_namespace,
+            sources,kind,parent_id,&|_|Ok(()))
+    }
+    /// A distributed worker calls this guard before every file/chunk and
+    /// immediately before manifest publication. A lost lease cannot START
+    /// publishing another manifest; expired leases must also be quarantined
+    /// instead of automatically reassigned. This is a cooperative safety
+    /// boundary; complete write fencing still needs live failover testing.
+    pub fn backup_in_namespace_mode_guard(&self,identity:&Path,label:&str,
+                               top_namespace:&str,sources:&[Source],
+                               kind:BackupKind,parent_id:Option<&str>,
+                               live:&dyn Fn(bool)->Result<(),String>)
+        ->Res<LogicalBackup> {
+        live(false)?;
         if !top_namespace.is_empty() && !crate::backup_policy::safe_namespace(top_namespace) {
             return Err("Unsafe top namespace".into());
         }
@@ -246,6 +260,7 @@ impl Store {
         let mut entries = Vec::new();
         let mut visited = HashSet::new();
         for src in sources {
+            live(false)?;
             if !crate::backup_policy::safe_namespace(&src.namespace) {
                 return Err("Unsafe source namespace".into());
             }
@@ -253,6 +268,7 @@ impl Store {
                 return Err("Source must be a directory, not symlink".into());
             }
             for file in WalkDir::new(&src.directory).follow_links(false).max_depth(64) {
+                live(false)?;
                 let file = file?;
                 if file.file_type().is_dir() { continue; }
                 if !file.file_type().is_file() { return Err("Symlink/special file rejected".into()); }
@@ -273,6 +289,7 @@ impl Store {
                 let mut chunks = Vec::new();
                 let mut bytes = 0u64;
                 loop {
+                    live(false)?;
                     let mut block = Vec::new();
                     (&mut input).take(self.cfg.chunk_bytes as u64).read_to_end(&mut block)?;
                     if block.is_empty() { break; }
@@ -291,7 +308,10 @@ impl Store {
                 .duration_since(std::time::UNIX_EPOCH).map_or(0,|v|v.as_secs()),
             top_namespace:top_namespace.to_owned(),
             kind,parent_id:parent_id.map(str::to_owned)};
+        // Fail closed if the lease was lost during a long-running scan.
+        live(true)?;
         let encrypted = age(&serde_json::to_vec(&snapshot)?, Some(&self.cfg.recipient), None)?;
+        live(true)?;
         if !write_new(&self.manifest_path(&snapshot.id)?, &encrypted)? {
             return Err("Manifest ID conflict".into());
         }
@@ -301,6 +321,82 @@ impl Store {
         fs2::FileExt::unlock(&lock)?;
         Ok(snapshot)
     }
+    /// Stream one provider-owned logical object directly into immutable,
+    /// age-encrypted and parity-protected chunks. No raw plaintext dump is
+    /// staged on disk. The producer's finalizer MUST prove successful
+    /// completion before an authenticated manifest can be published.
+    /// On interrupted reads or nonzero producer exit, orphan encrypted
+    /// chunks may remain for later guarded GC, but no successful backup.
+    pub fn backup_stream<R:Read,F:FnOnce()->Result<(),String>>(
+        &self,identity:&Path,label:&str,top_namespace:&str,
+        logical_path:&str,source:&mut R,kind:BackupKind,
+        parent_id:Option<&str>,finish:F)->Res<LogicalBackup>{
+        if label.trim().is_empty()||label.len()>256||
+           !safe_path(logical_path)||
+           (!top_namespace.is_empty()&&
+             !crate::backup_policy::safe_namespace(top_namespace)){
+            return Err("Invalid streamed backup label or namespace".into());
+        }
+        let full_path=if top_namespace.is_empty(){
+            logical_path.to_owned()
+        }else{format!("{top_namespace}/{logical_path}")};
+        if !safe_path(&full_path){return Err("Invalid streamed virtual path".into());}
+        let lock=OpenOptions::new().create(true).write(true)
+            .open(self.root.join(".lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
+        match (kind,parent_id){
+            (BackupKind::Full,None)=>{},
+            (BackupKind::Incremental,Some(parent))=>{
+                if !safe_hash(parent){return Err("Invalid stream parent".into());}
+                let previous=self.load(identity,parent)?;
+                if previous.top_namespace!=top_namespace||
+                    previous.entries.len()!=1||
+                    previous.entries[0].path!=full_path {
+                    return Err("Stream increment must match the same source object and namespace".into());
+                }
+                crate::backup_chain::ancestors(self,identity,parent)?;
+            }
+            _=>return Err("Incremental stream needs a parent; full stream must not have one".into())
+        }
+        let mut chunks=Vec::new();
+        let mut total=0u64;
+        loop{
+            // take() retries interrupted/short pipe reads internally up to the
+            // exact chunk boundary without needing seek or plaintext staging.
+            let mut data=Vec::new();
+            (&mut *source).take(self.cfg.chunk_bytes as u64)
+                .read_to_end(&mut data)?;
+            if data.is_empty(){break;}
+            total=total.checked_add(data.len() as u64)
+                .ok_or("Stream size overflow")?;
+            chunks.push(self.save_chunk(identity,&data)?);
+        }
+        // A short or interrupted command must not create an apparently
+        // complete backup. Verification happens BEFORE the manifest write.
+        finish().map_err(|e|format!("Source stream did not finish successfully: {e}"))?;
+        if total==0{return Err("Refusing an empty provider dump".into());}
+        let mut nonce=[0u8;32];
+        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        let snapshot=LogicalBackup{
+            version:1,id:hex::encode(nonce),label:label.to_owned(),
+            entries:vec![Entry{path:full_path,bytes:total,chunks}],
+            protected:false,
+            created_unix:std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0,|x|x.as_secs()),
+            top_namespace:top_namespace.to_owned(),kind,
+            parent_id:parent_id.map(str::to_owned)
+        };
+        let encrypted=age(&serde_json::to_vec(&snapshot)?,
+            Some(&self.cfg.recipient),None)?;
+        if !write_new(&self.manifest_path(&snapshot.id)?,&encrypted)?{
+            return Err("Stream manifest collision".into());
+        }
+        self.protect(identity,&snapshot.id)?;
+        fs2::FileExt::unlock(&lock)?;
+        Ok(snapshot)
+    }
+
     pub fn load(&self, identity: &Path, id: &str) -> Res<LogicalBackup> {
         let path = self.manifest_path(id)?;
         if !fs::symlink_metadata(&path)?.file_type().is_file() {
@@ -400,6 +496,30 @@ mod tests {
         assert!(safe_path("github/user/repository/refs/heads/main"));
         assert!(!safe_hash("invalid"));
         assert!(safe_hash(&"a".repeat(64)));
+    }
+    #[test]
+    fn distributed_guard_aborts_before_any_new_manifest_or_chunk(){
+        let root=tempfile::tempdir().unwrap();
+        let store=Store{
+            root:root.path().join(".multi-backup-v1"),
+            cfg:Config{version:1,recipient:"age1dummy".into(),
+                chunk_bytes:DEFAULT_CHUNK,secret:String::new()},
+            key:[7u8;32]
+        };
+        let source=Source{namespace:"files".into(),
+            directory:root.path().join("nonexistent")};
+        let mut checks=0;
+        let failure=store.backup_in_namespace_mode_guard(
+            Path::new("/missing-identity"),"test","",&[source],
+            BackupKind::Full,None,&|finalize|{
+                assert!(!finalize,"A dead lease must be denied before commit");
+                Err("lost lease".into())
+            });
+        checks+=1;
+        assert!(failure.is_err());
+        assert_eq!(checks,1);
+        assert!(!store.root.join("manifests").exists());
+        assert!(!store.root.join("chunks").exists());
     }
     #[test]
     fn keyed_name_does_not_disclose_content_sha256() {
@@ -643,8 +763,22 @@ impl Store {
                     s.members.iter().any(|m| m.id==item.id))
                     .ok_or("Corrupt chunk has no parity protection")?;
                 let mut shards = Vec::with_capacity(crate::parity::TOTAL);
-                for member in &protection.members {
-                    shards.push(fs::read(self.chunk_path(&member.id)?).ok());
+                // The Reed-Solomon stripe authenticates zero-PADDED age
+                // ciphertexts. A short valid member is not an erasure:
+                // check its recorded original length, then pad to shard_size.
+                // Previously all differently sized chunks were treated as
+                // missing shards, defeating repair for normal POSIX trees.
+                for (position,member) in protection.members.iter().enumerate() {
+                    let ciphertext=fs::read(self.chunk_path(&member.id)?).ok()
+                        .and_then(|mut bytes|{
+                            if bytes.len()!=protection.stripe.info[position].length ||
+                               bytes.len()>protection.stripe.shard_size {
+                                return None;
+                            }
+                            bytes.resize(protection.stripe.shard_size,0);
+                            Some(bytes)
+                        });
+                    shards.push(ciphertext);
                 }
                 while shards.len()<crate::parity::DATA {shards.push(Some(vec![0;
                     protection.stripe.shard_size]));}

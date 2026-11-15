@@ -67,3 +67,24 @@ offline. Never share the PDF password in chat, commits, CLI arguments or CI.
 
 Le credenziali del proprietario originale sono soltanto provenienza, non autorizzazione a scrivere nel nuovo account. Il restore GitHub verifica lo slug del nuovo owner e richiede gh autorizzato; Dropbox può verificare l'account del token WRITE della destinazione. Il purge modifica solo manifest cifrati e blocca successori protetti. La GC esamina tutti i backup sotto lock, esegue automaticamente il repack delle stripe 8+2 miste preparando e verificando nuovi shard prima del commit dell'indice autenticato, conserva la vecchia parità fino al grace del successore e rimuove soltanto ciphertext orfano dopo conferma. Non è WORM indipendente; restano da certificare crash, multiwriter e comportamento remoto.
 
+
+## r039 — Agent/cluster and resource security boundaries
+
+Agent ID, user, server-issued high-entropy token and Ed25519 device key require explicit server administrator approval. Proof includes timestamp, monotonic nonce, method/path, ciphertext digest and metadata digest. PostgreSQL stores approval/revocation, token digest and unique replay nonces, supports concurrent agent requests. Agent API is isolated from browser sessions and requires HTTPS proxy attestation injected by a trusted ingress; direct HTTP Pod access is prohibited. Cluster PG requires sslmode=verify-full, and stores shared login sessions and lease assignments.
+
+CPU/RAM policies are cooperative admission/stream checks and NOT hard cgroup/Windows Job Object limits; SSH target remote host load cannot be proven by a local probe. Queue lease tokens protect assignment/result updates but do not yet fence all encrypted object writes after lease loss. Agent push/pull and cross-pod storage use only true shared storage after explicit registration. These gaps require security and multi-node failure drills before RC. [Agent guide](AGENTS_AFS_R039_EN.md), [cluster guide](CLUSTER_ORCHESTRATION_R039_EN.md).
+
+## r039 hardened cluster Secret file ownership correction
+
+Use the Kubernetes example in [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHESTRATION_R039_EN.md). Multi Backup hardened mode requires **independent** 64-hex private-gate and recovery authorization secrets plus trusted agent-proxy attestation. A non-root process cannot read 0400 root-owned Kubernetes Secret projections. The initContainer copies the files into private memory-backed volumes owned by UID/GID 10001 and mode 0600; the app container remains read-only-rootfs with dropped capabilities. This avoids weakening the server's credential file checks. Cluster ingress must overwrite injected trust headers and restrict direct Pod network access. HPA only affects the availability of API pods and cannot substitute for verified writer fencing under network partitions.
+
+
+## r039 verified PostgreSQL TLS compatibility
+
+The postgres 0.19 Rust driver recognizes TLS require rather than libpq's verify-full option. The HA startup parser REQUIRES and structurally validates an input URI query with exactly one sslmode=verify-full; the internal wire mode is then normalized to require and native-tls enforces TLS >=1.2 with certificate chain and hostname checking explicitly enabled. A custom PEM CA may be provided only by a validated regular file through MULTI_BACKUP_CLUSTER_TLS_CA_FILE, e.g. a 0600 Kubernetes Secret copy from multi-backup-db-ca/db-ca.pem. Tests reject disguised sslmode=disable and duplicate conflicting query values. This is a connection security control, not evidence of a live trusted PostgreSQL failover qualification.
+
+
+## r039 OIDC state across replicas
+
+Pending PKCE state keys are hashed with SHA256 and stored in PostgreSQL with verifier, nonce and expiry of 10 minutes. Callback consumes the record atomically with DELETE RETURNING after verifying the initiating browser's HttpOnly/Secure cookie. No local-memory fallback when database is configured but unavailable. DB roles must protect PKCE verifier and nonce from inspection. Real callback relay/replay/PG failure tests remain outstanding.
+

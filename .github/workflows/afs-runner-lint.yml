@@ -1,0 +1,64 @@
+name: Multi Backup - disposable AFS runner script validation
+on:
+  pull_request:
+    paths:
+      - 'scripts/bootstrap-openafs-runner-vm.sh'
+      - 'scripts/register-openafs-runner-once.sh'
+      - 'scripts/patch-openafs-ansible-debian-facts.py'
+      - 'scripts/patch-openafs-ansible-local-facts-access.py'
+      - 'scripts/test-real-afs-cell.sh'
+      - 'rust/src/afs_volume.rs'
+      - 'docs/AFS_RUNNER_R039_IT.md'
+      - '.github/workflows/afs-runner-lint.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and policy without executing privileged scripts
+        run: |
+          set -euo pipefail
+          bash -n scripts/bootstrap-openafs-runner-vm.sh
+          bash -n scripts/register-openafs-runner-once.sh
+          bash -n scripts/test-real-afs-cell.sh
+          # Keep --json stdout uncontaminated by real vos/SSH diagnostics.
+          grep -q 'forward_child_stdout_to_stderr' rust/src/afs_volume.rs
+          grep -q 'let diagnostics=forward_child_stdout_to_stderr(&mut child)' rust/src/afs_volume.rs
+          if grep -Fq 'cmd.stdin(Stdio::piped()).stdout(Stdio::inherit())' rust/src/afs_volume.rs; then
+            echo "::error::vos restore progress must not leak into CLI JSON stdout"; exit 1
+          fi
+          cargo test --manifest-path rust/Cargo.toml --lib restore_child_stdout_is_drained_without_polluting_machine_stdout
+          grep -q 'SOURCE_PARENT="/afs/.' scripts/test-real-afs-cell.sh
+          grep -q 'fs setacl -dir "$SOURCE_PARENT" -acl system:administrators all' scripts/test-real-afs-cell.sh
+          grep -q 'fs getcalleraccess -path "$SOURCE_PARENT"' scripts/test-real-afs-cell.sh
+          grep -q 'fs listacl -path "$SOURCE_PARENT"' scripts/test-real-afs-cell.sh
+          if grep -Eq 'fs listacl -dir([[:space:]]|$)' scripts/test-real-afs-cell.sh; then echo "::error::fs listacl accepts -path, not -dir"; exit 1; fi
+          grep -q 'fs setacl -dir "$SOURCE_PARENT"' scripts/test-real-afs-cell.sh
+          grep -q 'test "$SOURCE_PARENT" = /afs/.example.com' scripts/test-real-afs-cell.sh
+          grep -q 'fs mkmount -dir "$SOURCE_MOUNT" -vol "$VOLUME" -cell "$CELL" -rw' scripts/test-real-afs-cell.sh
+          grep -q 'fs mkmount -dir "$RESTORE_MOUNT" -vol "$NEW_VOLUME" -cell "$CELL" -rw' scripts/test-real-afs-cell.sh
+          grep -q 'fs rmmount -dir "$SOURCE_MOUNT"' scripts/test-real-afs-cell.sh
+          if grep -q 'BASE=/afs/example.com/test' scripts/test-real-afs-cell.sh; then echo "::error::RO OpenAFS path must never be used to seed AFS test data"; exit 1; fi
+          python3 -m py_compile scripts/patch-openafs-ansible-debian-facts.py
+          python3 -m py_compile scripts/patch-openafs-ansible-local-facts-access.py
+          curl --fail --location --retry 3 --silent --show-error -o /tmp/local_install.yaml https://raw.githubusercontent.com/openafs-contrib/ansible-openafs/11fa2a5bbb27d4b44d297c5105f7dd9bc6347190/playbooks/local_install.yaml
+          python3 scripts/patch-openafs-ansible-local-facts-access.py /tmp/local_install.yaml
+          python3 scripts/patch-openafs-ansible-local-facts-access.py /tmp/local_install.yaml
+          grep -q 'mode: "0640"' /tmp/local_install.yaml
+          grep -q 'mode: "0710"' /tmp/local_install.yaml
+          grep -q -- '- /etc/ansible/facts.d' /tmp/local_install.yaml
+          grep -q 'Grant runner-group read-only access to real AFS client cacheinfo' /tmp/local_install.yaml
+          grep -q 'Prove the non-root AFS volume module can read' /tmp/local_install.yaml
+          grep -q 'afs-active' scripts/register-openafs-runner-once.sh
+          grep -q 'viceetcdir' scripts/patch-openafs-ansible-debian-facts.py
+          grep -q 'RUN_SUFFIX' scripts/test-real-afs-cell.sh
+          grep -q -- 'DISPOSABLE-OPENAFS-VM' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- 'debian:12' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- '6.1.*-amd64' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- 'libicu72' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- 'ubuntu:22.04' scripts/bootstrap-openafs-runner-vm.sh
+          grep -q -- '--ephemeral' scripts/register-openafs-runner-once.sh
+          grep -q -- 'sha256sum --check' scripts/register-openafs-runner-once.sh

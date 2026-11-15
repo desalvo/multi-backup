@@ -1,0 +1,40 @@
+name: Multi Backup - real database WAL and binlog PITR acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/test-postgresql-wal-pitr.sh'
+      - 'scripts/test-mariadb-binlog-pitr.sh'
+      - '.github/workflows/database-pitr-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgresql-wal-pitr:
+    name: PostgreSQL 16 physical base and archived WAL PITR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native clients and age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age postgresql-client jq
+      - name: Build actual native Rust CLI
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Run primary, encrypted backups, isolated recovery and negative PITR checks
+        run: bash scripts/test-postgresql-wal-pitr.sh
+  mariadb-binlog-pitr:
+    name: MariaDB 11.4 ROW binlog position PITR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native clients and age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age mariadb-client jq
+      - name: Build actual native Rust CLI
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Run source, encrypted snapshots, isolated binlog replay and checks
+        run: bash scripts/test-mariadb-binlog-pitr.sh

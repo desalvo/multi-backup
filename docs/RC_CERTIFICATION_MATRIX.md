@@ -313,3 +313,72 @@ Remaining qualification includes the current-head Production Gate, byte-identica
 La PR #10 contiene ora repack automatico delle stripe Reed-Solomon 8+2 miste nella GC confermata. La nuova parità viene cifrata e verificata prima del commit dell'indice autenticato, e la vecchia stripe è mantenuta per un grace period successivo. La GC ripulisce anche preparazioni incomplete prive di indice dopo la scadenza. Test aggiunti in garbage_collection_roundtrip.rs; serve la CI del **SHA corrente** e una qualifica indipendente con fault injection prima/dopo ogni shard, prima/dopo commit, durante il retire, su più generazioni e con byte-for-byte restore.
 
 Gate documentazione: scripts/check-documentation-consistency.py deve coprire entrambe le guide Rust r038 (OPERATIONS_R038_IT.md e OPERATIONS_R038_EN.md), FEATURE_INVENTORY_R038.md, DOCUMENTATION_INDEX_R038.md, CHUNK_STORAGE_V1.md, questa matrice e il generatore PDF. I vecchi PDF con screenshot Python/Tk sono storici; i PDF aggiornati devono essere rigenerati e verificati. Nessuna RC firmata/stable finché mancano CI, real account E2E, installazioni, firma e rollback.
+
+## r039 — parallelism, agent and Kubernetes RC blockers
+
+PR #11 delivers source transport types (server_local, ssh_agentless, managed_agent_pull/push), local/pinned SSH AFS volume plans, signed Ed25519 host agents, approved per-user tokens, encrypted upload receipts and durable PG nonces, server+agent execution budgets, PostgreSQL tls verify-full cluster queue, SKIP LOCKED lease tokens, node-local affinity, shared browser sessions and native agent installer CI. **Compilation is not certification.**
+
+Must prove live AFS full+incremental dump/restore to new volumes, checked site/cell/ACL/VLDB, authorized keytab/localauth and SSH key host validation; server/agent approved/revoked credentials, concurrent signed requests, TLS/ingress spoofing and push/pull under disconnect; bandwidth and CPU/RAM host limits incl. remote SSH where required; independent AFS volume parallelism; at least 2 replica Kubernetes jobs on registered truly shared vs pinned local backend, failover and physical write fencing after lease loss. Also OIDC pre-login state and cross-owner local restore, all Mac/Windows/Debian/Rocky/Alma agent installer installs, signature/notarization, update/rollback, and independent security audit.
+
+Read [r039 IT](CLUSTER_ORCHESTRATION_R039_IT.md) and [r039 EN](CLUSTER_ORCHESTRATION_R039_EN.md). Until exact current CI is green, tests on real systems pass and those gaps close, no merge of r039/PR #11 into r038, and no public RC.
+
+## r039 safety hardening — exact source and acceptance still required
+
+New implementation: quota-aware agent job slots across independent CLI processes; separately reviewed and SHA-256 pinned profiles; admin recovery authorization for profile approval; server-side preflight before age payload upload; native chunk writer checks its live PG lease per file/chunk and at manifest publication, replica admission is serialized, and expired distributed jobs are quarantined. Controlled recovery additionally requires explicit writer stopped + encrypted-store audited attestations and stale original-replica heartbeat.
+
+**NOT CERTIFIED:** automatic redistribution of in-flight jobs with physical write fencing, distributed GC safety after lost lease, HA failover acceptance with two real Kubernetes pods and shared data, agent push/pull under long transfers and disconnections, exact AFS incremental restore on a real cell, hard CPU/memory limits on remote SSH host, OIDC pending-login state sharing, global bandwidth caps, generic cloud input/output pairs. A passing Rust test is not a substitute for those operational checks.
+
+## r039 hardened Kubernetes deployment test requirement
+
+The example Deployment now materializes 0600 Secret copies for UID 10001 and sets hardened mode with distinct gateway and recovery credentials, HPA 2–10 pods, PDB and shared RWX. Production Gate source audits enforce these properties. **A YAML shape test is not a real Kubernetes install test.** Before RC, run live Pod startup, readiness, replica scale-up/down, OIDC login, agent HTTPS authentication, PG outage, shared-vs-node-local placement, old-writer fencing, rollback and encrypted recoveries on an actual cluster.
+
+
+## r039 PostgreSQL driver TLS incompatibility fixed (code preview)
+
+Exact URI parsing for sslmode=verify-full was added, matching postgres 0.19's Require wire mode to verified native-tls certificate chain and hostname checks with TLS >=1.2 and optional private CA file. A Kubernetes CA Secret now supplies the trust anchor to UID 10001 via private 0600 initContainer copy. Production Gate asserts the implementation. **Still mandatory:** real PG with valid/invalid certificates, wrong hostname, expired CA, interrupted TLS, multi-node failover; successful compilation alone is not TLS certification.
+
+
+## r039 OIDC HA improvement
+
+Added PostgreSQL-backed OIDC PKCE pending challenge store with atomic one-time cross-pod consumption, strict ten-minute expiry and fail-closed DB failure. Previously the pending challenge existed only in one pod and required sticky ingress sessions. Still release-blocking: real IdP two-pod callback/replay/issuer mismatch tests, credential-at-rest DB handling, session revocation and actual load balancer end-to-end.
+
+
+## r039+ AFS and mounted filesystem provider gates (OPEN)
+
+Executable preview: 8 generic input sources posix/nfs/smb/sshfs/gpfs/cephfs/glusterfs/lustre to an encrypted POSIX store; 6 restore outputs to new directories on posix/nfs/sshfs/cephfs/glusterfs/lustre. Explicit Linux exact RO/RW mount evidence, no-overwrite and source attestation are code gates; a real snapshot and ACL/xattr/stripe correctness are NOT thereby proven. AFS is a separate volume-stream provider with a completion-gated encrypted full/incremental vos dump, verified full chain, and new volume restore using overwrite abort then ordered increments.
+
+Rust native fake-vos full-chain test plus age encryption does NOT satisfy real OpenAFS acceptance. Required: real cell, server, VLDB, time-continuity, ACLs/mountpoints, keytab, localauth privilege and controlled NEW volume restore; real mounted remote filesystem sources/destinations and consistency test; OAuth/cloud/DB/block/VM adapters; proper distinct destination-account credentials; error recovery, offline/agent AFS restore, distributed writer fencing, signed packages and Kubernetes HA failover. Exactly **0/682** generic theoretical pairs have full production qualification at this stage.
+
+## r039+ remote AFS new-volume recovery extension
+
+Compiled code now supports typed SSH-agentless output restore over a fixed, quote-escaped vos restore command through the pinned SSH connection, without arbitrary scripts or local plaintext dump staging. The exact same new-volume/full/incremental confirmation and no-overwrite controls apply. Fake SSH+vos tests are included in rust/tests/afs_stream_roundtrip.rs; live host-identity, lost-connection and actual AFS destination-token/privilege checks remain release-blocking.
+
+### r039 host-wide upload throttling — development-only acceptance
+
+An optional local agent configuration cap shares one locked byte counter
+across independent HTTPS upload readers/processes. Unit tests cover file
+integrity, symlink rejection and shared accounting. This is **not**
+production-certified network shaping. Remaining hard gates: actual
+multi-process throughput measurement on macOS/Windows/Linux, crash/restart
+and clock-step recovery procedures, SSH/source streaming, server node-level
+or multi-pod bandwidth caps and hard OS CPU/RAM resource enforcement.
+
+### r039 database and authentic OpenAFS release qualification
+- PostgreSQL 16 and MariaDB 11.4 real-container full logical backup + restored 1,000 rows per engine: first live CI run 43670330802 PASS (2/2). New SHA adds full row-by-row comparisons and wrong-credential fail-closed test; exact-head verification still required.
+- OpenAFS stateful virtual-cell compiled Rust acceptance PASS on earlier run 43669415521, 3/3 AFS integration tests.
+- Separate genuine OpenAFS+Kerberos/KDC/VLDB/volserver+mounted-client acceptance in `.github/workflows/afs-real-cell.yml`: pending real GitHub runner provisioning and full restore. **Not certified merely by creation of workflow**.
+- Still blocking signed release: physical lost-lease fencing, HA crash/failover tests, AFS field auth/ACL tests, database PITR and incremental consistency, independent signed installer acceptance.
+
+### r039 PITR CI qualification
+- MariaDB ROW binlog PITR on separate server: PASS run 43672237760 (30 records, sum IDs 465, excluded post-boundary ID 999). Does not establish multi-binlog retention/GTID/replay safety.
+- PostgreSQL basebackup + encrypted archived WAL + named recovery target acceptance: initially blocked by pg_hba replication rule; corrected CI pending fresh verified PASS. Production physical WAL/PITR remains blocked.
+- Both PITR scripts are manually orchestrated CI integration using native Rust encryption/restore, NOT certified full auto provider PITR or crash-consistent unattended no-plaintext operation.
+
+### r039 — Galera 4 three-member recovery acceptance
+- **PASS** GitHub Actions run 43673606744 source SHA 37e5de39: real MariaDB 11.4 / Galera 4, Primary/Synced 3 members, one-node kill/quorum2/rejoin3, 40-row age/zstd FULL, 20 replayed cross-node write-sets from node2's binlog, target at position 60/1830 (exclude ID 999). Refuse a 3-node-required backup at 2 members and refuse overwrite during restore.
+- **Coverage only** controlled CI isolated containers + typed Rust CLI. Not production-certified: physical multi-host partitions/SST auth, multi-binlog/GTID failover, continuous zero-plaintext binlog archiving, scheduler/agent PITR automation, ACL and concurrency parity.
+
+### r039 actual POSIX, SSH and OpenAFS qualification (new)
+- POSIX Rust full/incremental, 10MiB mixed-sized chunks, selective restore, wrong key, symlink/FIFO and corrupted ciphertext parity repair **PASS** at run 43678452447. No ACL/xattr, mtime/uid/gid snapshot fidelity certification.
+- Real SSH/SCP/SFTP protocol and FUSE SSHFS CI source scripts added; these are *in progress* until individual job PASS. SSH catalog direct provider still Planned, no claim of native SSH plugin implementation.
+- OpenAFS authentic KDC/VLDB/fileserver/restore field workflow now manual on a disposable self-hosted `openafs-ci` runner, with exact SHA, sentinel and verified OpenAFS DKMS, to avoid unsupported Azure kernel; no PASS evidence yet, mandatory field gate stays open.

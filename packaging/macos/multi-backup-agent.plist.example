@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>eu.adsnet.multi-backup-agent</string>
+<key>ProgramArguments</key><array>
+<string>/usr/local/bin/multi-backup-agent</string>
+<string>poll</string>
+<string>--config</string>
+<string>REPLACE_WITH_USER_PRIVATE_CONFIG_PATH</string>
+<string>--poll-seconds</string><string>60</string>
+</array>
+<key>RunAtLoad</key><false/><key>KeepAlive</key><false/>
+</dict></plist>

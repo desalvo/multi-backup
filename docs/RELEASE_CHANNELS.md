@@ -84,3 +84,7 @@ Following feedback from macOS early testers, the rolling early-release uses the 
 
 Le sezioni storiche qui sopra descrivono anche la distribuzione Python/Tk r010-r018. Il codice Rust 0.1.0-r038 è in PR #10 come anteprima di sviluppo, **non** una RC stabile/pubblicata. I nuovi gate includono backup totali/incrementali, restore verificato, purge con rebase, GC con repack automatico 8+2, restore verso altro account, test di interruzione, installazione reale, firma/notarizzazione e update/rollback. Documentazione corrente: [indice](DOCUMENTATION_INDEX_R038.md) e [matrice RC](RC_CERTIFICATION_MATRIX.md).
 
+
+## r039 installation channels and native agents (preview)
+
+The agent preview is packaged as separate macOS Intel+ARM PKG, Windows x64 EXE, Debian 12/13 AMD64+ARM64 DEB and Rocky/Alma 8/9/10 x86_64 RPM, with no auto-enabled service until approved. These are CI artifacts, not a signed RC or stable release. The same Production Gate requires protocol, resource, storage affinity and documentation tests; the deployment example is [Kubernetes r039](../k8s/multi-backup-cluster-r039.preview.yaml). Full remote AFS restore, strict exactly-once cluster writes, hard resource ceilings and installer signing remain release-blocking.

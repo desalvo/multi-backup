@@ -28,8 +28,10 @@ fn supported_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
     plugins::plan(mode, input, output)?;
     let supported = match mode {
         Mode::Backup => output == "posix" && matches!(input,
-            "posix" | "nfs" | "smb" | "sshfs" | "gpfs"),
-        Mode::Restore => input == "posix" && output == "posix",
+            "posix" | "nfs" | "smb" | "sshfs" | "gpfs" |
+            "cephfs" | "glusterfs" | "lustre"),
+        Mode::Restore => input == "posix" && matches!(output,
+            "posix"|"nfs"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
     };
     if !supported {
         return Err(format!("No native generic executor for {input} -> {output}; operation denied").into());
@@ -52,6 +54,19 @@ pub fn backup_with_mode(input: &str, output: &str, source: &Path, root: &Path,
               top_namespace: &str, snapshot_attested: bool,
               gpfs_access: Option<GpfsAccess>,kind:BackupKind,
               parent_id:Option<&str>) -> Result<LogicalBackup> {
+    backup_with_mode_guard(input,output,source,root,identity,label,
+        namespace,top_namespace,snapshot_attested,gpfs_access,
+        kind,parent_id,&|_|Ok(()))
+}
+/// Distributed workers supply a lease guard. All source adapters that run
+/// under the cluster must honor it; never fall back to an unguarded writer.
+pub fn backup_with_mode_guard(input: &str, output: &str, source: &Path,
+              root: &Path, identity: &Path, label: &str, namespace: &str,
+              top_namespace: &str, snapshot_attested: bool,
+              gpfs_access: Option<GpfsAccess>,kind:BackupKind,
+              parent_id:Option<&str>,live:&dyn Fn(bool)->std::result::Result<(),String>)
+              -> Result<LogicalBackup> {
+    live(false)?;
     supported_pair(Mode::Backup, input, output)?;
     let source = regular_directory(source)?;
     if input == "posix" {
@@ -79,9 +94,9 @@ pub fn backup_with_mode(input: &str, output: &str, source: &Path, root: &Path,
         return Err("Backup requires a nonempty label".into());
     }
     let store = Store::open(&root, &identity)?;
-    let snapshot = store.backup_in_namespace_mode(&identity,label,top_namespace,
+    let snapshot = store.backup_in_namespace_mode_guard(&identity,label,top_namespace,
         &[Source { namespace: namespace.to_owned(), directory: source }],
-        kind,parent_id)?;
+        kind,parent_id,live)?;
     if !store.verify(&identity, &snapshot.id)?.healthy {
         return Err("Created backup did not pass encrypted integrity verification".into());
     }
@@ -101,6 +116,14 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
     let parent = destination.parent().filter(|p| !p.as_os_str().is_empty())
         .ok_or("Restore must specify an explicit destination parent")?;
     let parent = regular_directory(parent)?;
+    // Remote targets must be NEW immediate children of an exact RW mount.
+    // An ancestor mount or a matching prefix is not sufficient.
+    if output != "posix" {
+        let evidence=mount_probe::probe(output,&parent,None)?;
+        if !evidence.rw_mount_option {
+            return Err("Remote restore target must be an exact read-write mount".into());
+        }
+    }
     let name = destination.file_name().ok_or("Invalid restore directory name")?;
     if name == "." || name == ".." {
         return Err("Invalid restore directory name".into());
@@ -129,14 +152,31 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
 mod tests {
     use super::*;
     #[test]
+    fn cluster_worker_denies_expired_lease_before_scanning() {
+        let fail=backup_with_mode_guard("posix","posix",
+            Path::new("/source"),Path::new("/storage"),
+            Path::new("/identity"),"label","files","",false,
+            None,BackupKind::Full,None,&|_|Err("expired_lease".into()));
+        assert!(fail.is_err());
+        assert!(fail.unwrap_err().to_string().contains("expired_lease"));
+    }
+    #[test]
     fn unimplemented_providers_refuse_execution() {
         assert!(supported_pair(Mode::Backup, "github", "posix").is_err());
         assert!(supported_pair(Mode::Backup, "nfs", "posix").is_ok());
         assert!(supported_pair(Mode::Backup, "smb", "posix").is_ok());
         assert!(supported_pair(Mode::Backup, "gpfs", "posix").is_ok());
         assert!(supported_pair(Mode::Backup, "sshfs", "posix").is_ok());
+        for plugin in ["cephfs","glusterfs","lustre"] {
+            assert!(supported_pair(Mode::Backup,plugin,"posix").is_ok());
+        }
         assert!(supported_pair(Mode::Backup, "posix", "anti-ransomware-vault").is_err());
         assert!(supported_pair(Mode::Restore, "posix", "github").is_err());
+        for plugin in ["nfs","sshfs","cephfs","glusterfs","lustre"] {
+            assert!(supported_pair(Mode::Restore,"posix",plugin).is_ok());
+        }
+        assert!(supported_pair(Mode::Restore,"posix","smb").is_err());
+        assert!(supported_pair(Mode::Restore,"posix","gpfs").is_err());
         assert!(supported_pair(Mode::Backup, "posix", "posix").is_ok());
     }
 }

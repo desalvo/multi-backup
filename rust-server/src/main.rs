@@ -6,6 +6,12 @@ mod ldap;
 mod oidc;
 mod dav;
 mod security;
+mod cluster;
+#[cfg(test)]
+mod live_pg_acceptance;
+mod agent_registry;
+mod agent_api;
+mod cluster_worker;
 use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
@@ -22,7 +28,7 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, fs, fs::OpenOptions, io::Write,
     net::SocketAddr, path::PathBuf, sync::{Arc, Mutex},
     time::{Duration, Instant}};
-use zeroize::Zeroize;
+use zeroize::{Zeroize,Zeroizing};
 
 #[derive(Clone)]
 struct AppState(Arc<AppConfig>);
@@ -43,6 +49,8 @@ struct AppConfig {
     sessions: Mutex<HashMap<String, Session>>,
     failed_logins: Mutex<HashMap<String, (Instant,u32)>>,
     last_smtp_test: Mutex<Option<Instant>>,
+    cluster: Option<cluster::Database>,
+    agent_proxy_key: Option<Zeroizing<String>>,
 }
 #[derive(Clone)]
 struct Session { csrf: String, until: Instant, user: String }
@@ -86,6 +94,14 @@ fn session(headers:&HeaderMap,state:&AppConfig)->Option<(String,Session)> {
     if token.len()!=64 || !token.bytes().all(|v|v.is_ascii_hexdigit()) {
         return None;
     }
+    // In multi-replica mode PostgreSQL is authoritative for ALL sessions,
+    // including logout/revocation. An in-memory token on another pod never
+    // substitutes for a missing shared session.
+    if let Some(db)=&state.cluster{
+        return db.get_session(token).ok().flatten().map(|(user,csrf)|
+            (token.to_owned(),Session{user,csrf,
+                until:Instant::now()+Duration::from_secs(60)}));
+    }
     let mut sessions=state.sessions.lock().ok()?;
     sessions.retain(|_,session|session.until>Instant::now());
     sessions.get(token).cloned().map(|s|(token.to_string(),s))
@@ -104,6 +120,16 @@ fn secure_headers<R:IntoResponse>(response:R)->Response {
     result
 }
 async fn health()->impl IntoResponse {(StatusCode::OK,"ok")}
+async fn readiness(State(state):State<AppState>)->Response{
+    if let Some(db)=&state.0.cluster{
+        let probe=db.clone();
+        let healthy=tokio::task::spawn_blocking(move||probe.status()).await;
+        if !matches!(healthy,Ok(Ok(_))){
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
+    secure_headers((StatusCode::OK,"ready"))
+}
 async fn css()->Response {
     ([(header::CONTENT_TYPE,"text/css; charset=utf-8")],
         include_str!("../public/app.css")).into_response()
@@ -161,6 +187,12 @@ async fn do_login(State(state):State<AppState>,headers:HeaderMap,
     }
     let token=random_token();
     let csrf=random_token();
+    if let Some(db)=&state.0.cluster {
+        // Shared session write must succeed before publishing the cookie.
+        if db.put_session(&token,&login.username,&csrf).is_err() {
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
     let mut sessions=match state.0.sessions.lock(){
         Ok(value)=>value,Err(_)=>return secure_headers(StatusCode::INTERNAL_SERVER_ERROR)
     };
@@ -187,7 +219,13 @@ async fn oidc_start(State(state):State<AppState>)->Response{
         audit(&state.0,"oidc_start_failed");
         return secure_headers(StatusCode::BAD_GATEWAY);
     };
-    {
+    if let Some(db)=&state.0.cluster{
+        // All replicas must recognize the SAME outstanding PKCE challenge.
+        // Failure to commit is fatal; never fall back to replica-local state.
+        if db.put_oidc_pending(&csrf,&pending.verifier,&pending.nonce).is_err(){
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }else{
         let Ok(mut entries)=state.0.pending_oidc.lock() else {
             return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
         };
@@ -217,7 +255,17 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     let Some(code)=params.code.filter(|s|!s.is_empty()&&s.len()<=8192) else {
         return secure_headers(StatusCode::UNAUTHORIZED);
     };
-    let pending={
+    let pending=if let Some(db)=&state.0.cluster{
+        // Atomic DELETE..RETURNING enforces one-time consumption even when
+        // callbacks race through different pods behind the load balancer.
+        match db.take_oidc_pending(&state_param){
+            Ok(Some((verifier,nonce)))=>Some(Pending{
+                verifier,nonce,created:Instant::now()
+            }),
+            Ok(None)=>None,
+            Err(_)=>return secure_headers(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }else{
         let Ok(mut entries)=state.0.pending_oidc.lock() else {
             return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
         };
@@ -236,6 +284,11 @@ async fn oidc_callback(State(state):State<AppState>,headers:HeaderMap,
     };
     let cookie_id=random_token();
     let csrf=random_token();
+    if let Some(db)=&state.0.cluster{
+        if db.put_session(&cookie_id,&format!("oidc:{subject}"),&csrf).is_err(){
+            return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
     {
         let Ok(mut sessions)=state.0.sessions.lock() else {
             return secure_headers(StatusCode::INTERNAL_SERVER_ERROR);
@@ -430,6 +483,11 @@ async fn logout(State(state):State<AppState>,headers:HeaderMap)->Response {
     if let Some((token,s))=session(&headers,&state.0) {
         if same_origin(&headers,&state.0) &&
             headers.get("x-csrf-token").and_then(|x|x.to_str().ok())==Some(s.csrf.as_str()) {
+            if let Some(db)=&state.0.cluster{
+                if db.delete_session(&token).is_err() {
+                    return secure_headers(StatusCode::SERVICE_UNAVAILABLE);
+                }
+            }
             if let Ok(mut sessions)=state.0.sessions.lock(){sessions.remove(&token);}
             audit_actor(&state.0,"logout",&s.user);
             let mut result=Redirect::to("/login").into_response();
@@ -471,6 +529,62 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
+    let cluster=cluster::Database::configured()?;
+    let agent_proxy_key=std::env::var_os("MULTI_BACKUP_AGENT_PROXY_SECRET_FILE")
+        .map(|location|->Result<Zeroizing<String>,Box<dyn std::error::Error+Send+Sync>>{
+            let path=PathBuf::from(location);
+            let meta=fs::symlink_metadata(&path)?;
+            if !meta.file_type().is_file() || meta.len()>256 {
+                return Err("Unsafe trusted HTTPS proxy key file".into());
+            }
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                if meta.permissions().mode()&0o077!=0{
+                    return Err("Agent proxy key must be owner-read only".into());
+                }
+            }
+            let secret=fs::read_to_string(&path)?.trim().to_owned();
+            if secret.len()<64||secret.len()>256 {
+                return Err("Trusted HTTPS proxy secret must be 64+ chars".into());
+            }
+            Ok(Zeroizing::new(secret))
+        }).transpose()?;
+    // An agent endpoint is never enabled without an explicitly verified
+    // public HTTPS origin AND an independent secret injected by trusted proxy.
+    if agent_proxy_key.is_some() && (!origin.starts_with("https://")||cluster.is_none()){
+        return Err("Agent API requires HTTPS origin and shared DB".into());
+    }
+    if let Some(db)=&cluster {
+        let replica=std::env::var("MULTI_BACKUP_REPLICA_ID")
+            .map_err(|_|"Cluster requires a stable, unique replica ID")?;
+        let budget=std::env::var("MULTI_BACKUP_REPLICA_MAX_JOBS")
+            .unwrap_or_else(|_|"4".into()).parse::<u16>()?;
+        let accessible=std::env::var("MULTI_BACKUP_CLUSTER_STORAGE_IDS")
+            .unwrap_or_default().split(',').filter(|s|!s.is_empty())
+            .map(str::to_owned).collect::<Vec<_>>();
+        db.heartbeat_replica(&replica,budget,&accessible)?;
+        if std::env::var("MULTI_BACKUP_CLUSTER_EXECUTOR").ok().as_deref()==Some("enabled"){
+            // Explicit opt-in only: shared filesystem jobs can be processed by
+            // any replica. Local filesystems stay pinned to their owner.
+            // Fencing of commits after lease loss is still an RC requirement.
+            tokio::spawn(cluster_worker::spawn(db.clone(),replica.clone()));
+        }
+        let db=db.clone();
+        tokio::spawn(async move {
+            let mut beat=tokio::time::interval(std::time::Duration::from_secs(20));
+            loop {
+                beat.tick().await;
+                let local=db.clone();
+                let id=replica.clone();
+                let stores=accessible.clone();
+                let result=tokio::task::spawn_blocking(move||
+                    local.heartbeat_replica(&id,budget,&stores)).await;
+                if !matches!(result,Ok(Ok(()))){
+                    eprintln!("Cluster heartbeat failed; node will expire from dispatch");
+                }
+            }
+        });
+    }
     let security=SecurityPolicy::from_env(&origin)?;
     let smtp=SmtpConfig::from_env()?;
     let dav=DavConfig::from_env(&origin)?;
@@ -482,8 +596,9 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
         last_smtp_test:Mutex::new(None),
+        cluster,agent_proxy_key,
     }));
-    let app=Router::new().route("/healthz",get(health))
+    let app=Router::new().route("/healthz",get(health)).route("/readyz",get(readiness))
         .route("/login",get(login_page).post(do_login))
         .route("/oidc/start",get(oidc_start))
         .route("/oidc/callback",get(oidc_callback))
@@ -495,6 +610,21 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/dav/:id/*path",axum::routing::any(dav::file))
         .route("/api/export",post(export))
         .route("/api/audit",get(audit_list))
+        .route("/api/cluster/status",get(agent_api::cluster_status))
+        .route("/api/cluster/storage",post(agent_api::register_storage))
+        .route("/api/cluster/jobs",post(agent_api::enqueue_cluster))
+        .route("/api/cluster/jobs/recover",post(agent_api::recover_cluster_job))
+        .route("/api/agents/admin/list",get(agent_api::list_agents))
+        .route("/api/agents/admin/enroll",post(agent_api::enroll))
+        .route("/api/agents/admin/approve",post(agent_api::approve))
+        .route("/api/agents/admin/revoke",post(agent_api::revoke))
+        .route("/api/agents/admin/enqueue",post(agent_api::enqueue_pull))
+        .route("/api/agents/admin/profile",post(agent_api::approve_profile))
+        .route("/api/agents/admin/limits",post(agent_api::update_agent_limits))
+        .route("/api/agents/policy",get(agent_api::policy))
+        .route("/api/agents/poll",get(agent_api::poll))
+        .route("/api/agents/upload",
+            post(agent_api::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/api/security/status",get(security_status))
         .route("/api/smtp/status",get(smtp_status))
         .route("/api/smtp/test",post(smtp_test))

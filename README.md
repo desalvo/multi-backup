@@ -1,5 +1,15 @@
 # Multi Backup
 
+### r039+ Native Rust filesystem and OpenAFS executors (development preview)
+
+Eight generic input filesystem paths to encrypted POSIX chunk storage now include CephFS, GlusterFS and Lustre, requiring an exact pre-mounted Linux RO filesystem and explicit snapshot attestation. Six verified POSIX-store restore outputs can create new directories on POSIX, NFS, SSHFS, CephFS, GlusterFS and Lustre, with exact RW mount checks. The separate OpenAFS plugin streams typed local/SSH-agentless full/incremental vos dump into age/zstd/8+2 protected chunks, and can restore a verified volume dump chain to a NEW AFS volume only, with explicit confirmation. See [IT](docs/PLUGIN_EXECUTORS_R039_IT.md) and [EN](docs/PLUGIN_EXECUTORS_R039_EN.md). These are NOT production certified; provider credentials/keytab, remote recovery and live AFS/ACL/VLDB/HA tests remain open.
+
+
+## r039 Rust agent and HA cluster work — PREVIEW
+
+[Parallelism and Kubernetes (IT)](docs/CLUSTER_ORCHESTRATION_R039_IT.md), [cluster operations EN](docs/CLUSTER_ORCHESTRATION_R039_EN.md), [AFS agents IT](docs/AGENTS_AFS_R039_IT.md), [AFS agents EN](docs/AGENTS_AFS_R039_EN.md). r039 PR #11 remains draft. Native agent PKG/EXE/DEB/RPM and multi-replica shared PostgreSQL scheduling are under CI; local storage is pinned to one replica. Full platform/AFS recovery and lease write-fencing are NOT certified.
+
+
 ## Manuali operativi e stato r038
 
 La documentazione valida per la corrente anteprima Rust r038 è l'[indice documentale](docs/DOCUMENTATION_INDEX_R038.md), il [manuale IT](docs/OPERATIONS_R038_IT.md), l'[operational manual EN](docs/OPERATIONS_R038_EN.md) e l'[inventario delle funzionalità](docs/FEATURE_INVENTORY_R038.md). I manuali e gli screenshot Python/Tk delle versioni precedenti sono storici; il repack automatico 8+2 è ancora in qualificazione, non certificato come funzione stabile.
