@@ -14,6 +14,14 @@ use uuid::Uuid;
 
 type BoxError=Box<dyn std::error::Error+Send+Sync>;
 const SCHEMA:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_cluster_oidc_pending (
+  state_sha256 TEXT PRIMARY KEY,
+  verifier TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mb_cluster_oidc_expires
+ ON mb_cluster_oidc_pending(expires_at);
 CREATE TABLE IF NOT EXISTS mb_cluster_sessions (
   token_sha256 TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -199,6 +207,36 @@ impl Database {
         }
         let connector=postgres_native_tls::MakeTlsConnector::new(builder.build()?);
         Ok(Client::connect(&self.dsn,connector)?)
+    }
+    pub fn put_oidc_pending(&self,state:&str,verifier:&str,nonce:&str)
+        ->Result<(),BoxError>{
+        if !(16..=512).contains(&state.len()) ||
+           !(32..=512).contains(&verifier.len())||
+           !(16..=512).contains(&nonce.len()){
+            return Err(error("Unsafe OIDC pending challenge size"));
+        }
+        let digest=multi_backup_core::agent_protocol::hex_sha(state.as_bytes());
+        let mut db=self.connect()?;
+        // Shared and bounded across pods. The token exchange context is
+        // consumed atomically below; the raw OIDC state is never stored.
+        db.execute("INSERT INTO mb_cluster_oidc_pending
+             (state_sha256,verifier,nonce,expires_at)
+             VALUES ($1,$2,$3,now()+interval '10 minutes')",
+             &[&digest,&verifier,&nonce])?;
+        Ok(())
+    }
+    pub fn take_oidc_pending(&self,state:&str)
+        ->Result<Option<(String,String)>,BoxError>{
+        if !(16..=512).contains(&state.len()){
+            return Err(error("Unsafe OIDC state"));
+        }
+        let digest=multi_backup_core::agent_protocol::hex_sha(state.as_bytes());
+        let mut db=self.connect()?;
+        let result=db.query_opt("DELETE FROM mb_cluster_oidc_pending
+            WHERE state_sha256=$1 AND expires_at>now()
+            RETURNING verifier,nonce",
+            &[&digest])?;
+        Ok(result.map(|row|(row.get(0),row.get(1))))
     }
     pub fn put_session(&self,token:&str,user:&str,csrf:&str)
         ->Result<(),BoxError>{
