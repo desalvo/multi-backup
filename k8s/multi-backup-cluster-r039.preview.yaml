@@ -50,6 +50,7 @@ spec:
               cp /in-age/age-identity /out/age-identity
               cp /in-gateway/private-gate /out/private-gate
               cp /in-recovery/recovery /out/recovery
+              cp /in-db-ca/db-ca.pem /out/db-ca.pem
               chown 10001:10001 /out/*
               chmod 0600 /out/*
           securityContext:
@@ -65,6 +66,7 @@ spec:
             - {name: age-secret, mountPath: /in-age, readOnly: true}
             - {name: gateway-secret, mountPath: /in-gateway, readOnly: true}
             - {name: recovery-secret, mountPath: /in-recovery, readOnly: true}
+            - {name: db-ca-secret, mountPath: /in-db-ca, readOnly: true}
       containers:
         - name: server
           image: REPLACE_WITH_CI_VERIFIED_R039_SERVER_IMAGE
@@ -74,6 +76,7 @@ spec:
           env:
             - {name: MULTI_BACKUP_BIND, value: "0.0.0.0:8080"}
             - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: "https://REPLACE_WITH_FQDN"}
+            - {name: MULTI_BACKUP_CLUSTER_TLS_CA_FILE, value: "/run/secrets/db-ca.pem"}
             - name: MULTI_BACKUP_CLUSTER_DATABASE_URL
               valueFrom:
                 secretKeyRef: {name: multi-backup-db, key: postgresql-url-verify-full}
@@ -130,6 +133,8 @@ spec:
           secret: {secretName: multi-backup-private-gate, defaultMode: 256}
         - name: recovery-secret
           secret: {secretName: multi-backup-recovery, defaultMode: 256}
+        - name: db-ca-secret
+          secret: {secretName: multi-backup-db-ca, defaultMode: 256}
 ---
 # The PVC must bind to a provisioner that supports RWX across all replicas.
 # A local-path or RWO volume is not a valid substitute for shared storage.
