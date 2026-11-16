@@ -13,13 +13,13 @@ implemented and tested before the reverse operation is enabled.
 | onedrive | Planned | Planned | Microsoft Graph delta/eTag, tenant consent and resumable encrypted upload |
 | posix | Preview | Preview | Files, ACL/xattr, optional FS snapshot |
 | s3 | Planned | Planned | Versioned objects, multipart, optional Object Lock |
-| webdav | Planned | Planned | ETag/collection and atomic publish workaround |
+| webdav | Preview (davfs2 verified RO mount input; non-certified) | Planned | ETag/collection and atomic publish workaround |
 | nfs | Preview (read-only input) | Planned | NFSv3+, mounted server-side snapshot if available |
 | smb | Preview (read-only input) | — | SMB/CIFS ACL, streams and snapshot semantics |
 | cephfs | Planned | Planned | CephFS snapshot, file metadata and safe writer |
 | glusterfs | Planned | Planned | Gluster distributed volume, consistency barrier/snapshot, GFID, ACL/xattr; restore via mounted volume only |
 | lustre | Planned | Planned | Lustre MDT/OST, stripe metadata and coordinated snapshot; external client |
-| gpfs | Preview (CES read-only input) | Planned | IBM Storage Scale CES NFSv3/v4 or SMB3 using open-source OS clients; consistent fileset required |
+| gpfs | **Experimental / RC non-blocking** (IBM CES read-only adapter unqualified) | Planned | IBM Storage Scale CES NFSv3/v4 or SMB3 using open-source OS clients; consistent fileset required |
 | hdfs | Planned | Planned | SWebHDFS/WebHDFS, snapshots, ACL/xattr and Kerberos |
 | afs | Planned | Planned | OpenAFS cells and VLDB volume IDs, full/incremental vos dumps, ACL and new-volume restore |
 | alfresco | Planned | Planned | Alfresco REST/CMIS document versions, types/aspects, ACL, repository metadata |

@@ -28,7 +28,7 @@ fn supported_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
     plugins::plan(mode, input, output)?;
     let supported = match mode {
         Mode::Backup => output == "posix" && matches!(input,
-            "posix" | "nfs" | "smb" | "sshfs" | "gpfs" |
+            "posix" | "nfs" | "smb" | "sshfs" | "gpfs" | "webdav" |
             "cephfs" | "glusterfs" | "lustre"),
         Mode::Restore => input == "posix" && matches!(output,
             "posix"|"nfs"|"smb"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
@@ -167,6 +167,8 @@ mod tests {
         assert!(supported_pair(Mode::Backup, "smb", "posix").is_ok());
         assert!(supported_pair(Mode::Backup, "gpfs", "posix").is_ok());
         assert!(supported_pair(Mode::Backup, "sshfs", "posix").is_ok());
+        assert!(supported_pair(Mode::Backup, "webdav", "posix").is_ok());
+        assert!(supported_pair(Mode::Restore, "posix", "webdav").is_err());
         for plugin in ["cephfs","glusterfs","lustre"] {
             assert!(supported_pair(Mode::Backup,plugin,"posix").is_ok());
         }

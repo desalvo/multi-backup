@@ -56,7 +56,7 @@ fn parse_mountinfo(raw:&str)->Vec<MountEvidence>{
 /// authenticate SSH host keys, verify the GPFS backend or prove consistency.
 pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
     ->Result<MountEvidence,String>{
-    if !matches!(plugin,"gpfs"|"sshfs"|"nfs"|"smb"|"cephfs"|"glusterfs"|"lustre"){
+    if !matches!(plugin,"gpfs"|"sshfs"|"nfs"|"smb"|"webdav"|"cephfs"|"glusterfs"|"lustre"){
         return Err("Unsupported filesystem source; use nfs/smb/gpfs/sshfs/cephfs/glusterfs/lustre".into());
     }
     if plugin=="gpfs"&&access.is_none(){
@@ -85,6 +85,7 @@ pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
             ("gpfs",Some(GpfsAccess::CesNfs))=>&["nfs","nfs4"],
             ("gpfs",Some(GpfsAccess::CesSmb))=>&["cifs","smb3"],
             ("sshfs",None)=>&["fuse.sshfs"],
+            ("webdav",None)=>&["fuse.davfs"],
             ("nfs",None)=>&["nfs","nfs4"],
             ("smb",None)=>&["cifs","smb3"],
             // Native CephFS and the operator-installed FUSE client. Neither
@@ -125,6 +126,7 @@ mod tests{
         let tmp=tempfile::tempdir().unwrap();
         assert!(probe("gpfs",tmp.path(),None).is_err());
         assert!(probe("sshfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
+        assert!(probe("webdav",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
         assert!(probe("posix",tmp.path(),None).is_err());
         assert!(probe("nfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
         assert!(probe("smb",tmp.path(),Some(GpfsAccess::CesSmb)).is_err());
@@ -139,6 +141,7 @@ mod tests{
         assert!(probe("gpfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
         assert!(probe("gpfs",tmp.path(),Some(GpfsAccess::CesSmb)).is_err());
         assert!(probe("sshfs",tmp.path(),None).is_err());
+        assert!(probe("webdav",tmp.path(),None).is_err());
         assert!(probe("nfs",tmp.path(),None).is_err());
         assert!(probe("smb",tmp.path(),None).is_err());
         for plugin in ["cephfs","glusterfs","lustre"] {

@@ -12,6 +12,7 @@ pub enum Stage {
     Unsupported,
     Planned,
     Preview,
+    Experimental,
     Ready,
 }
 impl Stage {
@@ -182,6 +183,7 @@ impl PluginDescriptor {
 const NONE: Stage = Stage::Unsupported;
 const PLAN: Stage = Stage::Planned;
 const PREVIEW: Stage = Stage::Preview;
+const EXPERIMENTAL: Stage = Stage::Experimental;
 pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("github", "GitHub", DataKind::SourceControl, PREVIEW, NONE,
         "Git mirror+LFS and remote metadata checkpoint", "Repository/settings/Actions; remote restore creates new repositories only"),
@@ -197,8 +199,8 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Filesystem walk+metadata+optional consistent snapshot", "Archive CLI supports local files; generic plugin wiring and complete ACL/xattr capture are pending"),
     PluginDescriptor::new("s3", "S3 / AWS / Ceph RGW", DataKind::ObjectStore, PLAN, PLAN,
         "Versioned bucket and multipart ETag/checksum", "Use scoped credentials, multipart resume, optional Object Lock and no overwrite by default"),
-    PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PLAN, PLAN,
-        "ETag/Last-Modified and explicit collection traversal", "Output capability requires write permissions; server's read-only DAV mount is unrelated"),
+    PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PREVIEW, PLAN,
+        "Exact read-only authenticated davfs2 mount, with independently attested quiescent collection", "Experimental mounted WebDAV input to encrypted POSIX chunks; no native WebDAV output, ETag certification, or remote write/restore"),
     PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
         "Mounted filesystem plus server snapshot if available", "Support NFSv3, v4.x; do not assume root or atomic snapshots"),
     PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, NONE,
@@ -211,9 +213,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PREVIEW, PLAN,
         "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
         "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
-    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES", DataKind::DistributedFilesystem, PREVIEW, PLAN,
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES (EXPERIMENTAL)", DataKind::DistributedFilesystem, EXPERIMENTAL, PLAN,
         "NFSv3/v4 or SMB3 CES export on an authorized server; consistency proved separately",
-        "Use distro open-source NFS/CIFS client; no IBM native client shipped; CES server licensing, permission and snapshot fidelity remain operator responsibilities")
+        "EXPERIMENTAL, nonblocking RC: IBM Developer Edition trial portal unavailable, no genuine CES field result. Use NFS/CIFS client only; IBM license, snapshot and metadata certification remain unverified")
         .with_gpfs_ces(),
     PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
         "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
@@ -366,6 +368,7 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             }
         }
         if plugin.id == "gpfs" {
+            required_preflight.push("EXPERIMENTAL: real IBM GPFS CES qualification deferred; nonblocking RC exclusion; never advertise as certified");
             required_preflight.push("verify authorized IBM CES server/export; NFS/SMB clients require no GPFS Client license");
             required_preflight.push("verify an existing authenticated NFSv3/v4 or CIFS/SMB3 mount provided by OS open-source tools");
             required_preflight.push("prove out-of-band GPFS fileset snapshot consistency, ACLs/xattrs and vendor metadata fidelity");
@@ -375,6 +378,10 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             if writing {
                 required_preflight.push("verify new isolated target, write ACL, encrypted-only upload and manifest-last commit without overwrite");
             }
+        }
+        if plugin.id == "webdav" {
+            required_preflight.push("require exact mounted FUSE davfs2 read-only client, trusted HTTPS server certificate, authentication and out-of-band quiescent snapshot attestation");
+            required_preflight.push("WebDAV output/remote restore is NOT implemented; ETag cache, metadata and transactional publish need live certification");
         }
         if plugin.id == "sshfs" {
             required_preflight.push("verify existing patched SSHFS/FUSE mount, pinned SSH host key and secure authentication");
@@ -426,7 +433,7 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
     // as a mounted-file backup or a POSIX directory restore.
     let preview_executable = match mode {
         Mode::Backup => destination.id == "posix" && matches!(source.id,
-            "posix" | "nfs" | "smb" | "gpfs" | "sshfs" |
+            "posix" | "nfs" | "smb" | "gpfs" | "sshfs" | "webdav" |
             "cephfs" | "glusterfs" | "lustre"),
         Mode::Restore => source.id == "posix" && matches!(destination.id,
             "posix" | "nfs" | "smb" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
@@ -434,7 +441,9 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
         source_stage, destination_stage, executable, preview_executable,
-        reason: if executable { "both adapters are ready" } else if preview_executable {
+        reason: if executable { "both adapters are ready" } else if source_stage == Stage::Experimental || destination_stage == Stage::Experimental {
+            "EXPERIMENTAL: optional provider, external IBM field qualification pending; never a default RC blocker"
+        } else if preview_executable {
             "compiled local or read-only mounted-source preview available; production qualification pending"
         } else {
             "catalog/planning only: one or both generic adapters are not wired or qualified"
@@ -500,7 +509,7 @@ mod tests {
     }
     #[test]
     fn actual_preview_pairs_match_the_native_dispatcher(){
-        for input in ["posix","nfs","smb","gpfs","sshfs",
+        for input in ["posix","nfs","smb","gpfs","sshfs","webdav",
                       "cephfs","glusterfs","lustre"]{
             assert!(plan(Mode::Backup,input,"posix").unwrap().preview_executable);
         }
@@ -614,10 +623,10 @@ mod tests {
             let d = find(id).unwrap();
             // GPFS CES has a strictly read-only mounted-source preview;
             // output and all other providers remain declarative only.
-            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_input, if id=="gpfs" {Stage::Experimental} else if matches!(id,"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert_eq!(d.backup_output, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
             assert_eq!(d.restore_input, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_output, if id=="gpfs" {Stage::Experimental} else if matches!(id,"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
@@ -666,6 +675,8 @@ mod tests {
         let d=find("gpfs").unwrap();
         assert_eq!(d.access_gate,AccessGate::ExternalProtocolOrMountedClient);
         assert_eq!(d.gpfs_access,GPFS_CES_ACCESS);
+        assert_eq!(d.backup_input,Stage::Experimental);
+        assert!(!plan(Mode::Backup,"gpfs","posix").unwrap().executable);
         for protocol in GPFS_CES_ACCESS {
             let b=plan_profiles(Mode::Backup,"gpfs","sshfs",None,None,Some(*protocol),None).unwrap();
             assert!(!b.executable);
@@ -676,6 +687,17 @@ mod tests {
         assert!(GpfsAccess::parse("native").is_err());
         assert!(plan_profiles(Mode::Backup,"sshfs","posix",None,None,
                               Some(GpfsAccess::CesNfs),None).is_err());
+    }
+    #[test]
+    fn webdav_ro_source_requires_exact_native_mount_and_attestation() {
+        let d=find("webdav").unwrap();
+        assert_eq!(d.backup_input, Stage::Preview);
+        assert_eq!(d.backup_output, Stage::Planned);
+        let plan=plan(Mode::Backup,"webdav","posix").unwrap();
+        assert!(plan.preview_executable);
+        assert!(!plan.executable);
+        assert!(plan.required_preflight.iter().any(|s|s.contains("davfs2")));
+        assert!(!plan(Mode::Restore,"posix","webdav").unwrap().preview_executable);
     }
     #[test]
     fn sshfs_source_and_target_are_planned_distinct_from_sftp() {

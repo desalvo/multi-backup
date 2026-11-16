@@ -45,3 +45,7 @@ No automatic stable tag, Docker release, broad provider Ready promotion, or merg
 | Restore output | 13/31 = 42% | 7/31 = 23% | Native provider restore, GPFS CES RW, ACL e failover |
 
 Le percentuali sono un inventario del codice, non una certificazione produttiva. Alcuni adapter tipizzati (GitHub, Dropbox, OpenAFS e DB) non passano dal dispatcher generico.
+
+## r046 release scope exception — GPFS IBM
+
+GPFS IBM Storage Scale CES is **EXPERIMENTAL** and **NOT A RELEASE CANDIDATE BLOCKER** by explicit user decision (IBM free Developer Edition enrollment portal returns Java NullPointerException). Never claim IBM GPFS compatibility certified, and never confuse generic hosted NFS/SMB CI with GPFS field evidence. Other RC reliability/security/provider/installer gates remain mandatory. WebDAV read-only exact davfs2 mount is a separate development preview; its authenticated real server CI and metadata/restore limits must be recorded.
