@@ -29,6 +29,17 @@ class NormalizeWindowsArchiveTests(unittest.TestCase):
             b=subprocess.run(["bash",str(SCRIPT),str(gui),str(agent)],capture_output=True)
             self.assertNotEqual(b.returncode,0,"No overwrite on retry")
 
+    def test_already_flat_windows_agent_is_passed_without_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            gui,agent,expected=self.setup(Path(d))
+            folder,name=expected[1]
+            (folder/"installers"/name).rename(folder/name)
+            original=(folder/name).read_bytes()
+            p=subprocess.run(["bash",str(SCRIPT),str(gui),str(agent)],capture_output=True)
+            self.assertEqual(p.returncode,0,p.stderr)
+            self.assertEqual((folder/name).read_bytes(),original)
+            self.assertIn(b"already-flat",p.stdout)
+
     def test_symlink_input_is_denied(self):
         with tempfile.TemporaryDirectory() as d:
             gui,agent,expected=self.setup(Path(d))

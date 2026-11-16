@@ -10,8 +10,16 @@ normalize() {
   local source="$folder/installers/$filename"
   local target="$folder/$filename"
   [[ -d "$folder" && ! -L "$folder" ]] || { echo 'Missing trusted artifact folder' >&2; exit 2; }
+  # actions/upload-artifact strips the leading installer directory when it
+  # is the only upload path (agent), but preserves it with the GUI ZIP.
+  if [[ -e "$target" || -L "$target" ]];then
+    [[ -f "$target" && ! -L "$target" && ! -e "$source" && ! -L "$source" ]] || {
+      echo "Refusing ambiguous, duplicate or symlinked $filename" >&2; exit 2;
+    }
+    echo "PASS already-flat native $filename"
+    return 0
+  fi
   [[ -f "$source" && ! -L "$source" ]] || { echo "Missing real Windows installer $filename" >&2; exit 2; }
-  [[ ! -e "$target" && ! -L "$target" ]] || { echo "Refusing to overwrite $target" >&2; exit 2; }
   cp -- "$source" "$target"
   cmp -s -- "$source" "$target" || { echo 'Windows installer changed during normalization' >&2; exit 2; }
   [[ "$(sha256sum "$source" | cut -d' ' -f1)" == \
