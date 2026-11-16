@@ -12,6 +12,7 @@ mod live_pg_acceptance;
 mod agent_registry;
 mod agent_api;
 mod cluster_worker;
+mod internal_db_backup;
 use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
@@ -810,6 +811,20 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
                 }
             });
         }
+        // PostgreSQL policy, leases and history are shared across ALL
+        // physical hosts and Kubernetes replicas. Claiming a scheduled DB
+        // backup is single-writer, atomic and only uses verified S3 WORM.
+        if internal_db_backup::backup_configured() {
+            internal_db_backup::require_ready()?;
+            tokio::spawn(internal_db_backup::spawn(db.clone(),replica.clone()));
+        } else {
+            let verify=db.clone();
+            let enabled=tokio::task::spawn_blocking(move||
+                verify.db_backup_dashboard()).await??;
+            if enabled["enabled"].as_bool()==Some(true){
+                return Err("Scheduled DB backups enabled but S3 WORM config is unavailable".into());
+            }
+        }
         let db=db.clone();
         tokio::spawn(async move {
             let mut beat=tokio::time::interval(std::time::Duration::from_secs(20));
@@ -861,6 +876,9 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/api/audit",get(audit_list))
         .route("/api/cluster/status",get(agent_api::cluster_status))
         .route("/api/cluster/backups",get(agent_api::cluster_backups))
+        .route("/api/internal-db/status",get(agent_api::internal_db_backup_status))
+        .route("/api/internal-db/policy",post(agent_api::internal_db_backup_policy))
+        .route("/api/internal-db/backup",post(agent_api::internal_db_backup_now))
         .route("/api/cluster/storage",post(agent_api::register_storage))
         .route("/api/cluster/jobs",post(agent_api::enqueue_cluster))
         .route("/api/cluster/jobs/recover",post(agent_api::recover_cluster_job))
