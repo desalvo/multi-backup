@@ -46,3 +46,7 @@ Fonti IBM:
 - https://www.ibm.com/docs/en/storage-scale/6.0.0?topic=gpfs-software-requirements
 - https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=reference-mmbuildgpl-command
 - https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=overview-storage-scale-product-editions
+
+## Aggiornamento operatore — CES funzionale anche su 16 GiB (16 novembre 2026)
+
+L'operatore ha installato e verificato su tutti e tre i nodi RHEL 9.8 **kernel-devel esatto, gcc, gcc-c++, cpp, ksh e make**; gli stessi kernel RHEL 9.8 rimangono in esecuzione. Su ogni disco candidato NSD `wipefs --no-act` non rileva firme visibili (nessuna prova di assenza di dati nascosti o di identita hypervisor). **Decisione aggiornata:** testare CES autentico NFSv4 poi SMB3 anche con 16 GiB, un client e carico minimo; registrare PASS esclusivamente per funzionalita reale, non per hardware/performance IBM. L'evento IBM `total_memory_small` e un TIP e non necessariamente blocca il servizio, ma OOM, servizi unhealthy e perdita VIP invalidano il test. Il nuovo piano si trova in `docs/GPFS_ADSNET_CES_16GB_FUNCTIONAL_R044_IT.md` e il monitor read-only e `scripts/gpfs-lab/11-adsnet-observe-ces-lowmem.sh`. L'installazione IBM, NSD e CES non e stata ancora eseguita dall'assistente.
