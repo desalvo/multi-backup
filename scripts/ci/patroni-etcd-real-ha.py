@@ -74,7 +74,10 @@ def wait_for(label, checker, processes, seconds=90):
                 raise RuntimeError(f"{label}: {name} exited with {proc.returncode}")
         try:
             value = checker()
-            if value:
+            # Node index 0 is a valid leader/synchronous-standby ID.
+            # Truthiness would silently discard it and time out; keep
+            # boolean False and missing None as the only retry signals.
+            if value is not None and value is not False:
                 return value
         except (OSError, subprocess.SubprocessError, ValueError) as ex:
             last = str(ex)
