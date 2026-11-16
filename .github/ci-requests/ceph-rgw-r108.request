@@ -1,0 +1,1 @@
+One-shot real Ceph 20.2.4 RGW WORM acceptance with compact monmap.num_mons quorum attestation. Require 3 independent kind workers/OSD CRUSH hosts, zero remap, encrypted S3 Object Lock COMPLIANCE negative deletes and pinned restore. No fake PASS.
