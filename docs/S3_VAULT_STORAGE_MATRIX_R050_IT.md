@@ -70,3 +70,7 @@ Riferimenti RustFS:
 - https://docs.rustfs.com/en/installation/container
 - https://github.com/rustfs/rustfs/releases
 - https://docs.rustfs.com/en/reference/s3-compatibility
+
+### Ceph RGW — real Rook 1.20.9 / Ceph 20.2.4 acceptance, 16 Nov 2026
+
+**PASS** [GitHub Actions 43873411605](https://github.com/desalvo/multi-backup/actions/runs/43873411605), exact SHA `05c128a57f4050c927d975bf59b390005d0471b0`. Three MON quorum, three UP/IN OSDs on three distinct *virtual kind worker* CRUSH hosts, 89 PG active+clean, genuine RGW S3 Object Lock COMPLIANCE plus negative deletion/retention shortening tests, Rust age encrypted backup/verify/byte-identical restore, and independently pinned manifest version recovery after malicious delete marker. **Do not claim three independent physical failure domains or resistance to a compromised root on the storage cluster.** Earlier Ceph FAILED jobs are superseded for this tested virtual cluster profile only; retain their historical failure records.
