@@ -1,5 +1,9 @@
 name: Multi Backup - genuine 3-node Ceph RGW S3 WORM acceptance
 on:
+  push:
+    branches: ["feature/r060-baremetal-server-cluster-vault"]
+    paths:
+      - '.github/ci-requests/ceph-rgw-r076.request'
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -10,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   real-ceph-rgw:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-ceph-ci'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-ceph-ci'
     name: Rook-Ceph 3 MON / 3 OSD nodes + genuine RGW Object Lock
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -38,6 +42,8 @@ jobs:
           done
           python3 -m py_compile scripts/ci/ceph-assert-cluster.py
           python3 -m unittest discover -s tests -p test_ceph_rgw_ci_attestation.py -v
+          python3 -m unittest discover -s tests -p test_ceph_osd_crush_alignment.py -v
+          python3 -m py_compile scripts/ci/ceph-osd-crush-align.py
       - name: Compile Rust engine that will operate the genuine Ceph cluster
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
       - name: Start physical Ceph daemons on 3 disposable kind workers and verify S3 WORM

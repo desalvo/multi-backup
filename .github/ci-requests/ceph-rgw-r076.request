@@ -1,0 +1,1 @@
+Explicit one-shot disposable kind/Rook-Ceph RGW S3 Object Lock acceptance. Live 3-MON/3-OSD virtual-worker placement and WORM tests required. No production cluster data, no physical failure-domain certification. Do not change this file except to explicitly reauthorize another focused test.
