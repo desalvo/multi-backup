@@ -923,3 +923,21 @@ One-line English commit summary: Verify native Rust egui GUI startup and renderi
 - Keep draft/stacked branch; do not merge to main, tag RC or publish installers until the final unified Production Gate and remaining field acceptance.
 
 One-line English commit summary: Harden native hypervisor credential loading against symlink races and oversized token files, and correct permission test fixture.
+
+
+## r166 — GUI Rust server/agent monitor, atomically fenced agent upload and three-host HA field preflight (16 Nov 2026)
+
+- Branch: `feature/r166-ha-gui-agents-acceptance`, based on exact-SHA tested r164 `adb14dd0`. New GUI page "Server e agenti" connects to a verified HTTPS monitor.read REST endpoint, reads a token from a bounded owner-only file (not persisted) and displays aggregate agent/replica/job/DB health. This is not a native agent job-management GUI, and no credentials are stored in preferences.
+- Server extends the read-only authenticated REST with `GET /v1/agents` returning only counts (online/approved/revoked), not agent identities or profile secrets. Separate read-only API admin access remains scoped and protected.
+- Agent-to-server ciphertext publication uses atomic, same-directory hard link with **no replace** instead of `exists()` followed by `rename()`; concurrency tests verify exactly one winner for a colliding backup ID. An uncommitted ciphertext is retained for reconciliation rather than silently declaring a successful receipt. Agent credential reads use the bounded secure native reader and new agent identity files use no-clobber persistence.
+- New `scripts/ci/ha-three-host-field-r166.py` and manual self-hosted field workflow validate three distinct kernel boot IDs, machine identities, service state and consistent single-leader Patroni membership across independently connected SSH hosts; automatic safe fixture tests are separate. They are **read-only preflight only**, not an executed physical three-node failure test.
+- REQUIRE exact-SHA Rust core/server/desktop focused CI, actual Linux Xvfb GUI runtime, real separate physical host Patroni+etcd failover/fencing/rejoin, agent multi-machine encrypted transfer/restore, signed installers/rollback, production/security CI before RC. Legacy GPFS native certification remains deferred; the NFS/SMB protocol subset is the only supported profile.
+- Do not merge to main, tag RC or distribute unverified installers based on focused tests.
+
+One-line English commit summary: Add native Rust server-agent monitoring, atomic no-clobber encrypted uploads and guarded three-host HA field preflight.
+
+
+### r166 native signed-agent encrypted transfer E2E extension
+
+- Added an ignored-only live PostgreSQL16 test `real_pg_agent_encrypted_upload_no_clobber_and_restore` to the existing disposable DB workflow: generates a real age recipient and ciphertext with the native age CLI; enrolls and approves an Ed25519 device/profile in PG; calls the actual streaming Rust upload handler with signed hash; attests one PostgreSQL receipt and byte-identical age decrypt; blocks duplicate backup ID overwrite and rejects a revoked device. The job installs `age` explicitly; no real account secrets.
+- This tests an in-process handler with genuine PostgreSQL and cryptography, **NOT independent physical agent/server machines, WAN TLS proxy or recovery to a live AFS/VM source**. A passing CI remains scope-limited. Exact SHA CI evidence is needed.

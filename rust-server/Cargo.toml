@@ -41,3 +41,6 @@ axum-server = { version = "=0.7.3", features = ["tls-rustls"] }
 # Select an explicit rustls process CryptoProvider, even when other crates
 # transitively enable ring and aws-lc-rs simultaneously.
 rustls = { version = "0.23", features = ["aws_lc_rs"] }
+
+[dev-dependencies]
+tempfile = "3.10"

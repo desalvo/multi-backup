@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
     process::{Command, Stdio},
-    io::Write,
+    io::{Read, Write},
     thread,
     time::{Duration, Instant},
 };
@@ -25,24 +25,99 @@ const VIOLET: Color32 = Color32::from_rgb(113, 87, 231);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Page {
-    Dashboard, Backup, Archives, Restore, Storage, Plugins, Vault, Updates, Settings,
+    Dashboard, Backup, Archives, Restore, Storage, Plugins, Server, Vault, Updates, Settings,
 }
 impl Page {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Dashboard, Self::Backup, Self::Archives, Self::Restore, Self::Storage,
-        Self::Plugins, Self::Vault, Self::Updates, Self::Settings,
+        Self::Plugins, Self::Server, Self::Vault, Self::Updates, Self::Settings,
     ];
     fn label(self) -> &'static str {
         match self {
             Self::Dashboard => "Dashboard", Self::Backup => "Backup",
             Self::Archives => "Archivi", Self::Restore => "Ripristina", Self::Storage => "Storage chunk",
-            Self::Plugins => "Plugin", Self::Vault => "Vault e chiavi",
+            Self::Plugins => "Plugin", Self::Server => "Server e agenti", Self::Vault => "Vault e chiavi",
             Self::Updates => "Aggiornamenti", Self::Settings => "Impostazioni",
         }
     }
 }
 /// The GUI lists the authoritative Rust registry, not a hardcoded two-item
 /// provider subset. Search is read-only and never grants execution rights.
+/// Monitor endpoints accept only bare HTTPS origins: credentials are never
+/// embedded into the URL, persisted in native settings or used over HTTP.
+fn validated_monitor_origin(origin:&str)->Result<url::Url,String>{
+    let value=url::Url::parse(origin.trim()).map_err(|_|"Origine server HTTPS non valida")?;
+    if value.scheme()!="https"||value.host_str().is_none()||
+       !value.username().is_empty()||value.password().is_some()||
+       value.query().is_some()||value.fragment().is_some()||
+       value.path()!="/"{
+        return Err("Richiesta una sola origine HTTPS senza token o percorsi".into());
+    }
+    Ok(value)
+}
+/// Fetch only authenticated read-only status. Tokens are read when needed
+/// from an owner-only file, never kept in GUI settings or displayed.
+fn monitor_server(origin:&str,token_file:&str)->Result<String,String>{
+    let base=validated_monitor_origin(origin)?;
+    let bytes=multi_backup_core::protected_config::read_owner_only(
+        Path::new(token_file),256).map_err(|_|
+        "Token monitor.read non accessibile: serve un file privato 0600")?;
+    let secret=Zeroizing::new(bytes);
+    let token=std::str::from_utf8(secret.as_slice())
+        .map_err(|_|"Token REST non valido")?
+        .trim_end_matches(['\r','\n']);
+    if token.len()!=70 || !token.starts_with("mbmon_") ||
+       !token[6..].bytes().all(|c|c.is_ascii_hexdigit()&&!c.is_ascii_uppercase()){
+        return Err("Token monitor.read malformato".into());
+    }
+    let client=ureq::AgentBuilder::new().redirects(0)
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(15)).build();
+    let get=|route:&str|->Result<serde_json::Value,String>{
+        let mut endpoint=base.clone();
+        endpoint.set_path(route);
+        let reply=client.get(endpoint.as_str())
+            .set("Authorization",&format!("Bearer {token}"))
+            .set("Accept","application/json")
+            .call().map_err(|_|"HTTPS REST: TLS, rete o autorizzazione non validi")?;
+        if reply.status()!=200 {return Err("Risposta REST non valida".into());}
+        let mut body=Vec::new();
+        reply.into_reader().take(1_048_577).read_to_end(&mut body)
+            .map_err(|_|"Impossibile leggere la risposta REST")?;
+        if body.len()>1_048_576{return Err("Risposta REST oltre il limite".into());}
+        serde_json::from_slice(&body).map_err(|_|"Schema REST non valido".into())
+    };
+    let state=get("/v1/status")?;
+    let agents=get("/v1/agents")?;
+    if state["schema"]!=1||state["read_only"]!=true||
+       agents["schema"]!=1||agents["read_only"]!=true{
+        return Err("REST non conforme al protocollo read-only v1".into());
+    }
+    let replicas=state["cluster"]["replicas"].as_array()
+        .ok_or("Inventario repliche mancante")?;
+    let jobs=state["cluster"]["jobs"].as_array()
+        .ok_or("Inventario job mancante")?;
+    let counts=&agents["agents"];
+    let count=|field:&str|->Result<u64,String>{
+        counts[field].as_u64().ok_or_else(||
+            format!("Contatore agente {field} mancante"))
+    };
+    let mut report=format!(
+        "Cluster: {} repliche, {} attive\\nJob: {} in coda, {} in esecuzione, {} falliti\\nPostgreSQL: {}\\nAgenti: {} totali, {} online, {} approvati, {} revocati\\n",
+        replicas.len(),replicas.iter().filter(|r|r["healthy"]==true).count(),
+        jobs.iter().filter(|j|j["status"]=="queued").count(),
+        jobs.iter().filter(|j|j["status"]=="running").count(),
+        jobs.iter().filter(|j|j["status"]=="failed").count(),
+        state["database"]["database"]["role"].as_str().unwrap_or("non disponibile"),
+        count("total")?,count("online")?,count("approved")?,count("revoked")?
+    );
+    for replica in replicas.iter().take(32){
+        report.push_str(&format!("Replica {}: {}\\n",
+            replica["id"].as_str().unwrap_or("sconosciuta"),
+            if replica["healthy"]==true{"OK"}else{"NON DISPONIBILE"}));
+    }
+    Ok(report)
+}
 fn matching_providers(query:&str)->Vec<&'static plugins::PluginDescriptor>{
     let needle=query.trim().to_lowercase();
     plugins::CATALOG.iter().filter(|provider|{
@@ -61,6 +136,7 @@ enum Event {
     UpdateInfo(updater::ReleaseInfo),
     ChunkCatalog(Vec<chunk_store::LogicalBackup>),
     ProviderInventory(String),
+    ServerMonitor(String),
 }
 #[derive(Default)]
 struct Fields {
@@ -109,6 +185,8 @@ struct Fields {
     plugin_pve_storage: String,
     plugin_pve_guest_id: String,
     plugin_pbs_namespace: String,
+    server_monitor_origin: String,
+    server_monitor_token_file: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -307,6 +385,7 @@ struct NativeApp {
     /// (action, immutable backup id) captured when confirmation opens.
     chunk_confirmation: Option<(String,String)>,
     provider_inventory_result: String,
+    server_monitor_result: String,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -385,6 +464,7 @@ impl NativeApp {
             chunk_selected: String::new(),
             chunk_confirmation: None,
             provider_inventory_result: String::new(),
+            server_monitor_result: String::new(),
         }
     }
     fn rescan(&mut self) {
@@ -588,6 +668,7 @@ impl NativeApp {
                         self.active = false; completed = true;
                     }
                     Event::ProviderInventory(text) => self.provider_inventory_result = text,
+                    Event::ServerMonitor(text) => self.server_monitor_result = text,
                     Event::ChunkCatalog(backups) => {
                         if !backups.iter().any(|b| b.id == self.chunk_selected) {
                             self.chunk_selected = backups.first()
@@ -845,6 +926,46 @@ impl NativeApp {
     /// Provider account/API credentials are never entered in the GUI or saved
     /// to native settings: the independently owner-only JSON config file is
     /// loaded through the core Rust adapter in a bounded read-only worker.
+    fn run_server_monitor(&mut self){
+        if self.active{return;}
+        let origin=self.fields.server_monitor_origin.trim().to_owned();
+        let token_file=self.fields.server_monitor_token_file.trim().to_owned();
+        if origin.is_empty()||token_file.is_empty(){
+            self.status="Indicare endpoint HTTPS e percorso token monitor.read".into();
+            return;
+        }
+        let (tx,rx)=mpsc::channel();
+        self.receiver=Some(rx);
+        self.active=true;
+        self.progress=None;
+        self.server_monitor_result.clear();
+        self.started=Instant::now();
+        self.last_activity=Instant::now();
+        thread::spawn(move||match monitor_server(&origin,&token_file){
+            Ok(result)=>{
+                let _=tx.send(Event::ServerMonitor(result));
+                let _=tx.send(Event::Success("Stato server e agenti aggiornato".into()));
+            },
+            Err(reason)=>{let _=tx.send(Event::Failure(reason));}
+        });
+    }
+    fn server_page(&mut self,ui:&mut egui::Ui){
+        ui.heading("Server e agenti");
+        ui.label("Monitoraggio remoto Rust read-only tramite HTTPS e token monitor.read.");
+        ui.label("Origine HTTPS server (es. https://backup.example.org:8443)");
+        ui.text_edit_singleline(&mut self.fields.server_monitor_origin);
+        ui.label("File del token monitor.read privato (0600, non salvato nelle preferenze)");
+        ui.text_edit_singleline(&mut self.fields.server_monitor_token_file);
+        if ui.add_enabled(!self.active,egui::Button::new("Aggiorna stato cluster, DB e agenti"))
+            .clicked(){self.run_server_monitor();}
+        ui.separator();
+        if !self.server_monitor_result.is_empty(){
+            ui.label(RichText::new(&self.server_monitor_result).monospace().color(INK));
+        }
+        ui.label(RichText::new(&self.status).color(MUTED));
+        self.draw_progress(ui);
+        ui.label("Solo lettura: nessun segreto agenti viene restituito dalla API di monitoraggio.");
+    }
     fn run_provider_inventory(&mut self,action:&str){
         if self.active{return;}
         if !matches!(action,"pve-inventory"|"pve-backup-media"|
@@ -1941,6 +2062,7 @@ impl eframe::App for NativeApp {
                         Page::Restore => self.restore(ui),
                         Page::Storage => self.storage(ui),
                         Page::Plugins => self.plugins(ui),
+                        Page::Server => self.server_page(ui),
                         Page::Vault => self.vault(ui),
                         Page::Updates => self.updates(ui),
                         Page::Settings => self.settings(ui),
@@ -2108,6 +2230,28 @@ mod provider_gui_tests{
         fields.max_runs="5".into();
         assert!(build_native_prefs(&fields,"unregistered","stable").is_err());
         assert!(build_native_prefs(&fields,"github","beta").is_err());
+    }
+    #[test]
+    fn server_monitor_only_allows_bare_https_without_embedded_secrets(){
+        assert!(validated_monitor_origin("https://example.test:8443").is_ok());
+        for uri in ["http://example.test:8443",
+                    "https://user:password@example.test",
+                    "https://example.test/v1/status",
+                    "https://example.test/?token=secret",
+                    "https://example.test/#secret",
+                    "not an endpoint"]{
+            assert!(validated_monitor_origin(uri).is_err(),"{uri}");
+        }
+    }
+    #[test]
+    fn native_settings_never_persist_monitor_token_or_server_origin(){
+        let mut f=Fields::default();
+        f.max_runs="5".into();
+        f.server_monitor_origin="https://private.example.test:8443".into();
+        f.server_monitor_token_file="/private/monitor-secret".into();
+        let prefs=build_native_prefs(&f,"github","stable").unwrap();
+        assert!(!prefs.to_string().contains("private.example.test"));
+        assert!(!prefs.to_string().contains("monitor-secret"));
     }
     #[test]
     fn no_catalog_source_is_implicitly_production_ready(){

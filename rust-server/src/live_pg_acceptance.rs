@@ -295,3 +295,130 @@ fn real_pg_monitor_token_issue_revoke_and_single_db_backup_lease(){
     assert!(dashboard["history"].as_array().unwrap().iter()
         .any(|item|item["status"]=="failed"&&item["error_code"]=="ci_expected_failure"));
 }
+
+
+/// Real PostgreSQL16, Ed25519-authenticated agent upload handler and native
+/// age ciphertext acceptance. It is deliberately a direct in-process HTTP
+/// handler exercise, not a remote TLS/three-physical-machine certification.
+#[test]
+#[ignore = "requires disposable PostgreSQL16 plus age and age-keygen"]
+fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
+    use crate::{agent_api,security::SecurityPolicy,AppConfig,AppState};
+    use axum::{body::Body,extract::State,http::StatusCode};
+    use std::{collections::HashMap,fs,io::Write,path::PathBuf,
+        process::{Command,Stdio},sync::{Arc,Mutex}};
+    let db=live_pg_ci_fixture();
+    let temp=tempfile::tempdir().unwrap();
+    let private_spool=temp.path().join("upload");
+    fs::create_dir(&private_spool).unwrap();
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&private_spool,fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    // Ignored live tests run --test-threads=1. Do not change production env
+    // or use a non-disposable destination here.
+    std::env::set_var("MULTI_BACKUP_AGENT_UPLOAD_ROOT",&private_spool);
+    let key=temp.path().join("identity.agekey");
+    let gen=Command::new("age-keygen").arg("-o").arg(&key).output()
+        .expect("Real age-keygen executable is mandatory");
+    assert!(gen.status.success(),"age-keygen did not produce a test identity");
+    let public=Command::new("age-keygen").arg("-y").arg(&key).output().unwrap();
+    assert!(public.status.success());
+    let recipient=String::from_utf8(public.stdout).unwrap().trim().to_owned();
+    assert!(recipient.starts_with("age1"));
+    let cipher=temp.path().join("out.age");
+    let payload=b"Multi Backup real signed agent encrypted upload restore fixture\n";
+    let mut writer=Command::new("age").arg("-r").arg(&recipient)
+        .arg("-o").arg(&cipher)
+        .stdin(Stdio::piped()).spawn().expect("age binary missing");
+    writer.stdin.take().unwrap().write_all(payload).unwrap();
+    assert!(writer.wait().unwrap().success());
+    let ciphertext=fs::read(&cipher).unwrap();
+    assert!(ciphertext.starts_with(b"age-encryption.org/v1"));
+    let agent_id=format!("agent{}",Uuid::new_v4().simple());
+    let (private,public_key)=wire::device_keypair();
+    let registration=agent::register(&db,&agent::Enrollment{
+        agent_id:agent_id.clone(),owner_user:"operator".into(),
+        device_public_key:public_key,
+    }).unwrap();
+    let token=registration["token_once"].as_str().unwrap().to_owned();
+    assert!(agent::set_approval(&db,&agent_id,true,false).unwrap());
+    let profile_id=format!("profile{}",Uuid::new_v4().simple());
+    let profile_hash=wire::hex_sha(b"approved dedicated age/AFS profile");
+    assert!(agent::approve_profile(&db,&agent::ProfileApproval{
+        agent_id:agent_id.clone(),profile_id:profile_id.clone(),
+        profile_sha256:profile_hash.clone(),provider:"afs".into(),
+    }).unwrap());
+    let backup_id=wire::hex_sha(Uuid::new_v4().as_bytes());
+    let metadata=serde_json::to_vec(&json!({
+        "backup_id":backup_id,
+        "profile_id":profile_id,
+        "profile_sha256":profile_hash,
+        "provider":"afs",
+        "cell":"example.org",
+        "volume":"user.test",
+        "encrypted_bytes":ciphertext.len(),
+        "recipient":recipient
+    })).unwrap();
+    let runtime=tokio::runtime::Builder::new_multi_thread()
+        .enable_all().worker_threads(2).build().unwrap();
+    let state=AppState(Arc::new(AppConfig{
+        name:"ciadmin".into(),
+        password_hash:String::new(),
+        origin:"http://127.0.0.1:8080".into(),
+        security:SecurityPolicy::from_env("http://127.0.0.1:8080").unwrap(),
+        root:PathBuf::from(temp.path()),
+        identity:None,
+        immutable_vault_root:None,
+        s3_vault_config:None,
+        exports:temp.path().join("exports"),
+        audit:temp.path().join("audit.log"),
+        smtp:None,dav:None,ldap:None,oidc:None,
+        pending_oidc:Mutex::new(HashMap::new()),
+        sessions:Mutex::new(HashMap::new()),
+        failed_logins:Mutex::new(HashMap::new()),
+        last_smtp_test:Mutex::new(None),
+        cluster:Some(db.clone()),
+        agent_proxy_key:None,
+    }));
+    let build_headers=|sequence|{
+        let signed=wire::sign(&private,"POST","/api/agents/upload",
+            &agent_id,"operator",sequence,wire::now(),
+            &wire::hex_sha(&ciphertext),&metadata).unwrap();
+        let mut headers=HeaderMap::new();
+        headers.insert("authorization",format!("Bearer {token}").parse().unwrap());
+        headers.insert("x-mb-agent-proof",
+            B64.encode(serde_json::to_vec(&signed).unwrap()).parse().unwrap());
+        headers.insert("x-mb-agent-metadata",B64.encode(&metadata).parse().unwrap());
+        headers
+    };
+    let response=runtime.block_on(agent_api::upload(State(state.clone()),build_headers(1),
+        Body::from(ciphertext.clone())));
+    assert_eq!(response.status(),StatusCode::CREATED);
+    let committed=private_spool.join(format!("{backup_id}.age"));
+    assert_eq!(fs::read(&committed).unwrap(),ciphertext);
+    let rows:i64=db.connect().unwrap().query_one(
+        "SELECT COUNT(*) FROM mb_agent_uploads WHERE backup_id=$1",&[&backup_id])
+        .unwrap().get(0);
+    assert_eq!(rows,1,"Receipt must commit once in real PostgreSQL");
+    let decrypted=Command::new("age").arg("-d").arg("-i")
+        .arg(&key).arg(&committed).output().unwrap();
+    assert!(decrypted.status.success());
+    assert_eq!(decrypted.stdout,payload);
+
+    // Another valid signed device request with the SAME backup ID must get
+    // conflict and never replace the committed age file or add a PG receipt.
+    let duplicate=runtime.block_on(agent_api::upload(State(state.clone()),build_headers(2),
+        Body::from(ciphertext.clone())));
+    assert_eq!(duplicate.status(),StatusCode::CONFLICT);
+    assert_eq!(fs::read(&committed).unwrap(),ciphertext);
+    let rows:i64=db.connect().unwrap().query_one(
+        "SELECT COUNT(*) FROM mb_agent_uploads WHERE backup_id=$1",&[&backup_id])
+        .unwrap().get(0);
+    assert_eq!(rows,1);
+    assert!(agent::set_approval(&db,&agent_id,false,true).unwrap());
+    let revoked=runtime.block_on(agent_api::upload(State(state),build_headers(3),
+        Body::from(ciphertext)));
+    assert_eq!(revoked.status(),StatusCode::UNAUTHORIZED);
+    std::env::remove_var("MULTI_BACKUP_AGENT_UPLOAD_ROOT");
+}

@@ -1,0 +1,39 @@
+name: Multi Backup - real three-host Patroni field preflight
+on:
+  workflow_dispatch:
+    inputs:
+      node1:
+        description: "Dedicated lab host 1 (known_hosts pinned)"
+        required: true
+        type: string
+      node2:
+        description: "Dedicated lab host 2 (known_hosts pinned)"
+        required: true
+        type: string
+      node3:
+        description: "Dedicated lab host 3 (known_hosts pinned)"
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  field-3-host:
+    name: SSH to three independent host kernels, verify consistent Patroni quorum
+    runs-on: [self-hosted, linux, multi-backup-ha-field]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test negative fixtures without connecting to remote hosts
+        run: python3 scripts/ci/ha-three-host-field-r166.py --self-test
+      - name: Read-only live three-host preflight
+        env:
+          HOST1: ${{ inputs.node1 }}
+          HOST2: ${{ inputs.node2 }}
+          HOST3: ${{ inputs.node3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/ha-three-host-field-r166.py --hosts "$HOST1" "$HOST2" "$HOST3"
+      - name: Explicit certification boundary
+        run: |
+          echo 'Read-only real 3-host preflight does NOT certify physical isolation, crash/failover, quorum-loss, split-brain fencing or restore.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Full disruptive acceptance needs isolated authorized lab credentials and a separate manual maintenance window.' >> "$GITHUB_STEP_SUMMARY"

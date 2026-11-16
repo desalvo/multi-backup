@@ -304,6 +304,21 @@ fn spool_directory()->Result<PathBuf,String>{
     }
     Ok(path)
 }
+/// Atomically publish ciphertext on the SAME filesystem without replacing
+/// an existing backup ID. A preflight exists()+rename() is a race across
+/// concurrent agents and replicas; hard_link is a kernel no-replace operation.
+fn publish_ciphertext_no_replace(temporary:&std::path::Path,destination:&std::path::Path)
+    ->std::io::Result<()>{
+    fs::hard_link(temporary,destination)?;
+    // The link exists even if cleanup fails; an operator can reconcile it.
+    fs::remove_file(temporary)?;
+    #[cfg(unix)]{
+        let parent=destination.parent().ok_or_else(||
+            std::io::Error::new(std::io::ErrorKind::InvalidInput,"No spool parent"))?;
+        fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
 pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
                     body:Body)->Response{
     let Some(db)=state.0.cluster.clone() else {
@@ -397,13 +412,22 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
         return error(StatusCode::UNAUTHORIZED,"signed_ciphertext_integrity_mismatch");
     }
     let destination=folder.join(format!("{}.age",form.backup_id));
-    if destination.exists(){
-        let _=tokio::fs::remove_file(&temporary).await;
-        return error(StatusCode::CONFLICT,"backup_id_already_present");
-    }
-    if tokio::fs::rename(&temporary,&destination).await.is_err(){
-        let _=tokio::fs::remove_file(&temporary).await;
-        return error(StatusCode::SERVICE_UNAVAILABLE,"encrypted_upload_commit_failed");
+    let publishing_source=temporary.clone();
+    let publishing_destination=destination.clone();
+    let published=tokio::task::spawn_blocking(move||
+        publish_ciphertext_no_replace(&publishing_source,&publishing_destination)).await;
+    match published {
+        Ok(Ok(()))=>{},
+        Ok(Err(e)) if e.kind()==std::io::ErrorKind::AlreadyExists=>{
+            let _=tokio::fs::remove_file(&temporary).await;
+            return error(StatusCode::CONFLICT,"backup_id_already_present");
+        }
+        _=>{
+            // Any published but uncommitted object is quarantined for operator
+            // reconciliation. Never delete the destination or claim success.
+            let _=tokio::fs::remove_file(&temporary).await;
+            return error(StatusCode::SERVICE_UNAVAILABLE,"encrypted_upload_commit_uncertain");
+        }
     }
     let final_path=destination.to_string_lossy().into_owned();
     let upload_id=form.backup_id.clone();
@@ -417,5 +441,41 @@ pub async fn upload(State(state):State<AppState>,headers:HeaderMap,
             // for an operator to reconcile; never claim completed backup.
             error(StatusCode::SERVICE_UNAVAILABLE,"upload_stored_uncommitted_reconcile_required")
         }
+    }
+}
+
+#[cfg(test)]
+mod atomic_publish_tests{
+    use super::*;
+    #[test]
+    fn existing_destination_is_never_replaced(){
+        let root=tempfile::tempdir().unwrap();
+        let existing=root.path().join("same-backup.age");
+        let incoming=root.path().join(".incoming.age");
+        fs::write(&existing,b"original ciphertext").unwrap();
+        fs::write(&incoming,b"malicious replacement").unwrap();
+        let e=publish_ciphertext_no_replace(&incoming,&existing).unwrap_err();
+        assert_eq!(e.kind(),std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&existing).unwrap(),b"original ciphertext");
+        assert_eq!(fs::read(&incoming).unwrap(),b"malicious replacement");
+    }
+    #[test]
+    fn racing_uploads_for_same_id_publish_exactly_once(){
+        let root=tempfile::tempdir().unwrap();
+        let target=root.path().join("same-backup.age");
+        let temp_a=root.path().join(".incoming-a.age");
+        let temp_b=root.path().join(".incoming-b.age");
+        fs::write(&temp_a,b"ciphertext-a").unwrap();
+        fs::write(&temp_b,b"ciphertext-b").unwrap();
+        let dest_a=target.clone();
+        let dest_b=target.clone();
+        let a=std::thread::spawn(move||
+            publish_ciphertext_no_replace(&temp_a,&dest_a).is_ok());
+        let b=std::thread::spawn(move||
+            publish_ciphertext_no_replace(&temp_b,&dest_b).is_ok());
+        let successes=u8::from(a.join().unwrap())+u8::from(b.join().unwrap());
+        assert_eq!(successes,1);
+        assert!(matches!(fs::read(&target).unwrap().as_slice(),
+            b"ciphertext-a"|b"ciphertext-b"));
     }
 }

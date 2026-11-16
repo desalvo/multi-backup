@@ -1,6 +1,6 @@
 //! Optional independent monitoring listeners. PostgreSQL is never exposed
 //! through this module. SNMP is delegated to the read-only Net-SNMP daemon.
-use crate::{AppState,session,same_origin};
+use crate::{AppState,session,same_origin,agent_registry};
 use axum::{extract::{Json,State},http::{header,HeaderMap,StatusCode},
     response::{IntoResponse,Response},routing::get,Router};
 use serde::Deserialize;
@@ -204,6 +204,30 @@ async fn api_db(State(state):State<AppState>,headers:HeaderMap)->Response{
         Err(_)=>StatusCode::SERVICE_UNAVAILABLE.into_response()
     }
 }
+/// Expose counts only: a monitor.read bearer never permits listing the
+/// agents' user identities, approved profile hashes or enrollment secrets.
+fn safe_agent_counts(raw:&Value)->Value{
+    let agents=list(&raw["agents"]);
+    json!({
+        "total":agents.len(),
+        "online":agents.iter().filter(|x|x["online"]==true).count(),
+        "approved":agents.iter().filter(|x|x["approved"]==true && x["revoked"]!=true).count(),
+        "revoked":agents.iter().filter(|x|x["revoked"]==true).count()
+    })
+}
+async fn api_agents(State(state):State<AppState>,headers:HeaderMap)->Response{
+    if let Err(e)=verify_api(&state,&headers).await{return e;}
+    let Some(db)=state.0.cluster.clone() else{
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    match tokio::task::spawn_blocking(move||
+        agent_registry::list(&db)).await{
+        Ok(Ok(data))=>([(header::CACHE_CONTROL,"no-store")],
+            Json(json!({"schema":1,"read_only":true,
+                        "agents":safe_agent_counts(&data)}))).into_response(),
+        _=>StatusCode::SERVICE_UNAVAILABLE.into_response()
+    }
+}
 async fn admin(state:&AppState,headers:&HeaderMap,write:bool)
     ->Result<crate::cluster::Database,Response>{
     let auth=session(headers,&state.0).await
@@ -293,6 +317,7 @@ pub async fn start(state:AppState)->Result<(),ErrBox>{
             .route("/v1/status",get(api_status))
             .route("/v1/cluster",get(api_cluster))
             .route("/v1/database",get(api_db))
+            .route("/v1/agents",get(api_agents))
             .with_state(state);
         tokio::spawn(async move{
             if let Err(e)=axum_server::bind_rustls(ip,tls)
@@ -366,6 +391,20 @@ mod tests{
         assert_eq!(db["history"][0]["job_id"],"opaque");
         assert!(db["history"][0].get("manifest").is_none());
         assert!(!db.to_string().contains("/secret/"));
+    }
+    #[test]fn monitor_read_agents_never_leaks_account_or_profile_identity(){
+        let raw=json!({"agents":[
+            {"id":"first","user":"secret-user@example.test","online":true,
+             "approved":true,"revoked":false,"profile_sha256":"secret"},
+            {"id":"second","user":"other-secret","online":false,
+             "approved":false,"revoked":true}]});
+        let safe=safe_agent_counts(&raw);
+        assert_eq!(safe["total"],2);
+        assert_eq!(safe["online"],1);
+        assert_eq!(safe["approved"],1);
+        assert_eq!(safe["revoked"],1);
+        assert!(!safe.to_string().contains("secret"));
+        assert!(!safe.to_string().contains("first"));
     }
     #[test]fn prometheus_format_no_source_paths_or_secrets(){
         let v=json!({"cluster":{"replicas":[{"healthy":true}],"jobs":[{"status":"queued"}]},

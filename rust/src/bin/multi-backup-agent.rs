@@ -2,7 +2,7 @@
 //! No inbound listener. Pull = outbound TLS poll for approved local profiles;
 //! push = locally initiated signed TLS upload. No Python or shell evaluation.
 use multi_backup_core::{afs_volume::{self,VolumeJob,Execution},
-    agent_protocol as wire,execution_policy::{ExecutionLimits,ThrottledReader}};
+    agent_protocol as wire,protected_config,execution_policy::{ExecutionLimits,ThrottledReader}};
 use base64::{engine::general_purpose::STANDARD as B64,Engine as _};
 use serde::{Serialize,Deserialize};
 use serde_json::{json,Value};
@@ -69,15 +69,10 @@ fn path(m:&BTreeMap<String,String>,name:&str)->Res<PathBuf>{
     Ok(PathBuf::from(required(m,name)?))
 }
 fn private_file(file:&Path)->Res<Vec<u8>>{
-    let info=fs::symlink_metadata(file).map_err(err)?;
-    if !info.file_type().is_file(){return Err("Credential is not a regular file".into());}
-    #[cfg(unix)]{
-        use std::os::unix::fs::PermissionsExt;
-        if info.permissions().mode() & 0o077 != 0{
-            return Err(format!("Unsafe credential permissions: {}",file.display()));
-        }
-    }
-    fs::read(file).map_err(err)
+    // Shared native core: bounded opened descriptor, strict 0600 on Unix,
+    // no symlink-following or race between file metadata and read.
+    protected_config::read_owner_only(file,65_536)
+        .map_err(|_|"Unsafe or oversized owner-only agent credential".to_string())
 }
 fn atomic_private(path:&Path,bytes:&[u8])->Res<()>{
     let parent=path.parent().ok_or("Missing private configuration parent")?;
@@ -90,6 +85,20 @@ fn atomic_private(path:&Path,bytes:&[u8])->Res<()>{
         fs::set_permissions(file.path(),fs::Permissions::from_mode(0o600)).map_err(err)?;
     }
     file.persist(path).map_err(|e|err(e.error))?;
+    Ok(())
+}
+/// First-use identities are never allowed to replace a path created by a
+/// concurrent process between exists() and the temporary-file rename.
+fn atomic_private_new(path:&Path,bytes:&[u8])->Res<()>{
+    let parent=path.parent().ok_or("Missing private configuration parent")?;
+    let mut file=tempfile::NamedTempFile::new_in(parent).map_err(err)?;
+    file.write_all(bytes).map_err(err)?;
+    file.as_file().sync_all().map_err(err)?;
+    #[cfg(unix)]{
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(file.path(),fs::Permissions::from_mode(0o600)).map_err(err)?;
+    }
+    file.persist_noclobber(path).map_err(|e|err(e.error))?;
     Ok(())
 }
 fn init(opts:&BTreeMap<String,String>)->Res<()>{
@@ -112,7 +121,7 @@ fn init(opts:&BTreeMap<String,String>)->Res<()>{
     let key=parent.join("agent-device-ed25519.key");
     let (secret,public)=wire::device_keypair();
     if key.exists(){return Err("Existing device key; refusing to rotate silently".into());}
-    atomic_private(&key,&secret)?;
+    atomic_private_new(&key,&secret)?;
     let profiles=parent.join("profiles");
     let spool=parent.join("encrypted-spool");
     fs::create_dir_all(&profiles).map_err(err)?;
@@ -130,7 +139,7 @@ fn init(opts:&BTreeMap<String,String>)->Res<()>{
         profiles_dir:profiles,spool_dir:spool,
         limits:ExecutionLimits::default(),
         max_host_transfer_bytes_per_sec:None};
-    atomic_private(&location,&serde_json::to_vec_pretty(&cfg).map_err(err)?)?;
+    atomic_private_new(&location,&serde_json::to_vec_pretty(&cfg).map_err(err)?)?;
     println!("{}",serde_json::to_string_pretty(&json!({
         "agent_id":agent_id,"user":user,"public_key":public,
         "status":"pending server registration and admin approval",
