@@ -835,3 +835,21 @@ One-line English commit summary: Verify SNMPv3 authPriv against the genuine Rust
 - Remaining RC gates: true independent 3-host network isolation, split-brain/fencing and failback/rejoin; real HTTPS REST monitor.read token lifecycle and external VLAN TLS; real PVE/PBS backup archive/restore and VMware/oVirt native VM backup/restore, or explicitly excluded from a limited RC; macOS/Windows/Linux native install/update/rollback including signature+notarization; end-to-end Production/security gate on exact final SHA; manual operator acceptance. GPFS suspended and excluded from all RC gates.
 
 One-line English commit summary: Consolidate tested VMware and oVirt native VM inventory and refresh evidence-based release gate inventory.
+
+
+## r142 — final targeted acceptance ledger and RC gating, 16 November 2026
+
+The latest consolidated source SHA is r141 `8ebfcde4c12f0212111fab462af19ba722db715f`, with **all three Rust focused component jobs PASS** in [#43887673635](https://github.com/desalvo/multi-backup/actions/runs/43887673635): encrypted core, native desktop compile and server tests. The r140 genuine SNMPv3 authPriv + **actual Rust native monitor-snmp-status** acceptance [#43887445516](https://github.com/desalvo/multi-backup/actions/runs/43887445516) is also **PASS**; wrong key and SNMPv2c were rejected on the isolated loopback lab. The earlier SNMP-only test's synthetic metric limitation is now addressed.
+
+Consolidated code-level acceptance:
+- Real 3-process Patroni/PG16 + 3-process etcd mTLS strict synchronous leader crash/promotion/rejoin/DCS fencing: [#43883579584](https://github.com/desalvo/multi-backup/actions/runs/43883579584) PASS; single host only
+- Rook/Ceph RGW actual 3 virtual Kubernetes worker/OSD+MON WORM COMPLIANCE/negative deletes: [#43873411605](https://github.com/desalvo/multi-backup/actions/runs/43873411605) PASS
+- PostgreSQL16 and RustFS WORM age encrypted paired database/data disaster restore: [#43866257791](https://github.com/desalvo/multi-backup/actions/runs/43866257791) PASS
+- Native Rust Prometheus HTTPS verified CA + bearer and wrong-token/CA/plaintext rejections on integrated r138: [#43886988152](https://github.com/desalvo/multi-backup/actions/runs/43886988152) PASS
+- Native Rust PVE QEMU/LXC single-VM/CT backup task submit/poll and PBS VM/CT/host snapshots: [#43885350815](https://github.com/desalvo/multi-backup/actions/runs/43885350815) PASS, integration r134
+- Native Rust VMware and oVirt VM-only read-only inventories: [#43887673635](https://github.com/desalvo/multi-backup/actions/runs/43887673635) PASS, integration r141; no CT claims
+- Genuine Net-SNMPv3 with native Rust producer: [#43887445516](https://github.com/desalvo/multi-backup/actions/runs/43887445516) PASS, integration r140
+
+**No complete RC:** entire full Production/security gate still NOT PASS on final SHA (earlier failed environment bootstrap fixed in r127 but no final full run); signed/notarized cross-platform native installers and update/rollback, 3-independent-host PostgreSQL/etcd partition/fencing, real REST monitor.read HTTPS+PG lifecycle, and real native hypervisor backup archive+create-only restore remain open. GPFS suspended and excluded from required RC gates. No main merge, release tag or stable publication occurred.
+
+One-line English commit summary: Record green native Rust/SNMP integration evidence and explicit remaining RC release gates.
