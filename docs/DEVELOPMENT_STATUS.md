@@ -806,3 +806,12 @@ One-line English commit summary: Treat validated strict PostgreSQL commit blocki
 - Production Gate on the final release candidate is mandatory; the integration is a development branch commit, not a stable tag or a released installer.
 
 One-line English commit summary: Integrate passed native PVE vzdump and PBS snapshot inventory Rust adapters into the RC development line.
+
+
+## r138 — verified native HTTPS metrics and TLS cryptoprovider in main RC line
+
+- Integrate previously reviewed secure native Rust monitor+TLS runtime fixes from the r131–r135 branch. Focused Rust [43885772022](https://github.com/desalvo/multi-backup/actions/runs/43885772022) **PASS**; real PostgreSQL [43885772144](https://github.com/desalvo/multi-backup/actions/runs/43885772144) **PASS**; native server HTTPS Prometheus with X.509 CA verification, correct/wrong/missing bearer and plaintext-denial [43885771957](https://github.com/desalvo/multi-backup/actions/runs/43885771957) **PASS**. The test caught and led to a fix for a real rustls multi-provider startup panic.
+- Remote/private VLAN Prometheus now requires TLS **and** bearer; HTTP only loopback. Both REST and Prometheus use owner-only (0600), regular, non-symlinked private TLS keys. One-shot CI request r138 revalidates the integrated development branch SHA (not a stable release).
+- Outstanding: genuine 3-independent-host Patroni split-brain/network partitions, PostgreSQL-backed live REST monitor.read HTTPS, PVE/PBS actual backup-media/restore qualification, VMware/oVirt real backup/restore, signed installers and full final Production Gate. GPFS suspended and excluded.
+
+One-line English commit summary: Consolidate real native Rust HTTPS monitoring, TLS key hardening and cryptoprovider startup fix.

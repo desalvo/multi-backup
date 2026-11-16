@@ -10,6 +10,19 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 type ErrBox=Box<dyn Error+Send+Sync>;
 
+fn initialize_tls_crypto_provider()->Result<(),ErrBox>{
+    // axum-server and other dependencies may enable both aws-lc-rs and
+    // ring features transitively. rustls then panics when it cannot infer
+    // one default. Install a deliberate process-wide provider before
+    // parsing any HTTPS PEM/serving any monitoring request.
+    if rustls::crypto::CryptoProvider::get_default().is_none(){
+        let installed=rustls::crypto::aws_lc_rs::default_provider().install_default();
+        if installed.is_err() && rustls::crypto::CryptoProvider::get_default().is_none(){
+            return Err("Could not install safe rustls cryptographic provider".into());
+        }
+    }
+    Ok(())
+}
 fn flag(key:&str)->Result<bool,ErrBox>{
     match env::var(key).as_deref(){
         Ok("true"|"1")=>Ok(true),
@@ -20,10 +33,42 @@ fn flag(key:&str)->Result<bool,ErrBox>{
 fn binding(key:&str,default:u16)->Result<SocketAddr,ErrBox>{
     let socket=env::var(key).unwrap_or_else(|_|format!("127.0.0.1:{default}"))
        .parse::<SocketAddr>()?;
-    if socket.ip().is_unspecified()||socket.ip().is_multicast(){
-        return Err("Monitoring must bind to a specific trusted IP, not 0.0.0.0".into());
+    let allowed=match socket.ip(){
+        std::net::IpAddr::V4(ip)=>ip.is_loopback()||ip.is_private()||ip.is_link_local(),
+        std::net::IpAddr::V6(ip)=>ip.is_loopback()||ip.is_unique_local()||
+            ip.is_unicast_link_local(),
+    };
+    if !allowed {
+        return Err("Monitoring listeners must bind only to loopback or a trusted private address".into());
     }
     Ok(socket)
+}
+fn checked_tls_pem(cert:&str,key:&str)->Result<(),ErrBox>{
+    // Reject symlinked, empty or unexpectedly large PEMs; the private
+    // key MUST be accessible only to the daemon owner on Unix.
+    for (path,private) in [(cert,false),(key,true)]{
+        let md=fs::symlink_metadata(path)?;
+        if !md.file_type().is_file()||md.len()==0||md.len()>1_048_576{
+            return Err("Monitoring TLS PEM must be a nonempty bounded regular file".into());
+        }
+        #[cfg(unix)]{
+            if private{
+                use std::os::unix::fs::PermissionsExt;
+                if md.permissions().mode()&0o077 !=0{
+                    return Err("Monitoring TLS private key must be mode 0600".into());
+                }
+            }
+        }
+        #[cfg(not(unix))]let _=private;
+    }
+    Ok(())
+}
+fn remote_prometheus_safe(address:SocketAddr,has_token:bool,has_tls:bool)
+    ->Result<(),ErrBox>{
+    if !address.ip().is_loopback()&&(!has_token||!has_tls){
+        return Err("Remote Prometheus requires BOTH bearer authentication and TLS".into());
+    }
+    Ok(())
 }
 fn bearer(headers:&HeaderMap)->Option<&str>{
     headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")
@@ -200,20 +245,40 @@ pub async fn revoke(State(state):State<AppState>,headers:HeaderMap,Json(req):Jso
     }
 }
 pub async fn start(state:AppState)->Result<(),ErrBox>{
+    if flag("MULTI_BACKUP_PROMETHEUS_ENABLED")?||
+       flag("MULTI_BACKUP_REST_API_ENABLED")?{
+        initialize_tls_crypto_provider()?;
+    }
     if flag("MULTI_BACKUP_PROMETHEUS_ENABLED")?{
         let ip=binding("MULTI_BACKUP_PROMETHEUS_BIND",9502)?;
         let key=prometheus_key()?;
-        if !ip.ip().is_loopback()&&key.is_none(){
-            return Err("Non-loopback Prometheus requires a bearer token".into());
+        let cert=env::var("MULTI_BACKUP_PROMETHEUS_TLS_CERT_FILE").ok();
+        let tls_key=env::var("MULTI_BACKUP_PROMETHEUS_TLS_KEY_FILE").ok();
+        if cert.is_some()!=tls_key.is_some(){
+            return Err("Prometheus TLS certificate and key must be configured together".into());
         }
-        let listener=tokio::net::TcpListener::bind(ip).await?;
+        remote_prometheus_safe(ip,key.is_some(),cert.is_some())?;
         let app=Router::new().route("/metrics",get(metrics))
             .with_state(PromState{state:state.clone(),key});
-        tokio::spawn(async move{
-            if let Err(e)=axum::serve(listener,app).await{
-                eprintln!("Prometheus listener terminated: {e}");
-            }
-        });
+        if let (Some(cert),Some(tls_key))=(cert,tls_key){
+            checked_tls_pem(&cert,&tls_key)?;
+            let tls=axum_server::tls_rustls::RustlsConfig::from_pem_file(cert,tls_key).await?;
+            tokio::spawn(async move{
+                if let Err(e)=axum_server::bind_rustls(ip,tls)
+                    .serve(app.into_make_service()).await{
+                    eprintln!("Prometheus HTTPS listener terminated: {e}");
+                }
+            });
+        }else{
+            // Plain HTTP is permitted exclusively on loopback, where a
+            // local TLS reverse proxy or Prometheus agent can scrape it.
+            let listener=tokio::net::TcpListener::bind(ip).await?;
+            tokio::spawn(async move{
+                if let Err(e)=axum::serve(listener,app).await{
+                    eprintln!("Prometheus loopback listener terminated: {e}");
+                }
+            });
+        }
     }
     if flag("MULTI_BACKUP_REST_API_ENABLED")?{
         if state.0.cluster.is_none(){
@@ -222,12 +287,7 @@ pub async fn start(state:AppState)->Result<(),ErrBox>{
         let ip=binding("MULTI_BACKUP_REST_API_BIND",8443)?;
         let cert=env::var("MULTI_BACKUP_REST_TLS_CERT_FILE")?;
         let key=env::var("MULTI_BACKUP_REST_TLS_KEY_FILE")?;
-        for p in [&cert,&key]{
-            let md=fs::symlink_metadata(p)?;
-            if !md.file_type().is_file()||md.len()>1_048_576{
-                return Err("REST TLS PEM must be a regular bounded file".into());
-            }
-        }
+        checked_tls_pem(&cert,&key)?;
         let tls=axum_server::tls_rustls::RustlsConfig::from_pem_file(cert,key).await?;
         let router=Router::new()
             .route("/v1/status",get(api_status))
@@ -260,6 +320,37 @@ pub fn snmp_status()->Result<(),ErrBox>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn multi_feature_rustls_default_is_unambiguously_initialized(){
+        initialize_tls_crypto_provider().unwrap();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
+    #[test]fn remote_prometheus_refuses_cleartext_or_no_bearer(){
+        let private:std::net::SocketAddr = "10.70.0.11:9502".parse().unwrap();
+        let localhost:std::net::SocketAddr = "127.0.0.1:9502".parse().unwrap();
+        assert!(remote_prometheus_safe(private,false,false).is_err());
+        assert!(remote_prometheus_safe(private,true,false).is_err());
+        assert!(remote_prometheus_safe(private,false,true).is_err());
+        assert!(remote_prometheus_safe(private,true,true).is_ok());
+        assert!(remote_prometheus_safe(localhost,false,false).is_ok());
+    }
+    #[cfg(unix)]
+    #[test]fn tls_private_key_must_be_regular_and_owner_only(){
+        use std::os::unix::fs::PermissionsExt;
+        let root=std::env::temp_dir().join(format!("mb-monitor-tls-{}",uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let cert=root.join("cert.pem");
+        let key=root.join("key.pem");
+        fs::write(&cert,b"public certificate placeholder").unwrap();
+        fs::write(&key,b"test private key placeholder").unwrap();
+        fs::set_permissions(&key,fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(checked_tls_pem(cert.to_str().unwrap(),key.to_str().unwrap()).is_err());
+        fs::set_permissions(&key,fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(checked_tls_pem(cert.to_str().unwrap(),key.to_str().unwrap()).is_ok());
+        let link=root.join("symlink.key");
+        std::os::unix::fs::symlink(&key,&link).unwrap();
+        assert!(checked_tls_pem(cert.to_str().unwrap(),link.to_str().unwrap()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]fn standalone_snmp_exposes_only_safe_metrics_without_database(){
         let snapshot=standalone_snapshot();
         assert_eq!(snapshot["database"]["database"]["role"],"standalone");

@@ -1,0 +1,33 @@
+name: Multi Backup - real native Rust Prometheus HTTPS acceptance
+on:
+  push:
+    branches: ["feature/r060-baremetal-server-cluster-vault"]
+    paths:
+      - '.github/ci-requests/monitoring-https-r132.request'
+      - '.github/ci-requests/monitoring-https-r133.request'
+      - '.github/ci-requests/monitoring-https-r135.request'
+      - '.github/ci-requests/monitoring-https-r138.request'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-monitor-https-real-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-prometheus-https:
+    name: Native Rust TLS metric producer, verified bearer and negative HTTP/CA tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preflight isolated native monitoring test
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/ci/prometheus-https-native-r132.sh
+          command -v openssl
+          command -v curl
+      - name: Compile actual Rust web server (no synthetic metrics)
+        run: cargo build --manifest-path rust-server/Cargo.toml --bin multi-backup-server
+      - name: Test actual HTTPS Rust metrics, X.509 and bearer denial
+        run: bash scripts/ci/prometheus-https-native-r132.sh
