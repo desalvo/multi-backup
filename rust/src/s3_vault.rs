@@ -3,6 +3,8 @@
 //! process environment, never from files, command arguments or log output.
 //! No DeleteObject, DeleteObjects, PutObjectRetention or bucket mutation API.
 use crate::archive;
+use base64::Engine;
+use md5::Md5;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
@@ -59,6 +61,17 @@ fn hash_file(path: &Path) -> Result<(String,u64)> {
         bytes=bytes.checked_add(n as u64).ok_or("File size overflow")?;
     }
     Ok((hex::encode(sha.finalize()),bytes))
+}
+fn content_md5_file(path:&Path)->Result<String> {
+    let mut file=File::open(path)?;
+    let mut hash=Md5::new();
+    let mut buffer=[0u8;128*1024];
+    loop {
+        let n=file.read(&mut buffer)?;
+        if n==0 {break;}
+        hash.update(&buffer[..n]);
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(hash.finalize()))
 }
 fn encode(component: &str, keep_slash: bool) -> String {
     let mut encoded=String::new();
@@ -179,7 +192,7 @@ impl Client {
         headers.insert("x-amz-content-sha256".to_string(),hash.to_string());
         if let Some(t)=&self.token {headers.insert("x-amz-security-token".to_string(),t.clone());}
         for (k,v) in extra {
-            if *k!="if-none-match" && !k.starts_with("x-amz-") {
+            if *k!="if-none-match" && *k!="content-md5" && !k.starts_with("x-amz-") {
                 return Err("Only signed S3 security headers are allowed".into());
             }
             if v.bytes().any(|b|b==b'\n'||b==b'\r') {return Err("Unsafe S3 header".into());}
@@ -219,8 +232,9 @@ impl Client {
     }
     fn put_file(&self,key:&str,file:&Path,until:&str) -> Result<String> {
         let (hash,len)=hash_file(file)?;
+        let md5=content_md5_file(file)?;
         let response=self.sign("PUT",Some(key),&[],
-          &[("if-none-match","*"),("x-amz-object-lock-mode","COMPLIANCE"),
+          &[("if-none-match","*"),("content-md5",&md5),("x-amz-object-lock-mode","COMPLIANCE"),
             ("x-amz-object-lock-retain-until-date",until),
             ("x-amz-meta-sha256",&hash)],&hash)?
             .set("Content-Length",&len.to_string())
@@ -234,8 +248,9 @@ impl Client {
     }
     fn put_bytes(&self,key:&str,payload:&[u8],until:&str) -> Result<String> {
         let hash=hex_sha(payload);
+        let md5=base64::engine::general_purpose::STANDARD.encode(Md5::digest(payload));
         let response=self.sign("PUT",Some(key),&[],
-          &[("if-none-match","*"),("x-amz-object-lock-mode","COMPLIANCE"),
+          &[("if-none-match","*"),("content-md5",&md5),("x-amz-object-lock-mode","COMPLIANCE"),
             ("x-amz-object-lock-retain-until-date",until),
             ("x-amz-meta-sha256",&hash)],&hash)?
             .set("Content-Length",&payload.len().to_string()).send_bytes(payload)?;
