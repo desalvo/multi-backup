@@ -1,0 +1,29 @@
+[Unit]
+Description=Multi Backup native Rust cluster-aware server
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=multi-backup
+Group=multi-backup
+WorkingDirectory=/var/lib/multi-backup
+EnvironmentFile=/etc/multi-backup/server.env
+ExecStart=/usr/bin/multi-backup-server
+Restart=on-failure
+RestartSec=15s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/multi-backup /var/log/multi-backup
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+LimitNOFILE=65536
+[Install]
+WantedBy=multi-user.target
