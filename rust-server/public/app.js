@@ -277,6 +277,84 @@ async function loadClusterBackups(){
 document.getElementById("cluster-refresh").addEventListener("click",loadClusterBackups);
 loadClusterBackups();
 
+// Primary/replica status and scheduled encrypted internal DB backups.
+// Query PostgreSQL via the shared authenticated server API. This works from
+// any physical server or Kubernetes replica, without node-specific URLs.
+async function internalDbRefresh(){
+  const health=document.getElementById("internal-db-health");
+  const standby=document.getElementById("internal-db-standbys");
+  const history=document.getElementById("internal-db-history");
+  try{
+    const response=await fetch("/api/internal-db/status",{cache:"no-store",credentials:"same-origin"});
+    if(!response.ok){
+      health.textContent="Database cluster non disponibile o permessi insufficienti.";
+      standby.replaceChildren();history.replaceChildren();return;
+    }
+    const db=await response.json();
+    const state=db.database||{};
+    health.textContent="PostgreSQL: "+String(state.role||"sconosciuto")+
+      " · sync commit "+String(state.synchronous_commit||"non disponibile")+
+      " · job backup "+String(db.lease_state||"n/d")+
+      " · prossimo backup "+String(db.next_due||"non disponibile");
+    standby.replaceChildren();
+    const nodes=Array.isArray(state.standbys)?state.standbys:[];
+    for(const node of nodes){
+      const row=el("div",undefined,"cluster-record");
+      row.append(el("strong",String(node.name||"replica")+" · "+
+        String(node.sync_state||"n/d")),
+        el("small",String(node.state||"n/d")+" · "+
+          String(node.lag_bytes||0)+" byte di ritardo WAL","muted"));
+      standby.append(row);
+    }
+    if(!nodes.length)standby.append(el("small",
+       "Nessuna replica rilevata: controllare Patroni, permessi pg_monitor e HAProxy","muted"));
+    document.getElementById("internal-db-enabled").checked=Boolean(db.enabled);
+    document.getElementById("internal-db-interval").value=String(db.interval_minutes||1440);
+    history.replaceChildren();
+    for(const item of (Array.isArray(db.history)?db.history:[]).slice(0,40)){
+      const row=el("div",undefined,"cluster-record");
+      row.append(el("strong",String(item.status)+" · "+String(item.started_at||"")),
+        el("small","Backup "+String(item.backup_id||"da verificare")+
+          " · "+String(item.replica||"")+" · "+String(item.target),"muted"));
+      history.append(row);
+    }
+  }catch(_){
+    health.textContent="Impossibile contattare il catalogo HA PostgreSQL.";
+  }
+}
+async function internalDbWrite(operation){
+  const result=document.getElementById("internal-db-feedback");
+  const save=document.getElementById("internal-db-save");
+  const run=document.getElementById("internal-db-run");
+  save.disabled=true;run.disabled=true;
+  const headers={"X-CSRF-Token":csrf,"Content-Type":"application/json"};
+  // The offline approval value is not persisted, displayed or logged.
+  const approval=document.getElementById("recovery-authorization");
+  headers["X-Multi-Backup-Recovery-Authorization"]=approval.value.trim();
+  approval.value="";
+  try{
+    const req=operation==="policy"?{
+      enabled:document.getElementById("internal-db-enabled").checked,
+      interval_minutes:Number(document.getElementById("internal-db-interval").value),
+      target:"s3_worm"
+    }:{};
+    const resp=await fetch("/api/internal-db/"+operation,{
+      method:"POST",credentials:"same-origin",headers,body:JSON.stringify(req)
+    });
+    const obj=await resp.json();
+    result.textContent=resp.ok?
+      (operation==="backup"?"Backup database accodato: "+String(obj.job_id):
+       "Piano salvato e condiviso fra le repliche"):
+      "Operazione rifiutata: "+String(obj.error||resp.status);
+    if(resp.ok)await internalDbRefresh();
+  }catch(_){result.textContent="Errore durante la modifica del piano database.";}
+  finally{headers["X-Multi-Backup-Recovery-Authorization"]="";save.disabled=false;run.disabled=false;}
+}
+document.getElementById("internal-db-refresh").addEventListener("click",internalDbRefresh);
+document.getElementById("internal-db-save").addEventListener("click",()=>internalDbWrite("policy"));
+document.getElementById("internal-db-run").addEventListener("click",()=>internalDbWrite("backup"));
+internalDbRefresh();
+
 // Vault backup storage is separate from the password-protected age identity vault.
 const vaultStatus=document.getElementById("vault-state");
 const vaultRows=document.getElementById("vault-snapshots");
