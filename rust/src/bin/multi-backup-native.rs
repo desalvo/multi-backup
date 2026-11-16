@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -11,6 +11,7 @@ fn usage() -> &'static str {
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
+       multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
        multi-backup-native plugins pve-task-status --config-json OWNER_ONLY_PVE.json --node NODE --upid PVE_UPID [--json] (read-only status)\n\
        multi-backup-native plugins pbs-snapshots --config-json OWNER_ONLY_PBS.json --datastore DATASTORE [--namespace NS] [--json] (read-only native VM/CT/host snapshots; PBS verification is not Multi Backup verification)\n\
@@ -258,6 +259,15 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 if json {println!("{}",serde_json::to_string_pretty(&item)?);}
                 else {println!("PVE task {}: {} (remote success: {}, archive not verified)",
                     item.upid,item.state,item.remote_task_ok);}
+            },
+            "hypervisor-inventory" => {
+                accepted(&flags,&["--config-json"])?;
+                let cfg=hypervisor_inventory::Config::load(
+                    Path::new(required(&flags,"--config-json")?))?;
+                let guests=hypervisor_inventory::inventory(&cfg)?;
+                if json {println!("{}",serde_json::to_string_pretty(&guests)?);}
+                else {println!("{}: {} native VMs (READ-ONLY, incomplete inventory possible, backup/restore NOT certified)",
+                    guests.provider,guests.guests.len());}
             },
             "virtualization-inventory" => {
                 accepted(&flags,&["--config-json"])?;

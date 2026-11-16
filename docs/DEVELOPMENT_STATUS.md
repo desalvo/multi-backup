@@ -806,3 +806,15 @@ One-line English commit summary: Treat validated strict PostgreSQL commit blocki
 - Production Gate on the final release candidate is mandatory; the integration is a development branch commit, not a stable tag or a released installer.
 
 One-line English commit summary: Integrate passed native PVE vzdump and PBS snapshot inventory Rust adapters into the RC development line.
+
+
+## r137 — native read-only VMware vCenter and oVirt Engine VM inventory (no CT claims)
+
+- New Rust module `rust/src/hypervisor_inventory.rs` and CLI `plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json --json`. Configuration file (regular 0600, max 16KiB) contains `{"provider":"vmware"|"ovirt","endpoint":"https://HOST","session_token":"SHORT_LIVED_TOKEN"}`: token is preissued by official hypervisor SSO, never created from persisted login passwords.
+- vCenter uses official modern `GET /api/vcenter/vm` with `vmware-api-session-id`; oVirt Engine REST v4 uses `GET /ovirt-engine/api/vms`, `Version:4`, `Accept:application/json` and short-lived Bearer token. Verified server TLS, no HTTP/redirect/URL userinfo, bounded 2MiB and 4,000 guest response, strict native VM ID and duplicate checks.
+- Explicit `read_only=true`, `inventory_complete=false` (pagination/version differences), `native_container_guests_supported=false` and all live/offline/restore certifications **false**. No VM/CT mutation API or guest-agent-based container fallback. VMware/oVirt VM backups require VADP/CBT/transfer plus vendor-version field tests separately; there is no CT functionality unless an official version-specific native API and modes are proven.
+- Rust unit tests exercise modern VMware JSON and oVirt Engine JSON, wrong token/origin shape, malformed/duplicated IDs, and absence of CT support. This PR is draft; native Rust CI green is required. These are honest preliminary integrations, not a complete production plugin. No change to suspended GPFS.
+
+Official API references: https://developer.broadcom.com/xapis/vsphere-automation-api/latest/api/vcenter/vm/get/ ; https://ovirt.github.io/ovirt-engine-api-model/master/
+
+One-line English commit summary: Add TLS-verified read-only VMware and oVirt native VM inventory with no unqualified CT or backup claims.
