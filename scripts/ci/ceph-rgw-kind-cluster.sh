@@ -230,6 +230,7 @@ kubectl -n rook-ceph rollout status deploy/rook-ceph-tools --timeout=900s
 # OSD and three distinct CRUSH hosts. No MOCK/skip/single-OSD fallback.
 ready=0
 cluster_errors=0
+crush_fixed=0
 for attempt in $(seq 1 40); do
   if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status -f json \
       > "$TEMP/ceph-status.json" 2>/dev/null &&
@@ -237,6 +238,22 @@ for attempt in $(seq 1 40); do
       > "$TEMP/osd-tree.json" 2>/dev/null &&
      python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" \
       >/dev/null 2>&1; then ready=1;break;fi
+  # Work around a Ceph kind auto-placement defect ONLY after actual
+  # three-node running OSD/device identity is independently verified.
+  # Never change CRUSH on untrusted operator clusters or emulate OSDs.
+  if [ "$crush_fixed" -eq 0 ] && [ "$attempt" -ge 8 ] &&
+     [ -s "$TEMP/ceph-status.json" ] && [ -s "$TEMP/osd-tree.json" ];then
+    if kubectl -n rook-ceph get pods -l app=rook-ceph-osd -o json            > "$TEMP/osd-pods.json" 2>/dev/null &&
+       python3 "$ROOT/scripts/ci/ceph-osd-crush-align.py"            "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" "$TEMP/osd-pods.json"            "${WORKERS[0]}:${OSD_NAMES[0]}"            "${WORKERS[1]}:${OSD_NAMES[1]}"            "${WORKERS[2]}:${OSD_NAMES[2]}"            > "$TEMP/crush-verified-moves" 2> "$TEMP/crush-guard.err";then
+      if [ -s "$TEMP/crush-verified-moves" ];then
+        echo "Reconcile actual CRUSH logical hosts with independently proven kind worker/device identities"
+        while read -r osdid node;do
+          kubectl -n rook-ceph exec deploy/rook-ceph-tools --              ceph osd crush move "osd.$osdid" "root=default" "host=$node"
+        done < "$TEMP/crush-verified-moves"
+      fi
+      crush_fixed=1
+    fi
+  fi
   # Stop early if operator has persistently rejected an invalid cluster config.
   # This avoids burning CI minutes on a deployment that cannot progress.
   state="$(kubectl -n rook-ceph get cephcluster mb-ceph -o jsonpath='{.status.state}' 2>/dev/null || true)"
@@ -260,11 +277,13 @@ if [ "$ready" -ne 1 ]; then
     python3 -m json.tool "$TEMP/ceph-status.json" | head -100 >&2 || true
     echo "::endgroup::" >&2
   fi
+  [ ! -s "$TEMP/osd-tree.json" ] || python3 -m json.tool "$TEMP/osd-tree.json" >&2 || true
+  [ ! -s "$TEMP/crush-guard.err" ] || cat "$TEMP/crush-guard.err" >&2 || true
   on_error
   exit 1
 fi
 python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json"
-echo "PASS: real Ceph MON quorum and 3 physically distinct kind-node OSDs"
+echo "PASS: three distinct virtual kind-worker Ceph OSD/CRUSH hosts (not physical fault domains)"
 
 kubectl -n rook-ceph wait --for=condition=Ready pod -l app=rook-ceph-rgw --timeout=900s
 SECRET=rook-ceph-object-user-mb-ci-store-mb-ci-user

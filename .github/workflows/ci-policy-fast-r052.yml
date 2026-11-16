@@ -3,6 +3,8 @@ on:
   push:
     branches: ["feature/**"]
     paths:
+      - 'scripts/ci/ceph-osd-crush-align.py'
+      - 'tests/test_ceph_osd_crush_alignment.py'
       - '.github/workflows/**'
       - 'tests/test_ci_cost_policy.py'
       - 'docs/CI_MINUTES_POLICY_R051_IT.md'
@@ -26,6 +28,7 @@ jobs:
           set -euo pipefail
           python3 -m pip install --quiet 'PyYAML>=6,<7'
           python3 -m unittest discover -s tests -p test_ci_cost_policy.py -v
+          python3 -m unittest discover -s tests -p test_ceph_osd_crush_alignment.py -v
           python3 - <<'PY'
           from pathlib import Path
           import yaml
