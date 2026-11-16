@@ -94,3 +94,13 @@ Added cheap, fail-closed static tests for Kubernetes Service/Pod exposure, HAPro
 - RC: ancora necessari DR combinato database+dati su cluster vuoto, real Patroni 3-nodi/split-brain/failback, test sicurezza monitoring REST/SNMPv3 e rete esterna, installer/update/rollback e firme, ultima full Production CI sullo SHA finale, merge ordinato della catena PR. GitHub/Dropbox test-account e hypervisor non qualificati restano fuori da RC limitata.
 
 One-line English commit summary: Harden PostgreSQL WORM leases, certify Rocky 9 Rust RPM installation, replace Python release repackaging with verified Rust artifacts, gate private database networking, and extend guarded Ceph/PVE-PBS acceptance.
+
+
+## r083 — WORM-pinned isolated disaster recovery script hardening (16 Nov 2026)
+
+- Fixed offline `scripts/db-disaster-restore.sh`: pinned S3 manifest versions must be used for **both verify and restore**. The DB variable `MULTI_BACKUP_DR_DB_MANIFEST_VERSION` now reaches restore; the paired data archive supports `MULTI_BACKUP_DR_DATA_MANIFEST_VERSION` on verify and restore. This permits access to retained versions hidden by S3 delete markers when the operator supplies the recorded version IDs.
+- Fail closed if the stage root is not operator-owned or is not empty, and reject a data manifest pin without a paired data snapshot. Existing guards still require isolated NEW EMPTY PostgreSQL primary, explicit opt-in, local service stopped, private 0700 staging, and no overwrite.
+- Seven isolated shell drill tests verify pinned flags, unpinned mode, empty-root, standby, existing user objects, missing confirmation, and unmatched data receipt; all 7 PASS locally. The lightweight CI policy workflow runs `bash -n` plus the drill on relevant changes.
+- **Not a live DR qualification**: these tests use mocked commands. Combined DB+data consistency and genuine pg_dump→age→S3 WORM→pg_restore in an isolated PostgreSQL cluster remain a blocking RC acceptance. Patroni HA / split brain / release signing / final Production Gate also remain outstanding.
+
+One-line English commit summary: Preserve pinned WORM manifest versions across database and data disaster restores, refuse unsafe staging, and add seven isolated RC regression drills.
