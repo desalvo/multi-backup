@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/ci-requests/ceph-rgw-r076.request'
       - '.github/ci-requests/ceph-rgw-r080.request'
+      - '.github/ci-requests/ceph-rgw-r088.request'
   pull_request:
     types: [labeled]
   workflow_dispatch:

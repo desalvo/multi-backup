@@ -1,0 +1,1 @@
+One-shot genuine Rook-Ceph 3-MON 3-OSD multi-host, zero-remapped PG, RGW COMPLIANCE and pinned-version delete-marker acceptance at r088. DO NOT treat a failed result as PASS.
