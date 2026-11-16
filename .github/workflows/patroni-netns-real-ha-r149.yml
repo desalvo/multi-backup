@@ -1,0 +1,36 @@
+name: Multi Backup - real three-stack Patroni network partition acceptance
+on:
+  push:
+    branches: ["feature/r143-patroni-network-isolation"]
+    paths:
+      - ".github/ci-requests/patroni-netns-r149.request"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-patroni-network-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-patroni-netns:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install real Patroni PostgreSQL 16 TLS etcd and netns
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-16 postgresql-client-16 patroni python3-psycopg2 \
+            python3-etcd etcd-server etcd-client openssl iproute2 iptables util-linux
+          python3 -m py_compile scripts/ci/patroni-netns-real-ha-r149.py scripts/ci/patroni-etcd-real-ha.py
+      - name: Fail-closed real iptables split, synchronous data and fenced stale old leader
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+        run: python3 scripts/ci/patroni-netns-real-ha-r149.py
+      - name: Certify exact scope
+        if: success()
+        run: |
+          echo 'PASS: real separated Linux network namespaces, real PostgreSQL16/Patroni and mTLS etcd, network partition' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT three independent physical hosts or rack/network appliance certification' >> "$GITHUB_STEP_SUMMARY"
