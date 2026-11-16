@@ -14,7 +14,8 @@ def inputs():
           [{"type":"host","name":B[0][0],"children":[0,1,2]}]}
     pods={"items":[{"spec":{"nodeName":n,"containers":[{"env":[
        {"name":"ROOK_OSD_ID","value":str(i)},
-       {"name":"ROOK_BLOCK_PATH","value":"/dev/"+d}]}]},
+       {"name":"ROOK_BLOCK_PATH","value":"/dev/"+d},
+       {"name":"ROOK_CRUSHMAP_HOSTNAME","value":n}]}]},
        "status":{"phase":"Running"}} for i,(n,d) in enumerate(B)]}
     return status,tree,pods
 class Safety(unittest.TestCase):
@@ -30,6 +31,10 @@ class Safety(unittest.TestCase):
         s,t,p=inputs();p["items"][1]["spec"]["containers"][0]["env"][1]["value"]="/dev/sda"
         with self.assertRaises(ValueError):mod.reconcile(s,t,p,B)
         with self.assertRaises(ValueError):mod.reconcile(*inputs(),[B[0],B[0],B[2]])
+    def test_refuses_stale_daemon_crush_host_even_on_correct_worker(self):
+        s,t,p=inputs()
+        p["items"][1]["spec"]["containers"][0]["env"][2]["value"]=B[0][0]
+        with self.assertRaises(ValueError):mod.reconcile(s,t,p,B)
     def test_refuses_missing_quorum_or_osd(self):
         s,t,p=inputs();s["osdmap"]["osdmap"]["num_in_osds"]=2
         with self.assertRaises(ValueError):mod.reconcile(s,t,p,B)

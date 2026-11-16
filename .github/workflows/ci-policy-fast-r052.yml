@@ -6,6 +6,10 @@ on:
       - 'scripts/ci/ceph-osd-crush-align.py'
       - 'tests/test_ceph_osd_crush_alignment.py'
       - 'scripts/ci/ceph-osd-node-align.py'
+      - 'scripts/ci/ceph-assert-cluster.py'
+      - 'scripts/ci/ceph-rgw-kind-cluster.sh'
+      - 'scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh'
+      - 'tests/test_ceph_rgw_ci_attestation.py'
       - 'tests/test_ceph_osd_node_alignment.py'
       - 'scripts/ci/check-private-db-exposure.py'
       - 'tests/test_db_network_isolation_r081.py'
@@ -39,6 +43,9 @@ jobs:
           python3 -m unittest discover -s tests -p test_ci_cost_policy.py -v
           python3 -m unittest discover -s tests -p test_ceph_osd_crush_alignment.py -v
           python3 -m unittest discover -s tests -p test_ceph_osd_node_alignment.py -v
+          python3 -m unittest discover -s tests -p test_ceph_rgw_ci_attestation.py -v
+          bash -n scripts/ci/ceph-rgw-kind-cluster.sh
+          bash -n scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh
           python3 -m unittest discover -s tests -p test_rust_release_collection.py -v
           python3 scripts/check-production-gate.py
           python3 scripts/ci/check-private-db-exposure.py

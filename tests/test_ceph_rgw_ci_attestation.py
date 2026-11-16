@@ -20,6 +20,8 @@ def fixture(mons=3, up=3, hosts=3):
             "num_osds": up, "num_up_osds": up, "num_in_osds": up,
         }},
     }
+    status["pgmap"] = {"num_pgs": 18, "num_remapped_pgs": 0,
+                       "pgs_by_state": [{"state_name": "active+clean", "count": 18}]}
     tree = {"nodes": (
         [{"type": "host", "name": f"kind-worker{n}",
           "children": [n]} for n in range(hosts)]
@@ -45,6 +47,21 @@ class CephRealClusterAttestationTests(unittest.TestCase):
     def test_missing_osd_fails(self):
         with self.assertRaises(ValueError):
             module.attest(*fixture(up=2))
+
+    def test_three_hosts_with_remapped_pgs_fail(self):
+        status, tree = fixture()
+        status["pgmap"]["num_remapped_pgs"] = 9
+        status["pgmap"]["pgs_by_state"] = [
+            {"state_name": "active+clean+remapped", "count": 18}]
+        with self.assertRaises(ValueError):
+            module.attest(status, tree)
+
+    def test_three_hosts_with_degraded_pgs_fail(self):
+        status, tree = fixture()
+        status["pgmap"]["pgs_by_state"] = [
+            {"state_name": "active+clean+degraded", "count": 18}]
+        with self.assertRaises(ValueError):
+            module.attest(status, tree)
 
     def test_osd_down_on_one_host_fails(self):
         status, tree = fixture()
