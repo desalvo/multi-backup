@@ -242,6 +242,41 @@ document.addEventListener("visibilitychange",()=>{
   if(!document.hidden)loadCluster();
 });
 
+// PostgreSQL-authoritative backup metadata, identical on each bare-metal
+// server or Kubernetes replica. Never offer a local restore for a remote
+// node-local volume; that needs an authenticated owner routing operation.
+async function loadClusterBackups(){
+  const summary=document.getElementById("cluster-backup-summary");
+  const body=document.getElementById("cluster-backup-inventory");
+  try{
+    const response=await fetch("/api/cluster/backups",{
+      credentials:"same-origin",cache:"no-store"
+    });
+    if(!response.ok){
+      summary.textContent="Catalogo cluster non configurato o non disponibile.";
+      body.replaceChildren();return;
+    }
+    const catalog=await response.json();
+    const items=Array.isArray(catalog.backups)?catalog.backups:[];
+    summary.textContent=items.length+" backup nel catalogo unificato PostgreSQL";
+    body.replaceChildren();
+    for(const item of items.slice(0,100)){
+      const node=el("div",undefined,"cluster-record");
+      node.append(el("strong",String(item.label||item.id)),
+        el("small",String(item.owner_replica)+" · "+
+          String(item.storage_id)+" · "+
+          (item.owner_online?"nodo online":"nodo offline")+" · "+
+          (Array.isArray(item.files)?item.files.length:0)+" file","muted"),
+        el("small","Solo inventario verificato: restore remoto non ancora abilitato","muted"));
+      body.append(node);
+    }
+  }catch(_){
+    summary.textContent="Catalogo cluster temporaneamente non disponibile.";
+  }
+}
+document.getElementById("cluster-refresh").addEventListener("click",loadClusterBackups);
+loadClusterBackups();
+
 // Vault backup storage is separate from the password-protected age identity vault.
 const vaultStatus=document.getElementById("vault-state");
 const vaultRows=document.getElementById("vault-snapshots");
