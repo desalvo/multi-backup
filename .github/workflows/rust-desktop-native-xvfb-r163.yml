@@ -1,0 +1,39 @@
+name: Multi Backup - real native Rust egui Linux Xvfb acceptance
+on:
+  push:
+    branches: ["feature/r163-desktop-real-xvfb-smoke"]
+    paths:
+      - ".github/ci-requests/desktop-xvfb-r163.request"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-desktop-xvfb-real-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-native-gui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install software OpenGL Xvfb and required Rust GUI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libasound2-dev libgl1-mesa-dri xvfb xauth
+          bash -n scripts/ci/rust-desktop-native-xvfb-r163.sh
+      - name: Compile actual Rust egui native GUI
+        run: cargo build --manifest-path rust-desktop/Cargo.toml
+      - name: Open and render real desktop window under Xvfb
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+        run: bash scripts/ci/rust-desktop-native-xvfb-r163.sh
+      - name: Evidence limits
+        if: success()
+        run: |
+          echo 'PASS: actual native Rust application opened, rendered and closed an Xvfb window' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT certified: macOS/Windows installers, pixel/layout fidelity, signing or end-to-end GUI backup' >> "$GITHUB_STEP_SUMMARY"

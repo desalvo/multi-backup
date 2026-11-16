@@ -873,3 +873,12 @@ One-line English commit summary: Integrate tested PVE native backup-media invent
 - PVE per-VMID backup media parser and direct CLI came from r159 and have separate [Rust core CI 43904400603](https://github.com/desalvo/multi-backup/actions/runs/43904400603) PASS. A real physical PVE/PBS/VMware/oVirt lab and create-only VM/CT restore are still unqualified; compile and native GUI runtime acceptance must pass on this branch before merge.
 
 One-line English commit summary: Expose typed read-only PVE/PBS and VMware/oVirt inventories in native Rust GUI without persisting API secrets.
+
+
+## r163 — genuine native Rust egui/Xvfb runtime acceptance
+
+- An opt-in disposable GitHub-hosted runner compiles the actual Rust desktop app, runs its built-in artwork/gradient/catalog self-test, and executes `--smoke` against an actual Xvfb X11 framebuffer and Mesa software OpenGL. This exercises the eframe application loop, native window creation, three rendered frames and graceful close, rather than only `cargo check`.
+- The job uses isolated temporary HOME/XDG config, no real credentials or production archives, and deletes all temporary files on exit. A startup panic, broken graphics/OpenGL setup or inability to close fails CI.
+- A passing job is limited to native Linux GUI runtime. It is not a visual screenshot certification, signed/notarized macOS/Windows installer qualification or complete UI backup and restore journey.
+
+One-line English commit summary: Verify native Rust egui GUI startup and rendering through isolated Xvfb CI.
