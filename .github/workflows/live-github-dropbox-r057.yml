@@ -1,0 +1,67 @@
+name: Multi Backup - manual isolated GitHub and Dropbox Rust field qualification
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Which disposable live test account"
+        required: true
+        type: choice
+        options: [github, dropbox]
+      expected_sha:
+        description: "Exact reviewed default-branch commit SHA (40 lowercase hex)"
+        required: true
+        type: string
+      confirmation:
+        description: "Enter ISOLATED-GITHUB-DROPBOX-TEST-ACCOUNTS"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-live-account-field-${{ inputs.provider }}
+  cancel-in-progress: false
+jobs:
+  live-readonly-account:
+    name: Native Rust actual ${{ inputs.provider }} test-account encrypted backup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    if: github.actor == 'desalvo'
+    env:
+      FIELD_CI_APPROVAL: ${{ inputs.confirmation }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      PROVIDER: ${{ inputs.provider }}
+      GH_TOKEN: ${{ secrets.MULTI_BACKUP_TEST_GITHUB_TOKEN }}
+      MULTI_BACKUP_GITHUB_TEST_ACCOUNT: ${{ vars.MULTI_BACKUP_GITHUB_TEST_ACCOUNT }}
+      MULTI_BACKUP_DROPBOX_TOKEN: ${{ secrets.MULTI_BACKUP_TEST_DROPBOX_TOKEN }}
+      MULTI_BACKUP_DROPBOX_TEST_ACCOUNT_ID: ${{ vars.MULTI_BACKUP_DROPBOX_TEST_ACCOUNT_ID }}
+      RUNNER_ENVIRONMENT: github-hosted
+    steps:
+      - name: Deny unreviewed commit and missing separate test-account confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+          test "$FIELD_CI_APPROVAL" = ISOLATED-GITHUB-DROPBOX-TEST-ACCOUNTS
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install open tools for real Rust encrypted provider roundtrip
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age git-lfs
+          git lfs version
+          gh version
+          bash -n scripts/ci/live-github-dropbox-r057.sh
+      - name: Compile exact Rust-native source adapter
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Execute live isolated read-only provider acceptance
+        shell: bash
+        run: bash scripts/ci/live-github-dropbox-r057.sh "$PROVIDER"
+      - name: Record restricted qualification scope
+        if: success()
+        run: |
+          echo "PASS real disposable source-account read-only Rust backup and age archive integrity." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED provider remote write/restore or general personal-account parity." >> "$GITHUB_STEP_SUMMARY"
