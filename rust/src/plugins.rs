@@ -693,10 +693,10 @@ mod tests {
         let d=find("webdav").unwrap();
         assert_eq!(d.backup_input, Stage::Preview);
         assert_eq!(d.backup_output, Stage::Planned);
-        let plan=plan(Mode::Backup,"webdav","posix").unwrap();
-        assert!(plan.preview_executable);
-        assert!(!plan.executable);
-        assert!(plan.required_preflight.iter().any(|s|s.contains("davfs2")));
+        let webdav_plan=plan(Mode::Backup,"webdav","posix").unwrap();
+        assert!(webdav_plan.preview_executable);
+        assert!(!webdav_plan.executable);
+        assert!(webdav_plan.required_preflight.iter().any(|s|s.contains("davfs2")));
         assert!(!plan(Mode::Restore,"posix","webdav").unwrap().preview_executable);
     }
     #[test]
