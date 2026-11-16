@@ -736,3 +736,13 @@ One-line English commit summary: Certify genuine three-worker Ceph RGW Object Lo
 - Ceph real Rook-Ceph RGW WORM [43873411605](https://github.com/desalvo/multi-backup/actions/runs/43873411605) remains PASS on exact SHA and scope in r115; full signed RC and physical-host HA acceptance remain separate.
 
 One-line English commit summary: Qualify real Ceph RGW WORM and SNMPv3 authPriv, and harden genuine Patroni synchronous failover and quorum-fencing acceptance without relaxing release gates.
+
+
+## r125 — Native PVE QEMU/LXC vzdump task control preview (16 November 2026)
+
+- The standalone Rust CLI now supports an **explicitly confirmed** PVE guest-specific backup task: `plugins pve-start-backup --config-json PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE --json`. Its independent read-only PVE HTTPS inventory confirms exact guest ID, kind and node before POST.
+- The TLS-validated no-redirect PVE API issues `POST /api2/json/nodes/NODE/vzdump` with a **single VMID**, form-encoded options and `remove=0` (never prune/delete old backups). Scoped token is accepted only in owner-only config. Responses must contain a matching native UPID; credentials and server response bodies are not written into errors. Read-only `plugins pve-task-status` retrieves the remote task status.
+- **Do not equate accepted task or `exitstatus=OK` with a recoverable encrypted Multi Backup archive**: returned JSON explicitly marks `archive_verified=false` and `restore_certified=false`. Native archive ingestion, VM/CT create-only restore, PVE/PBS field permission/media tests and actual live/offline qualification remain open. PBS is never accepted at the PVE task endpoint; VMware/oVirt remain VM-only planned with CT disabled.
+- Rust unit tests cover strict mode/host/storage/VMID boundaries, wrong provider, task UPID spoofing, error-status refusal and absence of delete/prune options. GPFS is suspended/experimental/outside all RC gates.
+
+One-line English commit summary: Add explicitly confirmed PVE VM/LXC vzdump task dispatch with safe UPID polling and no false backup certification.

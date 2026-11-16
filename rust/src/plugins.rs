@@ -248,7 +248,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
     // saved jobs, but never conflate a PVE hypervisor with a PBS datastore.
     PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, NONE,
         "QEMU VM and native LXC CT inventory with explicit snapshot/suspend/stop modes",
-        "PVE online/offline guest consistency and restore are PLANNED: no snapshot/stop/rollback operation is exposed by the generic Rust dispatcher"),
+        "Explicit PVE vzdump snapshot/suspend/stop task trigger and polling are preview-only; archive transfer, task+media verification and create-only VM/CT restore remain PLANNED and NOT field certified"),
     PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PLAN, PLAN,
         "Distinct PBS datastore and snapshot groups for VM/CT/host backup archives",
         "PBS read-only inventory, encrypted export and verified restore are PLANNED; access to a PVE cluster does not imply PBS datastore scope or write privileges"),
