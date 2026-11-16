@@ -50,7 +50,11 @@ def issue_cert(directory, index, ca, ca_key):
     ext.write_text("basicConstraints=critical,CA:FALSE\n"
                    "keyUsage=critical,digitalSignature,keyEncipherment\n"
                    "extendedKeyUsage=serverAuth,clientAuth\n"
-                   f"subjectAltName=IP:{address},DNS:mb-node{index+1}.internal\n")
+                   # All three processes share one Linux loopback routing table:
+                   # when dialing 127.0.0.1X the source IP is 127.0.0.1.
+                   # etcd validates the peer certificate against the SOURCE
+                   # IP; add that source SAN only in this isolated CI lab.
+                   f"subjectAltName=IP:{address},IP:127.0.0.1,DNS:mb-node{index+1}.internal\n")
     run("openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
         "-subj", f"/CN=mb-node{index+1}.internal",
         "-keyout", str(key), "-out", str(csr))
