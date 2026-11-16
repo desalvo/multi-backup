@@ -1,6 +1,6 @@
 # Multi Backup r065 — PBS, PVE, VMware, oVirt: requisiti VM/CT
 
-Stato verificato 16 novembre 2026: **PLANNED / NON CERTIFICATI**. Il catalogo Rust contiene `proxmox` (PVE e PBS accorpati), `vmware` e `ovirt`, tutti `backup_input=Planned`, `backup_output=Unsupported`; non esistono implementazioni dedicated Rust né collaudi reali di backup/restore per questi hypervisor. La presente è una specifica, non un rilascio.
+Stato verificato 16 novembre 2026: **PLANNED / NON CERTIFICATI**. Il catalogo Rust contiene ID distinti `proxmox` (PVE, ID storico conservato), `pbs`, `vmware` e `ovirt` in stato Planned; PVE/VMware/oVirt non sono destinazioni generiche e PBS è Planned sia come sorgente sia come destinazione; non esistono implementazioni dedicated Rust né collaudi reali di backup/restore per questi hypervisor. La presente è una specifica, non un rilascio.
 
 ## Requisiti obbligatori
 
@@ -32,3 +32,7 @@ Riferimenti: https://github.com/proxmox/pve-docs/blob/master/vzdump.adoc ; https
 VMware VADP è documentato per le macchine virtuali; la pagina oVirt sul supporto container è un documento storico di progettazione, non una certificazione di funzionalità corrente né di backup CT. Pertanto **VMware e oVirt restano VM-only** per l'attuale perimetro del plugin. L'implementazione futura deve eseguire capability discovery per versione e resource type ed esporre CT soltanto dopo verifica di API ufficiali e test reali delle **singole modalità online/offline e restore**. Nessun plugin di runtime/container e nessun agente in-guest costituiscono un sostituto del supporto CT nativo.
 
 Riferimenti di verifica: https://developer.broadcom.com/xapis/virtual-disk-api/latest/vddkIntro.3.5.html ; https://www.ovirt.org/develop/release-management/features/integration/container-support.html ; https://ovirt.org/documentation/administration_guide/
+
+## r069 — catalogo separato PVE/PBS senza false funzionalità
+
+Nel catalogo Rust il plugin `proxmox` rappresenta **soltanto PVE** (VM QEMU e CT LXC nativi); `pbs` rappresenta **soltanto Proxmox Backup Server** (datastore, gruppi di snapshot e archivi). L'ID PVE storico resta invariato per compatibilità con le configurazioni esistenti. Entrambi rimangono `Planned` e il dispatcher non può eseguire backup o restore generici: ciò evita di far interpretare l'inventario dei provider come un adapter certificato. L'accesso a PVE non autorizza implicitamente PBS e viceversa. CT VMware/oVirt restano disabilitati.

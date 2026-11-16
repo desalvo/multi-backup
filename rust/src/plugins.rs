@@ -244,8 +244,14 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("nvmeof", "NVMe over Fabrics (NVMe-oF)", DataKind::BlockTransport, PLAN, PLAN,
         "NVMe NQN, NSID, EUI/NGUID and snapshot epoch",
         "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
-    PluginDescriptor::new("proxmox", "Proxmox VE / PBS", DataKind::Virtualization, PLAN, NONE,
-        "VM/CT config plus vzdump/PBS consistency points", "Inventory VM/CT/storage, PBS integration, opt-in quiesce and stop/rollback planning"),
+    // Keep the historical "proxmox" ID for backward compatibility with
+    // saved jobs, but never conflate a PVE hypervisor with a PBS datastore.
+    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, NONE,
+        "QEMU VM and native LXC CT inventory with explicit snapshot/suspend/stop modes",
+        "PVE online/offline guest consistency and restore are PLANNED: no snapshot/stop/rollback operation is exposed by the generic Rust dispatcher"),
+    PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PLAN, PLAN,
+        "Distinct PBS datastore and snapshot groups for VM/CT/host backup archives",
+        "PBS read-only inventory, encrypted export and verified restore are PLANNED; access to a PVE cluster does not imply PBS datastore scope or write privileges"),
     PluginDescriptor::new("kubernetes", "Kubernetes / OpenShift / OKD", DataKind::Cluster, PLAN, NONE,
         "API object resourceVersion, CSI VolumeSnapshots and etcd/CRD scope", "Never capture Secrets without explicit policy; cluster restore requires name remapping"),
     PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PLAN, NONE,
@@ -459,20 +465,20 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_31_user_requested_input_plugins_and_22_outputs_are_listed() {
+    fn all_32_requested_input_plugins_and_23_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
-            "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox",
+            "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox", "pbs",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
             "iscsi", "fc", "nvmeof", "glusterfs", "lustre", "gpfs",
             "hdfs", "afs", "alfresco", "owncloud", "nextcloud", "sshfs",
             "oracle"];
-        let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh",
+        let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
             "owncloud", "nextcloud", "sshfs"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 31);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 22);
-        assert_eq!(CATALOG.len(), 32);
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 32);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 23);
+        assert_eq!(CATALOG.len(), 33);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
@@ -480,12 +486,26 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 22);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 31);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 23);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
         }
+    }
+    #[test]
+    fn pve_and_pbs_have_distinct_non_executable_capabilities() {
+        let pve=find("proxmox").expect("PVE compatibility ID");
+        let pbs=find("pbs").expect("PBS must be separately selectable");
+        assert_eq!(pve.backup_input,Stage::Planned);
+        assert_eq!(pve.backup_output,Stage::Unsupported);
+        assert_eq!(pbs.backup_input,Stage::Planned);
+        assert_eq!(pbs.backup_output,Stage::Planned);
+        assert_ne!(pve.id,pbs.id);
+        assert!(!plan(Mode::Backup,"proxmox","posix").unwrap().executable);
+        assert!(!plan(Mode::Backup,"pbs","posix").unwrap().preview_executable);
+        assert!(!plan(Mode::Backup,"posix","pbs").unwrap().preview_executable);
+        assert!(!plan(Mode::Restore,"pbs","posix").unwrap().preview_executable);
     }
     #[test]
     fn vmware_and_ovirt_ct_are_disabled_until_native_api_certification() {

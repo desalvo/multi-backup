@@ -42,3 +42,7 @@ Questa è una valutazione basata su sorgenti GitHub, file di CI e risultati **co
 Non esiste una percentuale di completamento attendibile per una “RC completa di tutti i plugin”: molte integrazioni sono ancora semplici contratti `Planned`. Per una **RC ristretta** (Rust core + POSIX + backend S3 MinIO/RustFS verificati + server singolo) i blocchi chiave sono **5 gruppi** sopra: test del nuovo server, packaging firmato/installato, recovery reale, sicurezza, gate finale. Per una **RC HA** si aggiunge failover Patroni/etcd e write fencing end-to-end. Per una **RC con tutti i plugin** resta un programma sostanziale di implementazione E2E per hypervisor, provider cloud, OpenAFS, Ceph e storage enterprise; non è corretto considerarla imminente.
 
 Repo: https://github.com/desalvo/multi-backup . Ultima full CI completa nota verde: https://github.com/desalvo/multi-backup/actions/runs/43819587305 ; ma NON sullo SHA finale.
+
+## r069 — plugin hypervisor: separazione fonte PVE/PBS
+
+La separazione formale di `proxmox` (PVE) e `pbs` (Proxmox Backup Server) è completata nel catalogo Rust, con test fail-closed. È un passo di modellazione dell'interfaccia, NON un motore di backup: entrambe le integrazioni restano Planned e senza prova E2E reale. VMware/oVirt continuano VM-only; CT soltanto da API ufficiali dell'hypervisor e collaudo per modalità.

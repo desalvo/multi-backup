@@ -615,3 +615,7 @@ Current VMware and oVirt plugin scope is VM-only. Do NOT build a container-agent
 ## r068 — Patroni HAProxy TLS primary check fix
 
 Corrected HAProxy health probes to use TLS `check-ssl` and verify the private Patroni CA and per-node SNI/hostname on port 8008; previously the health check was plain HTTP while Patroni REST is HTTPS, so a healthy primary could be permanently DOWN. The check uses `/primary` (leader lock and writable PostgreSQL) rather than `/health`, and preserves TLS pass-through on the application PostgreSQL connection, bound to localhost:6432. A cheap targeted CI syntax check will use the actual distro HAProxy binary; full 3-node Patroni failover certification is still pending.
+
+## r069 — PVE vs PBS native Rust plugin catalog
+
+Separated the old combined Proxmox VE/PBS catalog into two distinct IDs: retain `proxmox` for PVE backward compatibility and add `pbs` for Proxmox Backup Server datastore/snapshot scope. Capability policy remains **Planned/non-executable** with Rust tests preventing accidental generic backup/restore. No PVE QEMU/LXC or PBS real environment E2E certification has yet been achieved; VMware/oVirt remain VM-only, native CT capability gated. Do not claim shipped/working hypervisor plugins until live backup/restore tests pass.
