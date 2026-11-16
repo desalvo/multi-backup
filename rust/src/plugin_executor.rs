@@ -8,11 +8,13 @@ use std::{fs, path::Path};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn regular_directory(path: &Path) -> Result<std::path::PathBuf> {
-    let kind = fs::symlink_metadata(path)?.file_type();
+    let kind = fs::symlink_metadata(path)
+        .map_err(|e|format!("Metadata of plugin source/destination {}: {e}",path.display()))?.file_type();
     if !kind.is_dir() || kind.is_symlink() {
         return Err("Plugin path must be an existing real directory (not a symlink)".into());
     }
-    Ok(fs::canonicalize(path)?)
+    Ok(fs::canonicalize(path)
+        .map_err(|e|format!("Canonicalize plugin path {}: {e}",path.display()))?)
 }
 
 fn regular_identity(identity: &Path) -> Result<std::path::PathBuf> {
