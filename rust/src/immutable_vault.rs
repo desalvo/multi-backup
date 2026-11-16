@@ -157,6 +157,32 @@ pub fn restore(root:&Path,id:&str,identity:&Path,destination:&Path)->Result<Vaul
     archive::extract(&archive_file,identity,destination)?;
     Ok(record)
 }
+/// Decrypt only in memory with a caller-supplied zeroizing age identity.
+pub fn verify_from_memory(root:&Path,id:&str,secret:&[u8])->Result<VaultRecord>{
+    let root=root_directory(root)?;
+    let _=policy(&root)?;
+    let _=safe_snapshot_dir(&root)?;
+    let item=snapshot_file(&root,id)?;
+    let (sha,bytes)=verify_sidecar(&item)?;
+    let count=archive::verify_from_memory(&item,secret)?;
+    Ok(VaultRecord{id:id.to_owned(),sha256:sha,encrypted_bytes:bytes,
+        files:Some(count),external_worm_verified:false})
+}
+pub fn restore_from_memory(root:&Path,id:&str,secret:&[u8],destination:&Path)
+    ->Result<VaultRecord>{
+    let record=verify_from_memory(root,id,secret)?;
+    let root=root_directory(root)?;
+    let _=safe_snapshot_dir(&root)?;
+    let archive_file=snapshot_file(&root,id)?;
+    if fs::symlink_metadata(destination).is_ok(){
+        return Err("Vault restore destination already exists".into());
+    }
+    let parent=destination.parent().ok_or("Explicit restore parent required")?;
+    let parent=root_directory(parent)?;
+    if parent.starts_with(&root){return Err("Refusing restore into vault".into());}
+    archive::extract_from_memory(&archive_file,secret,destination)?;
+    Ok(record)
+}
 pub fn list(root:&Path)->Result<Vec<VaultRecord>>{
     let root=root_directory(root)?;
     let _=policy(&root)?;
