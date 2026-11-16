@@ -725,3 +725,14 @@ One-line English commit summary: Preserve pinned WORM manifest versions across d
 - **Qualification is pending** until the real GitHub Actions job completes successfully on this SHA. A syntactically correct script does NOT count as a successful PostgreSQL/RustFS test. Even PASS will certify only this ephemeral RustFS+PG16 lab, not synchronized production DB+data snapshots, Patroni failover, Ceph RGW, physical failure domains, release signing or cross-OS installers.
 
 One-line English commit summary: Add a real ephemeral PostgreSQL-to-RustFS WORM disaster-restore drill with pinned DB/data receipts and fail-closed repeated-restore checks.
+
+
+## r085 — real PG16 + RustFS WORM disaster-recovery evidence (16 Nov 2026)
+
+- **PASS on exact functional SHA `aca51a4ed6d126b3e2af7e1c94a8fbfea412995e`**: GitHub Actions https://github.com/desalvo/multi-backup/actions/runs/43866257791 ran real RustFS 1.0.3 S3 Object Lock COMPLIANCE plus ephemeral real PostgreSQL 16. The logs confirm `DB logical restore completed into new empty cluster`, `PASS real isolated PG16 -> age -> RustFS WORM -> pinned DB+data restore`, and final RustFS negative-delete/retention suite PASS. The current lightweight static CI https://github.com/desalvo/multi-backup/actions/runs/43866257960 is also **PASS**.
+- Scope of certification: encrypted PostgreSQL logical dump, separate data backup, S3 WORM retained-version recovery after paired manifest delete markers, byte-exact data/row verification and fail-closed repeat restore, all on **one disposable GitHub-hosted runner**, not a live production environment.
+- Does NOT certify coordinated transactional point-in-time snapshots of a production DB with an independently running filesystem data backup, server application resume, three-node Patroni/etcd, recovery on distinct failure-domain hosts, Ceph RGW, OS installer signatures or native update/rollback.
+- Remaining narrow RC release gates: final SHA full Production Gate, release installation/update/rollback/firma on supported native target platforms, HTTPS monitor token revocation/SNMPv3 and network isolation acceptance, review of PR stacking/mergeability and a documented limited-provider scope. HA RC additionally requires real 3-node primary kill, DCS partition, fencing, synchronous standby promotion, no split brain, node rejoin and client failover.
+- Ceph 3-node kind RGW trial https://github.com/desalvo/multi-backup/actions/runs/43848726571 remains **FAIL** despite running MON/OSD/RGW; 89 PG remained remapped and a 320s readiness deadline expired after CRUSH reconciliation. Ceph remains outside limited RC, GPFS experimental and non-blocking; PVE/PBS backup engines, VMware/oVirt, GitHub/Dropbox authenticated field integrations are not certified.
+
+One-line English commit summary: Record real PostgreSQL and RustFS WORM disaster-recovery PASS evidence while keeping HA, Ceph and signed RC publication gated.
