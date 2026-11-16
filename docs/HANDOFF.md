@@ -854,3 +854,13 @@ One-line English commit summary: Integrate real isolated Patroni PG16 and TLS et
 - This is admission control, not a certified global exactly-once transaction/storage write fence; real multi-replica network failure testing and manifest atomic fencing remain open. No signed RC/stable release has been issued.
 
 One-line English commit summary: Reject mismatched replica admission limits at server startup before distributing jobs.
+
+
+## r159 — native PVE VM/CT backup-media inventory (read-only, no false restore claim)
+
+- Adds Rust CLI `plugins pve-backup-media --config-json PVE.json --node NODE --storage STORE --guest-id VMID --json`. Uses documented Proxmox `GET /api2/json/nodes/NODE/storage/STORE/content?content=backup&vmid=VMID` over certificate-verified HTTPS, no redirects, owner-only API token. 2 MiB max response, max 10k media, strict same-storage, same-guest and duplicate volid checks.
+- Exposes actual PVE backup volume identifiers, format, sizes, creation timestamps, guest subtype when explicitly provided, PVE protection and provider verification state; `multibackup_archive_verified=false`, `exported_to_multibackup=false`, `multibackup_restore_certified=false` always, even if PVE says verified OK. Native PVE list does not imply successful encrypted Multi Backup archive transfer, nor guest create-only restore.
+- Rust unit tests cover native PVE archive JSON, optional/unknown kinds, provider verification provenance, mismatched guest and storage ID, traversal, duplicate volume, malformed size and dangerous flags. Test on real authenticated PVE and archive fetch+restore remain required for any provider RC claim.
+- Vendor reference: https://pve.proxmox.com/pve-docs/api-viewer/#/nodes/{node}/storage/{storage}/content and Proxmox storage API documentation. GPFS IBM-native semantics remain outside protocol-only NFS/SMB certification.
+
+One-line English commit summary: Add strict read-only native PVE VM/CT backup media listing with independent archive verification provenance.

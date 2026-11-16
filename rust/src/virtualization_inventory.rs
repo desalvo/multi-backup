@@ -292,6 +292,156 @@ pub fn pve_backup_task_status(cfg:&Config,node:&str,upid:&str)->Result<PveTaskSt
 }
 
 
+
+#[derive(Debug,Serialize)]
+pub struct PveMedia {
+    pub volid:String,
+    pub guest_id:u32,
+    pub guest_kind:Option<String>,
+    pub size_bytes:Option<u64>,
+    pub created_unix:Option<i64>,
+    pub format:String,
+    pub protected:bool,
+    pub pve_verification_state:String,
+    pub pve_verification_ok:bool,
+    pub multibackup_archive_verified:bool,
+}
+#[derive(Debug,Serialize)]
+pub struct PveMediaInventory{
+    pub provider:String,
+    pub node:String,
+    pub storage:String,
+    pub guest_id:u32,
+    pub read_only:bool,
+    pub media:Vec<PveMedia>,
+    pub exported_to_multibackup:bool,
+    pub multibackup_restore_certified:bool,
+}
+fn valid_pve_volid(storage:&str,volid:&str)->Result<()>{
+    let prefix=format!("{storage}:");
+    let relative=volid.strip_prefix(&prefix).ok_or("PVE media belongs to another storage")?;
+    if relative.is_empty()||relative.len()>512||relative.split('/').any(|segment|
+        segment.is_empty()||segment=="."||segment==".."||
+        !segment.bytes().all(|c|c.is_ascii_alphanumeric()||b"_.-".contains(&c))){
+        return Err("Unsafe or traversal-prone PVE media volume identity".into());
+    }
+    Ok(())
+}
+fn parse_pve_media(node:&str,store:&str,vmid:u32,bytes:&[u8])
+    ->Result<PveMediaInventory>{
+    validate_pve_name(node)?;
+    validate_pve_name(store)?;
+    if !(100..=999_999_999).contains(&vmid){
+        return Err("Invalid PVE guest ID for media listing".into());
+    }
+    let document:Value=serde_json::from_slice(bytes)?;
+    let items=document.get("data").and_then(Value::as_array)
+        .ok_or("PVE media listing missing data array")?;
+    if items.len()>10_000{return Err("PVE media listing exceeds limit".into());}
+    let mut seen=std::collections::HashSet::new();
+    let mut media=Vec::with_capacity(items.len());
+    for item in items{
+        if item.get("content").and_then(Value::as_str)!=Some("backup"){
+            return Err("PVE returned non-backup storage content".into());
+        }
+        let returned_id=item.get("vmid").and_then(Value::as_u64)
+            .ok_or("PVE backup volume lacks VMID")?;
+        if returned_id!=u64::from(vmid){
+            return Err("PVE returned backup for another guest ID".into());
+        }
+        let id=item.get("volid").and_then(Value::as_str)
+            .ok_or("PVE backup volume ID is missing")?;
+        valid_pve_volid(store,id)?;
+        if !seen.insert(id.to_owned()){
+            return Err("PVE returned duplicate backup volume IDs".into());
+        }
+        let subtype=match item.get("subtype").and_then(Value::as_str){
+            Some("qemu")=>Some("qemu".to_owned()),
+            Some("lxc")=>Some("lxc".to_owned()),
+            Some(_)=>return Err("Unknown PVE native backup subtype".into()),
+            None=>None,
+        };
+        let format=item.get("format").and_then(Value::as_str)
+            .ok_or("PVE backup format missing")?;
+        if format.len()>32||format.is_empty()||
+           !format.bytes().all(|c|c.is_ascii_alphanumeric()||b"_.-".contains(&c)){
+            return Err("PVE backup format contains unsafe characters".into());
+        }
+        let size=match item.get("size"){
+            Some(Value::Number(n))=>Some(n.as_u64().ok_or("Invalid PVE media size")?),
+            Some(Value::Null)|None=>None,
+            _=>return Err("Invalid PVE media size".into()),
+        };
+        let created=match item.get("ctime"){
+            Some(Value::Number(n))=>{
+                let t=n.as_i64().ok_or("Invalid PVE media creation time")?;
+                if !(1..=253402300799).contains(&t){return Err("Invalid PVE creation timestamp".into());}
+                Some(t)
+            },
+            Some(Value::Null)|None=>None,
+            _=>return Err("Invalid PVE creation timestamp".into()),
+        };
+        let state=item.get("verification").and_then(Value::as_object)
+            .and_then(|m|m.get("state")).and_then(Value::as_str)
+            .unwrap_or("unverified");
+        if state.len()>32||
+           !state.bytes().all(|c|c.is_ascii_alphanumeric()||b"_-".contains(&c)){
+            return Err("PVE verification state unsafe".into());
+        }
+        let protected=match item.get("protected"){
+            Some(Value::Bool(x))=>*x,
+            Some(Value::Number(n))=>match n.as_u64(){
+                Some(0)=>false,Some(1)=>true,_=>return Err("Invalid protection flag".into()),
+            },
+            Some(Value::Null)|None=>false,
+            _=>return Err("Invalid protection flag".into()),
+        };
+        media.push(PveMedia{volid:id.to_owned(),guest_id:vmid,
+            guest_kind:subtype,size_bytes:size,created_unix:created,
+            format:format.to_owned(),protected,
+            pve_verification_state:state.to_owned(),
+            pve_verification_ok:state=="ok",
+            multibackup_archive_verified:false});
+    }
+    media.sort_by(|a,b|a.volid.cmp(&b.volid));
+    Ok(PveMediaInventory{provider:"proxmox".into(),node:node.into(),
+        storage:store.into(),guest_id:vmid,read_only:true,media,
+        exported_to_multibackup:false,multibackup_restore_certified:false})
+}
+/// Native read-only media inventory on a selected PVE node/storage/guest.
+/// Not an encrypted-media download, PBS chunk transfer or recovery proof.
+pub fn pve_backup_media(cfg:&Config,node:&str,store:&str,vmid:u32)
+    ->Result<PveMediaInventory>{
+    cfg.validate()?;
+    if cfg.provider!="proxmox"{return Err("PVE storage media query refuses PBS provider".into());}
+    validate_pve_name(node)?;
+    validate_pve_name(store)?;
+    if !(100..=999_999_999).contains(&vmid){
+        return Err("Invalid PVE guest ID".into());
+    }
+    let mut url=Url::parse(&cfg.endpoint)?;
+    url.path_segments_mut().map_err(|_|"Invalid PVE URL")?
+        .extend(["api2","json","nodes",node,"storage",store,"content"]);
+    url.query_pairs_mut().append_pair("content","backup")
+        .append_pair("vmid",&vmid.to_string());
+    let response=pve_read_media_https(cfg,&url)?;
+    parse_pve_media(node,store,vmid,&response)
+}
+fn pve_read_media_https(cfg:&Config,url:&Url)->Result<Vec<u8>>{
+    let agent=ureq::AgentBuilder::new().redirects(0)
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(20)).build();
+    let mut authorization=format!("PVEAPIToken={}={}",cfg.token_id,cfg.token_secret);
+    let result=agent.get(url.as_str()).set("Authorization",&authorization).call();
+    authorization.zeroize();
+    let response=result.map_err(|_|"PVE HTTPS storage list rejected, untrusted TLS or unauthorized")?;
+    if response.status()!=200{return Err("Unexpected PVE media status".into());}
+    let mut bytes=Vec::new();
+    response.into_reader().take(2_097_153).read_to_end(&mut bytes)?;
+    if bytes.len()>2_097_152{return Err("Oversized PVE media list".into());}
+    Ok(bytes)
+}
+
 #[derive(Debug,Serialize)]
 pub struct PbsSnapshot{
     pub backup_type:String,
@@ -444,6 +594,45 @@ mod tests{
         let fail=pve_task_state("pve-node1",upid,br#"{"data":{"status":"stopped","exitstatus":"failed"}}"#).unwrap();
         assert!(!fail.remote_task_ok);
         assert!(pve_task_state("pve-node1",upid,br#"{"data":{"status":"stopped"}}"#).is_err());
+    }
+    #[test]fn real_pve_storage_content_shape_has_provenance_not_restorability(){
+        let payload=br#"{"data":[
+            {"volid":"local:backup/vzdump-qemu-101-2026_11_16-12_00_00.vma.zst",
+             "content":"backup","vmid":101,"subtype":"qemu",
+             "ctime":1794830400,"size":4096,"format":"vma.zst",
+             "protected":1,"verification":{"state":"ok"}},
+            {"volid":"local:backup/vzdump-qemu-101-2026_11_16-11_00_00.vma.zst",
+             "content":"backup","vmid":101,"format":"vma.zst"}
+        ]}"#;
+        let data=parse_pve_media("node1","local",101,payload).unwrap();
+        assert_eq!(data.media.len(),2);
+        assert!(data.read_only&&!data.exported_to_multibackup);
+        assert!(!data.multibackup_restore_certified);
+        let verified=data.media.iter().find(|m|m.protected).unwrap();
+        assert_eq!(verified.guest_kind.as_deref(),Some("qemu"));
+        assert!(verified.pve_verification_ok);
+        assert!(!verified.multibackup_archive_verified);
+        let unknown=data.media.iter().find(|m|!m.protected).unwrap();
+        assert_eq!(unknown.guest_kind,None);
+        assert!(!unknown.pve_verification_ok);
+    }
+    #[test]fn pve_media_rejects_cross_guest_storage_and_unsafe_volumes(){
+        let payloads=[
+            r#"{"data":[{"content":"backup","vmid":102,"volid":"local:backup/file","format":"vma.zst"}]}"#,
+            r#"{"data":[{"content":"iso","vmid":101,"volid":"local:backup/file","format":"vma.zst"}]}"#,
+            r#"{"data":[{"content":"backup","vmid":101,"volid":"other:backup/file","format":"vma.zst"}]}"#,
+            r#"{"data":[{"content":"backup","vmid":101,"volid":"local:../etc/passwd","format":"vma.zst"}]}"#,
+            r#"{"data":[{"content":"backup","vmid":101,"volid":"local:backup/file","format":"vma.zst"},{"content":"backup","vmid":101,"volid":"local:backup/file","format":"vma.zst"}]}"#,
+            r#"{"data":[{"content":"backup","vmid":101,"volid":"local:backup/file","format":"vma.zst","protected":2}]}"#,
+            r#"{"data":[{"content":"backup","vmid":101,"volid":"local:backup/file","format":"vma.zst","size":-7}]}"#
+        ];
+        for case in payloads{
+            assert!(parse_pve_media("pve1","local",101,case.as_bytes()).is_err(),"{case}");
+        }
+        assert!(parse_pve_media("pve1/evil","local",101,br#"{"data":[]}"#).is_err());
+        assert!(parse_pve_media("pve1","local",99,br#"{"data":[]}"#).is_err());
+        let pbs=config("pbs","https://pbs.internal:8007");
+        assert!(pve_backup_media(&pbs,"pve1","local",101).is_err());
     }
     #[test]fn pbs_snapshot_verification_is_not_multibackup_archive_attestation(){
         let list=br#"{"data":[
