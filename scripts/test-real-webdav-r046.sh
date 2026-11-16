@@ -44,9 +44,17 @@ printf "%s %s %s\n" "https://localhost:18919/" mbci "$PASSWORD" | sudo tee -a /e
 sudo chmod 0600 /etc/davfs2/secrets
 unset PASSWORD
 sudo mount -t davfs -o ro "https://localhost:18919/" "$RO"
-test "$(findmnt -rn -T "$RO" -o FSTYPE)" = fuse.davfs
+FSTYPE="$(findmnt -rn -T "$RO" -o FSTYPE)"
+if [ "$FSTYPE" != "fuse.davfs" ]; then
+  printf 'FAIL WebDAV mount type: expected fuse.davfs; observed %s\n' "$FSTYPE" >&2
+  exit 1
+fi
 "$CLI" plugins probe --plugin webdav --mount "$RO" --json > "$WORK/probe.json"
-test "$(jq -er '.rw_mount_option == false and .fs_type == "fuse.davfs"' "$WORK/probe.json")" = true
+if ! jq -e '.rw_mount_option == false and .fs_type == "fuse.davfs"' "$WORK/probe.json" >/dev/null; then
+  echo "FAIL WebDAV mount probe did not attest exact RO fuse.davfs" >&2
+  cat "$WORK/probe.json" >&2
+  exit 1
+fi
 if "$CLI" plugins backup --input webdav --output posix --source "$RO" \
   --root "$STORE" --identity "$IDENTITY" --label not-attested >/dev/null 2>&1; then
   echo "FAIL WebDAV allowed backup without external snapshot attestation" >&2; exit 1
