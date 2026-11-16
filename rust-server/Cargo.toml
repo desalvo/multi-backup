@@ -35,3 +35,6 @@ native-tls = "0.2"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 url = "2.5"
+
+# Standalone TLS listener for the monitor.read-only REST API (not the web UI)
+axum-server = { version = "=0.7.3", features = ["tls-rustls"] }
