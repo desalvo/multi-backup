@@ -89,6 +89,11 @@ fn monitor_server(origin:&str,token_file:&str)->Result<String,String>{
     };
     let state=get("/v1/status")?;
     let agents=get("/v1/agents")?;
+    summarize_monitor_status(&state,&agents)
+}
+
+/// Validate the server REST contract before any values enter native GUI text.
+fn summarize_monitor_status(state:&serde_json::Value,agents:&serde_json::Value)->Result<String,String>{
     if state["schema"]!=1||state["read_only"]!=true||
        agents["schema"]!=1||agents["read_only"]!=true{
         return Err("REST non conforme al protocollo read-only v1".into());
@@ -103,7 +108,7 @@ fn monitor_server(origin:&str,token_file:&str)->Result<String,String>{
             format!("Contatore agente {field} mancante"))
     };
     let mut report=format!(
-        "Cluster: {} repliche, {} attive\\nJob: {} in coda, {} in esecuzione, {} falliti\\nPostgreSQL: {}\\nAgenti: {} totali, {} online, {} approvati, {} revocati\\n",
+        "Cluster: {} repliche, {} attive\nJob: {} in coda, {} in esecuzione, {} falliti\nPostgreSQL: {}\nAgenti: {} totali, {} online, {} approvati, {} revocati\n",
         replicas.len(),replicas.iter().filter(|r|r["healthy"]==true).count(),
         jobs.iter().filter(|j|j["status"]=="queued").count(),
         jobs.iter().filter(|j|j["status"]=="running").count(),
@@ -112,7 +117,7 @@ fn monitor_server(origin:&str,token_file:&str)->Result<String,String>{
         count("total")?,count("online")?,count("approved")?,count("revoked")?
     );
     for replica in replicas.iter().take(32){
-        report.push_str(&format!("Replica {}: {}\\n",
+        report.push_str(&format!("Replica {}: {}\n",
             replica["id"].as_str().unwrap_or("sconosciuta"),
             if replica["healthy"]==true{"OK"}else{"NON DISPONIBILE"}));
     }
@@ -1992,7 +1997,19 @@ impl eframe::App for NativeApp {
     fn update(&mut self, ctx: &Context, _: &mut eframe::Frame) {
         if let Some(frames) = &mut self.smoke_frames {
             *frames += 1;
-            if *frames >= 3 {
+            // A single native GUI process visits every sidebar page instead
+            // of re-running the entire UI test ten times.
+            let index=(*frames-1)/3;
+            if index<Page::ALL.len(){
+                self.page=Page::ALL[index];
+                if (*frames-1)%3==0{
+                    println!("RUST_GUI_PAGE_SMOKE={}",self.page.label());
+                }
+            }else if *frames==Page::ALL.len()*3+1{
+                self.about=true;
+                println!("RUST_GUI_PAGE_SMOKE=About");
+            }
+            if *frames>=Page::ALL.len()*3+4{
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             ctx.request_repaint_after(Duration::from_millis(90));
@@ -2177,6 +2194,31 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod provider_gui_tests{
     use super::*;
+    #[test]
+    fn monitor_v1_readonly_payload_is_validated_and_rendered_multiline(){
+        let status=serde_json::json!({
+            "schema":1,"read_only":true,
+            "cluster":{"replicas":[{"id":"worker-a","healthy":true},
+                                   {"id":"worker-b","healthy":false}],
+                       "jobs":[{"status":"queued"},{"status":"failed"}]},
+            "database":{"database":{"role":"primary"}}
+        });
+        let agents=serde_json::json!({
+            "schema":1,"read_only":true,
+            "agents":{"total":3,"online":2,"approved":1,"revoked":1}
+        });
+        let text=summarize_monitor_status(&status,&agents).unwrap();
+        assert!(text.contains("Cluster: 2 repliche, 1 attive\nJob:"));
+        assert!(text.contains("PostgreSQL: primary\nAgenti: 3 totali"));
+        assert!(text.contains("Replica worker-b: NON DISPONIBILE\n"));
+        assert!(!text.contains("\\n"),"GUI must show real line breaks");
+        let mut malformed=agents.clone();
+        malformed["agents"]["online"]=serde_json::Value::Null;
+        assert!(summarize_monitor_status(&status,&malformed).is_err());
+        let mut unsafe_status=status.clone();
+        unsafe_status["read_only"]=serde_json::json!(false);
+        assert!(summarize_monitor_status(&unsafe_status,&agents).is_err());
+    }
     #[test]
     fn every_catalog_plugin_is_discoverable_and_missing_plugins_are_not_invented(){
         assert_eq!(matching_providers("").len(),plugins::CATALOG.len());

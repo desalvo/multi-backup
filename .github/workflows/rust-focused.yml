@@ -98,5 +98,5 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libasound2-dev
-      - name: Compile desktop
-        run: cargo check --manifest-path rust-desktop/Cargo.toml
+      - name: Compile and execute native desktop unit tests
+        run: cargo test --manifest-path rust-desktop/Cargo.toml --all-targets

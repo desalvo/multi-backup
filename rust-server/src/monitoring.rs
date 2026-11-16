@@ -179,7 +179,7 @@ async fn verify_api(state:&AppState,headers:&HeaderMap)->Result<(),Response>{
     if matches!(tokio::task::spawn_blocking(move||db.monitor_token_valid(&token)).await,
         Ok(Ok(true))){Ok(())}else{Err(StatusCode::UNAUTHORIZED.into_response())}
 }
-async fn api_status(State(state):State<AppState>,headers:HeaderMap)->Response{
+pub(crate) async fn api_status(State(state):State<AppState>,headers:HeaderMap)->Response{
     if let Err(e)=verify_api(&state,&headers).await{return e;}
     match state_snapshot(&state).await{
         Ok(data)=>([(header::CACHE_CONTROL,"no-store")],
@@ -215,7 +215,7 @@ fn safe_agent_counts(raw:&Value)->Value{
         "revoked":agents.iter().filter(|x|x["revoked"]==true).count()
     })
 }
-async fn api_agents(State(state):State<AppState>,headers:HeaderMap)->Response{
+pub(crate) async fn api_agents(State(state):State<AppState>,headers:HeaderMap)->Response{
     if let Err(e)=verify_api(&state,&headers).await{return e;}
     let Some(db)=state.0.cluster.clone() else{
         return StatusCode::SERVICE_UNAVAILABLE.into_response();

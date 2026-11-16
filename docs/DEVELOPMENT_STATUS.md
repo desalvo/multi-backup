@@ -951,3 +951,13 @@ One-line English commit summary: Add native Rust server-agent monitoring, atomic
 - Real three-physical-host failover/partition fencing and multi-host agent transport still open. Software gate results must be recorded from CI exact commit before any component can be promoted. No main merge, tag or distribution merely because workflow exists.
 
 One-line English commit summary: Reuse single-SHA Rust, PostgreSQL agent, OCI Kubernetes and GUI gates while isolating physical HA on a private ephemeral runner.
+
+
+## r170 — REST monitoring agent/PG integration and full native GUI page render sweep (16 Nov 2026)
+
+- On top of r168 single-SHA software gate, the existing **real PostgreSQL16 signed-age agent upload test** now also calls the same read-only `/v1/status` and `/v1/agents` Rust Axum handlers used by the native GUI, validates schema and aggregate counts, rejects missing/wrong/revoked `monitor.read` token and verifies no secrets/agent profiles or identities are exposed. This extends the existing test fixture, **not a duplicate test job**. It remains an in-process HTTP handler test on genuine PG16, **not remote HTTPS TLS certification**.
+- Native egui GUI monitor response parsing is now separately unit-tested for schema, fail-closed missing counters and actual multiline display, fixing literal escaped `\\n` text. In the **existing** Xvfb smoke job, a single GUI process visits all **ten** sidebar pages and About (three animation/render frames per page), checking visited page labels and successful exit. This is real Linux GUI render acceptance, still not screenshot-perfect UX or Windows/macOS installer acceptance.
+- The existing focused Rust workflow executes full desktop **unit tests**, not only `cargo check`. Existing r168 single-SHA workflow now triggers on changed core/server/desktop/test scripts and still reuses existing PostgreSQL, egui and Kind jobs. Full gate PASS must be confirmed for the new exact SHA.
+- The authoritative **33-plugin and 4-direction RC readiness matrix** is in `docs/RC_READINESS_R170_IT.md`; no untested plugin was promoted to production `Ready`. Field-only items (three independent physical machines, HA disruption, full remote agent TLS, vendor authentication, signed installers, root-resistant WORM) remain open. No release, tag or main merge.
+
+One-line English commit summary: Exercise PostgreSQL-backed monitoring and every Rust GUI page with existing CI suites while retaining honest 33-plugin RC readiness gates.
