@@ -9,6 +9,8 @@ if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_ENVIRONMENT:-}" != github-ho
 fi
 for cmd in snmpd snmpwalk openssl ss python3;do command -v "$cmd" >/dev/null;done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SERVER="$ROOT/rust-server/target/debug/multi-backup-server"
+test -x "$SERVER"
 TMP="$(mktemp -d)"
 PID=""
 cleanup(){
@@ -25,7 +27,7 @@ export MULTI_BACKUP_SNMP_ENABLED=true MULTI_BACKUP_SNMP_BIND=127.0.0.1
 export MULTI_BACKUP_SNMP_PORT=11611 MULTI_BACKUP_SNMP_VERSIONS=3
 export MULTI_BACKUP_SNMP_V3_USER=mbmonitor
 bash "$ROOT/scripts/configure-baremetal-snmp.sh" "$TMP/snmpd.conf" >/dev/null
-python3 - "$TMP/snmpd.conf" <<'PY'
+python3 - "$TMP/snmpd.conf" "$SERVER" <<'PY'
 from pathlib import Path
 import sys
 path=Path(sys.argv[1])
@@ -34,10 +36,15 @@ assert "agentAddress udp:127.0.0.1:11611" in data
 assert "rouser mbmonitor priv -V mbstatus" in data
 assert "rocommunity" not in data
 assert "extend mbStatus /usr/bin/multi-backup-server monitor-snmp-status" in data
-# Only the native status producer is replaced. Net-SNMP/VACM/authPriv are real.
+# Exercise the actual Rust status producer with real Net-SNMP/VACM/authPriv.
+# No synthetic /bin/echo or plaintext secrets are used. The native
+# standalone producer has no PostgreSQL dependency in this isolated lab.
+binary=Path(sys.argv[2]).resolve()
+assert binary.is_file() and binary.name=="multi-backup-server"
 data=data.replace(
     "extend mbStatus /usr/bin/multi-backup-server monitor-snmp-status",
-    "extend mbStatus /bin/echo mb_cluster_nodes_total=3")
+    f"extend mbStatus {binary} monitor-snmp-status")
+assert f"extend mbStatus {binary} monitor-snmp-status" in data
 path.write_text(data)
 path.chmod(0o600)
 PY
@@ -51,7 +58,8 @@ for n in $(seq 1 25);do
     -a SHA -A "$AUTH" -x AES -X "$PRIV" -t 1 -r 0 \
     udp:127.0.0.1:11611 .1.3.6.1.4.1.8072.1.3.2 \
     >"$TMP/authorized.log" 2>"$TMP/authorized-error.log";then
-    if grep -Fq "mb_cluster_nodes_total=3" "$TMP/authorized.log";then
+    if grep -Fq "multi_backup_cluster_nodes_total=1" "$TMP/authorized.log" &&
+       grep -Fq "multi_backup_database_primary=0" "$TMP/authorized.log";then
       ready=true
       break
     fi
@@ -78,5 +86,5 @@ if snmpwalk -On -v2c -c public -t 1 -r 0 \
   >/dev/null 2>&1;then
   echo "FAIL SNMP exposed legacy v2c with v3-only configuration" >&2;exit 1
 fi
-echo "PASS real Net-SNMP v3 SHA/AES authPriv read; wrong-key and v2c denied; loopback-only"
-echo "Scope: real Net-SNMP transport with synthetic read-only extend fixture"
+echo "PASS real Net-SNMP v3 SHA/AES authPriv with native Rust status producer; wrong-key and v2c denied; loopback-only"
+echo "Scope: real Net-SNMP transport and actual Rust standalone status; not yet remote server/PG cluster polling"

@@ -784,3 +784,12 @@ One-line English commit summary: Integrate passed native PVE vzdump and PBS snap
 - Outstanding: genuine 3-independent-host Patroni split-brain/network partitions, PostgreSQL-backed live REST monitor.read HTTPS, PVE/PBS actual backup-media/restore qualification, VMware/oVirt real backup/restore, signed installers and full final Production Gate. GPFS suspended and excluded.
 
 One-line English commit summary: Consolidate real native Rust HTTPS monitoring, TLS key hardening and cryptoprovider startup fix.
+
+
+## r140 — real SNMPv3 polling now reads the native Rust server's monitoring output
+
+- The earlier real [SNMPv3 acceptance 43875372585](https://github.com/desalvo/multi-backup/actions/runs/43875372585) already verified real Net-SNMP authPriv SHA/AES, wrong auth key rejection, loopback-only bind and v2c denial, but replaced the actual Rust metrics producer with a synthetic `/bin/echo` fixture.
+- The r140 CI compiles the **real Rust `multi-backup-server`** and configures Net-SNMP `extend` to execute its native `monitor-snmp-status`; assertions now require real standalone counters `multi_backup_cluster_nodes_total=1`, `multi_backup_database_primary=0`, plus all previous negative network/auth checks.
+- A PASS proves end-to-end local SNMPv3 → real Rust metrics producer, not cluster-backed remote polling or production host network separation. No fake readings. The change is a targeted CI acceptance gate; release remains blocked until exact final Production Gate and remaining field tests.
+
+One-line English commit summary: Verify SNMPv3 authPriv against the genuine Rust monitoring producer instead of a synthetic echo.

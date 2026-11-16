@@ -25,5 +25,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends snmp snmpd iproute2
           bash -n scripts/ci/snmp-v3-real-r117.sh
           bash -n scripts/configure-baremetal-snmp.sh
-      - name: Perform real on-host authenticated and encrypted SNMPv3 polling
+      - name: Compile actual Rust status producer (no synthetic metric)
+        run: cargo build --manifest-path rust-server/Cargo.toml --bin multi-backup-server
+      - name: Perform real on-host authenticated SNMPv3 polling against native Rust status
         run: bash scripts/ci/snmp-v3-real-r117.sh
