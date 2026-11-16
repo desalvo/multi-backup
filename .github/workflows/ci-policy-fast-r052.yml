@@ -15,6 +15,9 @@ on:
       - 'tests/test_db_network_isolation_r081.py'
       - 'scripts/db-disaster-restore.sh'
       - 'tests/test_db_disaster_restore_r083.py'
+      - 'scripts/ci/patroni-etcd-real-ha.py'
+      - 'scripts/ci/ha-primary-routing-real.py'
+      - 'tests/test_ha_release_safety_r105.py'
       - 'packaging/ha/**'
       - 'packaging/linux/server.env.example'
       - 'k8s/multi-backup-cluster-r039.preview.yaml'
@@ -52,6 +55,8 @@ jobs:
           python3 -m unittest discover -s tests -p test_db_network_isolation_r081.py -v
           bash -n scripts/db-disaster-restore.sh
           python3 -m unittest discover -s tests -p test_db_disaster_restore_r083.py -v
+          python3 -m py_compile scripts/ci/patroni-etcd-real-ha.py scripts/ci/ha-primary-routing-real.py
+          python3 -m unittest discover -s tests -p test_ha_release_safety_r105.py -v
           python3 - <<'PY'
           from pathlib import Path
           import yaml
