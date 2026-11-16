@@ -1,0 +1,35 @@
+name: Multi Backup - real RustFS S3 Object Lock WORM acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'rust-desktop/**'
+      - 'scripts/ci/s3-worm-rustfs-live.sh'
+      - '.github/workflows/s3-rustfs-live-r050.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-rustfs-real-${ github.ref }
+  cancel-in-progress: true
+jobs:
+  rustfs-real:
+    name: Real RustFS 1.0.3 S3 COMPLIANCE WORM + Rust age verify/restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install age, AWS CLI and validate actual RustFS test script
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          python3 -m pip install 'awscli>=1.42,<2'
+          bash -n scripts/ci/s3-worm-rustfs-live.sh
+      - name: Build and unit test native Rust S3 vault with rustfs provider
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib s3_vault
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Test actual RustFS WORM server, not mock, with negative deletions
+        run: bash scripts/ci/s3-worm-rustfs-live.sh
