@@ -241,3 +241,55 @@ loadCluster();
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden)loadCluster();
 });
+
+// Vault backup storage is separate from the password-protected age identity vault.
+const vaultStatus=document.getElementById("vault-state");
+const vaultRows=document.getElementById("vault-snapshots");
+async function loadImmutableVault(){
+  const status=await fetch("/api/vault-store/status",{credentials:"same-origin",cache:"no-store"});
+  if(!status.ok){
+    vaultStatus.textContent=status.status===403?"Solo amministratore":"Vault append-only non configurato";
+    vaultRows.replaceChildren();return;
+  }
+  const info=await status.json();
+  vaultStatus.textContent="Deposito configurato · external WORM verificato: "+
+    (info.external_worm_verified?"sì":"NO — anteprima, protezione storage indipendente necessaria");
+  const response=await fetch("/api/vault-store/list",{credentials:"same-origin",cache:"no-store"});
+  if(!response.ok){vaultRows.textContent="Impossibile leggere manifest vault";return;}
+  const values=await response.json();
+  vaultRows.replaceChildren();
+  for(const record of values.snapshots||[]){
+    const row=el("div",undefined,"virtual-file");
+    const select=el("button","Seleziona");
+    select.addEventListener("click",()=>{document.getElementById("vault-snapshot").value=record.id;});
+    row.append(el("span",record.id),el("small",String(record.encrypted_bytes)+" B","muted"),select);
+    vaultRows.append(row);
+  }
+}
+async function vaultMutation(operation){
+  vaultStatus.textContent="Operazione vault in corso...";
+  const headers={"X-CSRF-Token":csrf,"Content-Type":"application/json"};
+  const request={method:"POST",credentials:"same-origin",headers};
+  if(operation==="restore"){
+    const id=document.getElementById("vault-snapshot").value.trim();
+    if(!/^[0-9a-f]{32}$/.test(id)){vaultStatus.textContent="ID snapshot vault non valido";return;}
+    const input=document.getElementById("recovery-authorization");
+    const approval=input.value.trim();input.value="";
+    if(approval)headers["X-Multi-Backup-Recovery-Authorization"]=approval;
+    request.body=JSON.stringify({id});
+  }
+  try{
+    const response=await fetch("/api/vault-store/"+operation,request);
+    const data=await response.json();
+    vaultStatus.textContent=response.ok?(
+      operation==="backup"?"Nuovo backup vault: "+data.id+" · WORM esterno non verificato":
+        "Restore in cartella NUOVA: "+data.new_restore_directory):
+      "Errore: "+String(data.error||"vault_unavailable");
+    if(response.ok)await loadImmutableVault();
+  }catch(error){vaultStatus.textContent="Connessione vault non disponibile";}
+  finally{headers["X-Multi-Backup-Recovery-Authorization"]="";}
+}
+document.getElementById("vault-refresh").addEventListener("click",()=>loadImmutableVault().catch(()=>{}));
+document.getElementById("vault-backup").addEventListener("click",()=>vaultMutation("backup"));
+document.getElementById("vault-restore").addEventListener("click",()=>vaultMutation("restore"));
+loadImmutableVault().catch(()=>{vaultStatus.textContent="Vault non disponibile";});
