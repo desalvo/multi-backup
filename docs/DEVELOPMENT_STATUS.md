@@ -804,3 +804,12 @@ One-line English commit summary: Treat validated strict PostgreSQL commit blocki
 - Rust unit tests verify the remote four-way TLS/bearer matrix and private-key permissions/symlink guard; Rust-server focused CI must compile/test before this feature is considered accepted. Native HTTPS probe against real PostgreSQL and external network attack test are separate remaining RC gates; no published stable release.
 
 One-line English commit summary: Require HTTPS and bearer for remote Prometheus and owner-only TLS keys for REST monitoring.
+
+
+## r132 — real Rust Prometheus TLS/bearer acceptance on hosted CI
+
+- New isolated job `.github/workflows/prometheus-https-native-r132.yml` compiles and boots the **real native Rust web server** (not a synthetic SNMP extend fixture) with a locally generated one-day X.509 SAN certificate, mode-0600 private key and fresh random opaque Prometheus bearer.
+- Tests actual `https://127.0.0.1:19502/metrics` with certificate validation, asserts native `multi_backup_up`, cluster and DB counters; verifies tokenless/wrong-bearer return 401, wrong CA fails, HTTP plaintext fails and listener stays loopback-only. Requires an isolated GitHub-hosted runner; no IBM, production keys, external services or host disks.
+- Strictly an opt-in one-shot job; no automatic heavy CI on arbitrary commits. A PASS certifies only the genuine **standalone loopback** Prometheus HTTPS path. Remote VLAN monitoring and real PostgreSQL-scoped REST API require separate field/integration checks. The r131 unit security matrix still requires both TLS and bearer for non-loopback.
+
+One-line English commit summary: Exercise native Rust Prometheus HTTPS and bearer denial against a real isolated server.
