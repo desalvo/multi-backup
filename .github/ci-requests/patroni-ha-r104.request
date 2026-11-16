@@ -1,0 +1,1 @@
+One-shot real Patroni Postgres16 3-etcd TLS HA after waiting for DCS-confirmed synchronous standby prior to leader crash. Require promotion, acknowledgement durability, old primary reintegration, DCS quorum fencing. Fail closed.
