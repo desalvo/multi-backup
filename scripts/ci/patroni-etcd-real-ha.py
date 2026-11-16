@@ -365,16 +365,25 @@ def main():
             successor = wait_primary(root, survivors, processes, 90)
             if successor == initial:
                 raise RuntimeError("Original dead primary was not fenced")
-            new_sync = wait_for("new leader has DCS-confirmed synchronous standby",
-                lambda: dcs_sync_candidate(root, successor), processes, 60)
-            if new_sync not in survivors or new_sync == successor:
-                raise RuntimeError("No independent standby on new primary")
+            # Proven committed data MUST exist on the automatically
+            # promoted primary, independently of whether it already has a
+            # replacement synchronous sender (strict mode may block writes).
             if pg(root, successor, "SELECT payload FROM ha_witness WHERE id=1").stdout.strip() != (
                     "acknowledged-before-failover"):
                 raise RuntimeError("Acknowledged synchronous transaction missing after promotion")
-            pg(root, successor, "INSERT INTO ha_witness VALUES (2,'committed-after-promotion');")
+            print("PASS: acknowledged PG row survived automatic primary promotion",
+                  flush=True)
             if pg(root, initial, "SELECT 1", expect_ok=False).returncode == 0:
                 raise RuntimeError("Terminated primary still accepts clients")
+            if dcs_sync_candidate(root, successor) is None:
+                # If the new primary has not yet selected a synchronous
+                # standby, strict mode MUST block a newly committed write.
+                result = pg(root, successor,
+                    "SET statement_timeout='2000ms'; "
+                    "INSERT INTO ha_witness VALUES (9,'unsafe-without-sync');",
+                    expect_ok=False)
+                if result.returncode == 0:
+                    raise RuntimeError("UNSAFE: strict primary committed without synchronous standby")
             # Rejoin the former leader: Patroni must rewind or rebuild it as a standby.
             path, _ = conf(root, initial)
             patroni[initial] = start(root / f"patroni-{initial}-restart.log",
@@ -387,6 +396,16 @@ def main():
             wait_for("old primary reintegrated as standby", rejoined, processes, 110)
             if len(primaries(root)) != 1:
                 raise RuntimeError("Two Patroni primaries visible after rejoin")
+            new_sync = wait_for("new leader has DCS-confirmed synchronous standby after rejoin",
+                lambda: dcs_sync_candidate(root, successor), processes, 90)
+            if new_sync == successor or new_sync not in (0, 1, 2):
+                raise RuntimeError("New primary lacks an independent synchronous standby")
+            pg(root, successor, "INSERT INTO ha_witness VALUES (2,'committed-after-rejoin');")
+            confirmed = pg(root, successor,
+                "SELECT payload FROM ha_witness WHERE id IN (1,2) ORDER BY id")
+            if confirmed.stdout.strip().splitlines() != [
+                "acknowledged-before-failover", "committed-after-rejoin"]:
+                raise RuntimeError("HA failover or post-rejoin write verification mismatch")
             # Remove etcd majority. All surviving Patroni nodes must lose
             # writable primary status rather than continue with a stale lease.
             for i in (1, 2):
