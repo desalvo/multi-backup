@@ -810,7 +810,7 @@ impl NativeApp {
                     .map_err(|e|e.to_string())?;
                 match action.as_str() {
                     "preflight"=>s3_vault::preflight(&config)
-                        .map(|_|"Ceph RGW/MinIO: versioning + COMPLIANCE preflight PASS".into())
+                        .map(|_|"S3 Ceph RGW/MinIO/RustFS: versioning + COMPLIANCE preflight PASS".into())
                         .map_err(|e|e.to_string()),
                     "backup"=>s3_vault::backup(&config,&source)
                         .map(|r|format!("S3 backup {} cifrato e trattenuto fino a {}",r.id,r.retain_until))
@@ -920,7 +920,7 @@ impl NativeApp {
             self.run_immutable_vault("restore");
         }
         ui.separator();
-        ui.heading("Vault Ceph RGW / MinIO S3 (anteprima)");
+        ui.heading("Vault S3 WORM: Ceph RGW / MinIO / RustFS (anteprima)");
         ui.label("Richiede bucket dedicato con versioning e Object Lock COMPLIANCE. Credenziali solo dal keyring/ambiente isolato, mai nel file JSON.");
         ui.label("Configurazione S3 JSON (senza secret)");
         ui.text_edit_singleline(&mut self.fields.s3_vault_config);
