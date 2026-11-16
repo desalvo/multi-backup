@@ -7,7 +7,6 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf}};
-use tempfile::NamedTempFile;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const POLICY: &str = ".multi-backup-immutable-vault-v1.json";
@@ -117,7 +116,7 @@ pub fn status(root:&Path)->Result<serde_json::Value>{
 pub fn backup(root:&Path,source:&Path)->Result<VaultRecord>{
     let root=root_directory(root)?;
     let cfg=policy(&root)?;
-    let snapshots=safe_snapshot_dir(&root)?;
+    let _snapshots=safe_snapshot_dir(&root)?;
     let source_root=root_directory(source)?;
     if source_root.starts_with(&root)||root.starts_with(&source_root){
         return Err("Vault and input directory cannot overlap".into());
@@ -125,7 +124,7 @@ pub fn backup(root:&Path,source:&Path)->Result<VaultRecord>{
     let mut random=[0u8;16];
     OsRng.fill_bytes(&mut random);
     let id=hex::encode(random);
-    let dest=snapshot_file(&snapshots,&id)?;
+    let dest=snapshot_file(&root,&id)?;
     let member_count=archive::create(&source_root,&dest,&cfg.recipient,
         &format!("multi-backup/vault/{id}"))?;
     let (sha,bytes)=verify_sidecar(&dest)?;
@@ -135,8 +134,8 @@ pub fn backup(root:&Path,source:&Path)->Result<VaultRecord>{
 pub fn verify(root:&Path,id:&str,identity:&Path)->Result<VaultRecord>{
     let root=root_directory(root)?;
     let _=policy(&root)?;
-    let snapshots=safe_snapshot_dir(&root)?;
-    let path=snapshot_file(&snapshots,id)?;
+    let _snapshots=safe_snapshot_dir(&root)?;
+    let path=snapshot_file(&root,id)?;
     let (sha,bytes)=verify_sidecar(&path)?;
     let files=archive::verify(&path,identity)?;
     Ok(VaultRecord{id:id.to_string(),sha256:sha,encrypted_bytes:bytes,files:Some(files),
@@ -144,8 +143,9 @@ pub fn verify(root:&Path,id:&str,identity:&Path)->Result<VaultRecord>{
 }
 pub fn restore(root:&Path,id:&str,identity:&Path,destination:&Path)->Result<VaultRecord>{
     let record=verify(root,id,identity)?;
-    let snapshots=safe_snapshot_dir(&root_directory(root)?)?;
-    let archive_file=snapshot_file(&snapshots,id)?;
+    let vault_root=root_directory(root)?;
+    let _snapshots=safe_snapshot_dir(&vault_root)?;
+    let archive_file=snapshot_file(&vault_root,id)?;
     if fs::symlink_metadata(destination).is_ok() {
         return Err("Vault restore destination already exists".into());
     }
