@@ -18,9 +18,10 @@ def fixture(mons=3, up=3, hosts=3):
         "quorum_names": [f"mon.{n}" for n in range(mons)],
         "osdmap": {"osdmap": {
             "num_osds": up, "num_up_osds": up, "num_in_osds": up,
+            "num_remapped_pgs": 0,
         }},
     }
-    status["pgmap"] = {"num_pgs": 18, "num_remapped_pgs": 0,
+    status["pgmap"] = {"num_pgs": 18,
                        "pgs_by_state": [{"state_name": "active+clean", "count": 18}]}
     tree = {"nodes": (
         [{"type": "host", "name": f"kind-worker{n}",
@@ -50,9 +51,15 @@ class CephRealClusterAttestationTests(unittest.TestCase):
 
     def test_three_hosts_with_remapped_pgs_fail(self):
         status, tree = fixture()
-        status["pgmap"]["num_remapped_pgs"] = 9
+        status["osdmap"]["osdmap"]["num_remapped_pgs"] = 9
         status["pgmap"]["pgs_by_state"] = [
             {"state_name": "active+clean+remapped", "count": 18}]
+        with self.assertRaises(ValueError):
+            module.attest(status, tree)
+
+    def test_missing_remapped_evidence_fails(self):
+        status, tree = fixture()
+        del status["osdmap"]["osdmap"]["num_remapped_pgs"]
         with self.assertRaises(ValueError):
             module.attest(status, tree)
 

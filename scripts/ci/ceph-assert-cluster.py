@@ -34,7 +34,11 @@ def attest(status: dict, tree: dict) -> dict:
     # must have converged, with no remapped or degraded status.
     pgmap = status.get("pgmap") or {}
     num_pgs = int(pgmap.get("num_pgs", 0))
-    remapped = int(pgmap.get("num_remapped_pgs", -1))
+    # Ceph 20.2.x reports num_remapped_pgs under osdmap, not pgmap.
+    # Require explicit evidence and never infer success from an absent field.
+    raw_remapped = osd.get("num_remapped_pgs",
+                          pgmap.get("num_remapped_pgs"))
+    remapped = int(raw_remapped) if raw_remapped is not None else -1
     states = pgmap.get("pgs_by_state") or []
     if num_pgs < 1 or remapped != 0 or not states:
         raise ValueError("Ceph PGs are not ready or remain remapped")
