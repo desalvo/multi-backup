@@ -45,6 +45,28 @@ Ogni esecuzione fa 6 connessioni SSH non interattive: FQDN e short name di 01/02
 
 **Nessuna chiave SSH privata deve essere scambiata tra VM**, e il nodo 04 non deve disporre di accesso SSH root a 01/02/03.
 
+## Esito dei preflight dell'operatore (16 novembre 2026)
+
+L'operatore ha riportato: 18/18 connessioni SSH root tra tre nodi PASS; RHEL 9.8 6 vCPU, circa 16 GiB e NTP sincronizzato su ciascuno; release subscription-manager 9.8; DNS distinti per i sei nomi inclusi due VIP. Kernel in esecuzione su tutti: **5.14.0-687.5.3.el9_8.x86_64**. Missing su tutti: kernel-devel esattamente corrispondente, ksh, gcc, gcc-c++, cpp; make non ancora verificato. Dischi: 01/02 sistema sda e dati sdb; **03 sistema sdb e dati sda**. Nessun segnale di partizione o filesystem dal solo lsblk; **non prova assenza di firme**. Il report non include identificativi di sottoscrizione Red Hat né seriali di account.
+
+Per la nuova verifica read-only e fallimento esplicito se mancano dipendenze, su ciascun nodo dopo aggiornamento della copia Git:
+
+~~~bash
+bash scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh 01
+bash scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh 02
+bash scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh 03
+~~~
+
+È normale che questo controllo restituisca EXIT 1 fino all'installazione dei tool richiesti; non autorizza automaticamente l'uso dei dischi. Per verificare in sicurezza che il kernel-devel esatto sia disponibile nei repository 9.8 senza cambiare kernel, su ogni RHEL:
+
+~~~bash
+sudo dnf --assumeno install "kernel-devel-$(uname -r)" ksh gcc gcc-c++ cpp make
+~~~
+
+Se non è disponibile, NON sostituire il kernel né sbloccare la release 9.8 per correggere il problema. Serve corrispondenza esatta tra kernel boot e kernel-devel. Il file RPM del kernel-devel potrebbe essere reperibile dal media RHEL 9.8 o da repo appropriato a cui la sottoscrizione dà accesso: usare fonti ufficiali, non pacchetti casuali.
+
+**ATTENZIONE DIMENSIONAMENTO:** IBM raccomanda 64 GiB RAM per CES NFS solo, e 128 GiB per CES SMB o NFS+SMB, oltre a rete almeno 10 GbE e CPU/socket congrui. Con 16 GiB le VM 01/02 non sono dimensionate per la qualificazione CES raccomandata da IBM; non dichiarare PASS hardware/protocollo anche se il cluster di sviluppo si avvia. https://www.ibm.com/docs/en/storage-scale/6.0.1?topic=storage-scale-faq
+
 ## Prerequisiti IBM prima di ogni operazione sui 150 GB
 
 Confermare i dischi con seriale/WWN, verificare assenza di PV/VG/LV, filesystem e mount, e autorizzare separatamente ogni operazione distruttiva del toolkit o di mmcrnsd/mmcrfs. Non eseguire dnf update senza vincolo di minor release: RHEL 9.8 potrebbe diventare 9.9. Controllare la matrice IBM esatta tra Developer Edition, kernel e portability layer. Questi test non certificano il diritto di licenza o il kernel.
