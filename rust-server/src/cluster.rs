@@ -130,6 +130,69 @@ CREATE TABLE IF NOT EXISTS mb_agent_uploads (
 ALTER TABLE mb_agent_uploads
   ADD COLUMN IF NOT EXISTS profile_sha256 TEXT;
 "#;
+
+const LATEST_SCHEMA_VERSION:i32=2;
+const RECOVERY_SCHEMA_V2:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_server_database_policy (
+  policy_id TEXT PRIMARY KEY CHECK (policy_id='server'),
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  interval_seconds BIGINT NOT NULL DEFAULT 86400
+    CHECK (interval_seconds BETWEEN 3600 AND 31622400),
+  destination TEXT NOT NULL DEFAULT 's3_worm'
+    CHECK (destination IN ('s3_worm','local_encrypted')),
+  include_data BOOLEAN NOT NULL DEFAULT FALSE,
+  retain_last INTEGER NOT NULL DEFAULT 5 CHECK(retain_last BETWEEN 1 AND 1000),
+  last_success_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO mb_server_database_policy(policy_id)
+ VALUES ('server') ON CONFLICT (policy_id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS mb_server_database_backups (
+  backup_id TEXT PRIMARY KEY,
+  destination TEXT NOT NULL CHECK(destination IN ('s3_worm','local_encrypted')),
+  storage_reference TEXT NOT NULL,
+  data_reference TEXT,
+  archive_sha256 TEXT NOT NULL,
+  recovery_consistency TEXT NOT NULL
+    CHECK(recovery_consistency IN ('database_snapshot','sequential_uncoordinated')),
+  schema_version INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS mb_server_database_backups_recent
+  ON mb_server_database_backups(created_at DESC);
+"#;
+/// Single transaction and PostgreSQL advisory transaction lock serialize
+/// concurrent startup across bare-metal services and Kubernetes pods.
+/// An unsuccessful migration rolls back and blocks the server from starting.
+fn migrate_schema(client:&mut Client)->Result<(),BoxError>{
+    let mut tx=client.transaction()?;
+    tx.query_one("SELECT pg_advisory_xact_lock($1)",&[&704148005381_i64])?;
+    tx.batch_execute("CREATE TABLE IF NOT EXISTS mb_schema_migrations (
+         version INTEGER PRIMARY KEY CHECK(version>0),
+         description TEXT NOT NULL,
+         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )")?;
+    let current:i32=tx.query_one(
+        "SELECT COALESCE(MAX(version),0) FROM mb_schema_migrations",&[])?.get(0);
+    if current>LATEST_SCHEMA_VERSION{
+        return Err(error("Database schema is newer than this server; downgrade refused"));
+    }
+    if current<1 {
+        // SCHEMA is the idempotent historical r039 baseline. Applying it in
+        // one transaction upgrades existing preview DBs without data loss.
+        tx.batch_execute(SCHEMA)?;
+        tx.execute("INSERT INTO mb_schema_migrations(version,description)
+             VALUES (1,'r039 control-plane baseline')",&[])?;
+    }
+    if current<2 {
+        tx.batch_execute(RECOVERY_SCHEMA_V2)?;
+        tx.execute("INSERT INTO mb_schema_migrations(version,description)
+             VALUES (2,'r060 server DB schedules, backups and recovery catalog')",&[])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 fn error(message:impl Display)->BoxError{message.to_string().into()}
 fn ident(value:&str)->bool{
     !value.is_empty()&&value.len()<=128&&
@@ -188,7 +251,11 @@ impl Database {
         // underlying postgres 0.19 transport gets sslmode=require.
         let db=Self{dsn:strict_tls_dsn(&dsn)?};
         let mut client=db.connect()?;
-        client.batch_execute(SCHEMA)?;
+        // Never accept a read-only replica for migrations or writes.
+        if client.query_one("SELECT pg_is_in_recovery()",&[])?.get::<_,bool>(0){
+            return Err(error("PostgreSQL endpoint must route to the HA writable leader"));
+        }
+        migrate_schema(&mut client)?;
         Ok(Some(db))
     }
     pub(crate) fn connect(&self)->Result<Client,BoxError>{
@@ -208,6 +275,46 @@ impl Database {
         let connector=postgres_native_tls::MakeTlsConnector::new(builder.build()?);
         Ok(Client::connect(&self.dsn,connector)?)
     }
+
+    /// The database HA operator (Patroni/CloudNativePG), never Multi Backup,
+    /// elects or promotes writers. This endpoint is strictly read-only.
+    pub fn ha_status(&self)->Result<Value,BoxError>{
+        let mut client=self.connect()?;
+        let standby:bool=client.query_one("SELECT pg_is_in_recovery()",&[])?.get(0);
+        let mode:String=client.query_one(
+            "SELECT current_setting('synchronous_commit')",&[])?.get(0);
+        let synchronous_names:String=client.query_one(
+            "SELECT current_setting('synchronous_standby_names')",&[])?.get(0);
+        let schema:i32=client.query_one(
+            "SELECT COALESCE(MAX(version),0) FROM mb_schema_migrations",&[])?.get(0);
+        let peers=if standby {Vec::new()}else{
+            client.query("SELECT application_name,state,sync_state
+              FROM pg_stat_replication ORDER BY application_name",&[])?
+              .iter().map(|r|json!({
+                  "name":r.get::<_,String>(0),
+                  "state":r.get::<_,String>(1),
+                  "sync_state":r.get::<_,String>(2)
+              })).collect::<Vec<_>>()
+        };
+        let ready=!standby && schema==LATEST_SCHEMA_VERSION;
+        Ok(json!({
+            "db_engine":"postgresql","role":if standby{"replica"}else{"primary"},
+            "writer_ready":ready,"schema_version":schema,
+            "supported_schema_version":LATEST_SCHEMA_VERSION,
+            "synchronous_commit":mode,"synchronous_standby_names":synchronous_names,
+            "replication_peers":peers,
+            "ha_election_owner":"external_patroni_or_cloudnativepg",
+            "note":"Synchronous commit and a quorum-aware external HA operator are required for protected automatic failover"
+        }))
+    }
+    /// libpq PGDATABASE accepts the original verify-full URL. Never pass
+    /// credentials on the command line when spawning pg_dump/pg_restore.
+    pub(crate) fn backup_dsn(&self)->Result<String,BoxError>{
+        let raw=env::var("MULTI_BACKUP_CLUSTER_DATABASE_URL")?;
+        strict_tls_dsn(&raw)?;
+        Ok(raw)
+    }
+
     pub fn put_oidc_pending(&self,state:&str,verifier:&str,nonce:&str)
         ->Result<(),BoxError>{
         if !(16..=512).contains(&state.len()) ||
@@ -528,6 +635,13 @@ mod tests {
         assert!(strict_tls_dsn("postgresql://backup@db.example/multi_backup?sslmode=prefer").is_err());
         assert!(strict_tls_dsn("postgresql://backup@db.example/multi_backup").is_err());
         assert!(strict_tls_dsn("postgresql:///multi_backup?sslmode=verify-full").is_err());
+    }
+    #[test]fn schema_migrations_are_transactional_and_forward_only(){
+        assert!(RECOVERY_SCHEMA_V2.contains("mb_server_database_policy"));
+        assert!(RECOVERY_SCHEMA_V2.contains("mb_server_database_backups"));
+        assert!(RECOVERY_SCHEMA_V2.contains("s3_worm"));
+        assert!(RECOVERY_SCHEMA_V2.contains("last_success_at"));
+        assert_eq!(LATEST_SCHEMA_VERSION,2);
     }
     #[test]fn cluster_schema_has_fencing_and_storage_affinity(){
         assert!(SCHEMA.contains("lease_token"));
