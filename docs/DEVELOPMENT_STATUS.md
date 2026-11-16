@@ -862,3 +862,12 @@ One-line English commit summary: Record green native Rust/SNMP integration evide
 - This commit includes Rust unit boundaries; real hosted CI on an actual NFS server and Samba server is necessary before the protocol adapter can be marked verified. No IBM libraries or tokens. No native GPFS restore implementation.
 
 One-line English commit summary: Enable explicit GPFS-over-NFS-or-SMB mounted create-only recovery as a protocol-only RC preview.
+
+
+## r144 — Test GPFS NFS/SMB client subset on actual standard NFS and Samba services
+
+- Five matrix jobs now include GPFS client protocol compatibility via NFS and SMB3, in addition to genuine NFS, Samba and GlusterFS native adapter tests. The GPFS modes run the *real Rust plugin* with an explicit input CES access and output CES access; real mount preflight enforces matching NFS/CIFS kernel mount types.
+- Full and incremental age-encrypted backups are checked against real NFS/Samba servers, then chain verification, wrong-key denial, RO restore refusal, create-only remote recovery, overwrites rejected, byte-for-byte source match and deleted/changed/new files.
+- STANDARD NFS/Samba server is **NOT IBM Storage Scale**: only protocol client interoperability can be accepted, not IBM snapshot, ILM, CES failover, ACL/SID conversion or native GPFS metadata. GPFS via CES stays optional in limited RC; native GPFS remains unqualified. CI result required before claiming protocol PASS.
+
+One-line English commit summary: Exercise GPFS NFS and SMB compatibility with real protocol servers, encrypted FULL/INC and create-only restore.

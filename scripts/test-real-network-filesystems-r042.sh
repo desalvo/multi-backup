@@ -3,7 +3,24 @@
 set -euo pipefail
 umask 077
 MODE="$1"
-case "$MODE" in nfs|smb|glusterfs) ;; *) exit 2;; esac
+case "$MODE" in
+ nfs|smb|glusterfs) PROTOCOL="$MODE";;
+ gpfs-nfs-compat) PROTOCOL=nfs;;
+ gpfs-smb-compat) PROTOCOL=smb;;
+ *) echo "Unsupported filesystem lab mode" >&2; exit 2;;
+esac
+PLUGIN="$PROTOCOL"
+ACCESS=""
+PROBE_FLAGS=()
+BACKUP_FLAGS=()
+RESTORE_FLAGS=()
+if [[ "$MODE" == gpfs-nfs-compat || "$MODE" == gpfs-smb-compat ]];then
+ PLUGIN=gpfs
+ if [[ "$PROTOCOL" == nfs ]];then ACCESS=ces-nfs; else ACCESS=ces-smb; fi
+ PROBE_FLAGS=(--access "$ACCESS")
+ BACKUP_FLAGS=(--input-gpfs-access "$ACCESS")
+ RESTORE_FLAGS=(--output-gpfs-access "$ACCESS")
+fi
 test "$RUNNER_ENVIRONMENT" = github-hosted || { echo "Refusing to install lab servers outside hosted CI" >&2; exit 1; }
 CLI=rust/target/debug/multi-backup-native
 test -x "$CLI"
@@ -18,12 +35,12 @@ cleanup() {
   for m in "$RW" "$RO"; do
     if mountpoint -q "$m"; then sudo umount "$m" || sudo umount -l "$m"; fi
   done
-  if [ "$MODE" = nfs ]; then sudo rm -f "$EXPORTS"; sudo exportfs -ra >/dev/null 2>&1; fi
-  if [ "$MODE" = glusterfs ]; then
+  if [ "$PROTOCOL" = nfs ]; then sudo rm -f "$EXPORTS"; sudo exportfs -ra >/dev/null 2>&1; fi
+  if [ "$PROTOCOL" = glusterfs ]; then
     sudo gluster --mode=script volume stop "$VOL" force >/dev/null 2>&1
     sudo gluster --mode=script volume delete "$VOL" >/dev/null 2>&1
   fi
-  if [ "$MODE" = smb ] && [ -f "$WORK/smbd.pid" ]; then
+  if [ "$PROTOCOL" = smb ] && [ -f "$WORK/smbd.pid" ]; then
     sudo kill "$(cat "$WORK/smbd.pid")" >/dev/null 2>&1
   fi
   sudo rm -rf -- "$WORK"
@@ -33,7 +50,7 @@ printf 'old version\n' > "$ROOT/nested/data.txt"
 printf 'deleted later\n' > "$ROOT/delete.txt"
 dd if=/dev/urandom of="$ROOT/payload.bin" bs=1M count=3 status=none
 HASH=$(sha256sum "$ROOT/payload.bin" | awk '{print $1}')
-case "$MODE" in
+case "$PROTOCOL" in
 nfs)
   sudo modprobe nfsd
   sudo systemctl start rpcbind || true
@@ -120,21 +137,21 @@ glusterfs)
 esac
 mount_ro
 test "$(findmnt -rn -T "$RO" -o FSTYPE)" = "$expected"
-"$CLI" plugins probe --plugin "$MODE" --mount "$RO" --json > "$WORK/mount.json"
+"$CLI" plugins probe --plugin "$PLUGIN" --mount "$RO" "${PROBE_FLAGS[@]}" --json > "$WORK/mount.json"
 test "$(jq -r .fs_type "$WORK/mount.json")" = "$expected"
 test "$(jq -r .rw_mount_option "$WORK/mount.json")" = false
 # Require actual source readability, not just a plausible fs type.
 stat "$RO/nested/data.txt"
 head -c 1 "$RO/nested/data.txt" >/dev/null
 # An exact mount, but NO assertion of source consistency, must fail.
-if "$CLI" plugins backup --input "$MODE" --output posix --source "$RO" \
+if "$CLI" plugins backup --input "$PLUGIN" "${BACKUP_FLAGS[@]}" --output posix --source "$RO" \
   --root "$STORE" --identity "$KEY" --label unsafe >/dev/null 2>&1; then
   echo "FAIL: missing consistency attestation was accepted" >&2; exit 1
 fi
 age-keygen -o "$KEY" >/dev/null 2>&1
 RECIPIENT=$(sed -n 's/^# public key: //p' "$KEY" | head -1)
 "$CLI" storage init --root "$STORE" --recipient "$RECIPIENT" >/dev/null
-"$CLI" plugins backup --input "$MODE" --output posix --source "$RO" \
+"$CLI" plugins backup --input "$PLUGIN" "${BACKUP_FLAGS[@]}" --output posix --source "$RO" \
   --root "$STORE" --identity "$KEY" --label full --namespace files \
   --source-snapshot-attested --json > "$WORK/full.json"
 FULL=$(jq -er '.id | select(length==64)' "$WORK/full.json")
@@ -146,7 +163,7 @@ rm "$ROOT/delete.txt"
 printf 'new file\n' > "$ROOT/add.txt"
 sync
 mount_ro
-"$CLI" plugins backup --input "$MODE" --output posix --source "$RO" \
+"$CLI" plugins backup --input "$PLUGIN" "${BACKUP_FLAGS[@]}" --output posix --source "$RO" \
   --root "$STORE" --identity "$KEY" --label incremental --namespace files \
   --mode incremental --parent "$FULL" --source-snapshot-attested \
   --json > "$WORK/inc.json"
@@ -175,20 +192,23 @@ if "$CLI" plugins restore --input posix --output posix --root "$STORE" \
 fi
 # Every supported remote restore, including authenticated SMB3, MUST
 # reject read-only inputs and create a NEW directory on an exact RW mount.
-if "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
+if "$CLI" plugins restore --input posix --output "$PLUGIN" "${RESTORE_FLAGS[@]}" --root "$STORE" \
   --identity "$KEY" --id "$INC" --destination "$RO/no-write" >/dev/null 2>&1; then
   echo "FAIL: $MODE restored to read-only mount" >&2; exit 1
 fi
 if ! mountpoint -q "$RW"; then mount_rw; fi
-"$CLI" plugins probe --plugin "$MODE" --mount "$RW" --json > "$WORK/rw.json"
+"$CLI" plugins probe --plugin "$PLUGIN" --mount "$RW" "${PROBE_FLAGS[@]}" --json > "$WORK/rw.json"
 test "$(jq -r .rw_mount_option "$WORK/rw.json")" = true
-"$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
+"$CLI" plugins restore --input posix --output "$PLUGIN" "${RESTORE_FLAGS[@]}" --root "$STORE" \
   --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null
 cmp "$ROOT/add.txt" "$RW/new-recovery/files/add.txt"
 cmp "$ROOT/payload.bin" "$RW/new-recovery/files/payload.bin"
-if "$CLI" plugins restore --input posix --output "$MODE" --root "$STORE" \
+if "$CLI" plugins restore --input posix --output "$PLUGIN" "${RESTORE_FLAGS[@]}" --root "$STORE" \
   --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null 2>&1; then
   echo "FAIL: existing $MODE recovery overwritten" >&2; exit 1
 fi
-echo "PASS: genuine $MODE server+kernel/FUSE client, Rust FULL/INC age encrypted verify-chain and byte-identical recovery"
+echo "PASS: genuine $MODE through $PROTOCOL server+kernel/FUSE, Rust FULL/INC age encrypted verification and byte-identical recovery"
+if [[ "$PLUGIN" == gpfs ]];then
+ echo "SCOPE: NFS/SMB client protocol only; NO IBM Storage Scale CES/native GPFS qualified"
+fi
 echo "NOT CERTIFIED: snapshot orchestration, complete ACL/xattr/UID/GID/mtime, network failover or production fencing"
