@@ -41,6 +41,10 @@ pub struct Record {
     pub id: String,
     pub archive_key: String,
     pub archive_version: String,
+    // Pinned manifest version is returned in the receipt, never embedded
+    // circularly in the manifest itself. It can rescue a hidden delete-marker.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub manifest_version: Option<String>,
     pub sha256: String,
     pub bytes: u64,
     pub files: usize,
@@ -319,23 +323,28 @@ pub fn backup(config:&Config,source:&Path)->Result<Record> {
         .to_rfc3339_opts(SecondsFormat::Secs,true);
     let archive_key=config.object_key(&format!("snapshots/{id}.tar.gz.age"));
     let version=client.put_file(&archive_key,&output,&until)?;
-    let record=Record{schema:1,id:id.clone(),archive_key,archive_version:version,
-                      sha256:digest,bytes,files,retain_until:until.clone()};
+    let mut record=Record{schema:1,id:id.clone(),archive_key,archive_version:version,
+                      manifest_version:None,sha256:digest,bytes,files,retain_until:until.clone()};
     // Manifest LAST: an interrupted upload creates only a locked orphan,
     // never a visible completed backup.
     let manifest_key=config.object_key(&format!("manifests/{id}.json"));
-    client.put_bytes(&manifest_key,&serde_json::to_vec(&record)?,&until)?;
+    let v=client.put_bytes(&manifest_key,&serde_json::to_vec(&record)?,&until)?;
+    record.manifest_version=Some(v);
     Ok(record)
 }
-fn read_record(client:&Client,id:&str)->Result<Record>{
+fn read_record(client:&Client,id:&str,requested:Option<&str>)->Result<Record>{
     if id.len()!=32 || !id.bytes().all(|c|c.is_ascii_hexdigit()&&!c.is_ascii_uppercase()){
         return Err("Invalid S3 vault snapshot ID".into());
     }
     client.preflight()?;
     let key=client.cfg.object_key(&format!("manifests/{id}.json"));
-    let (raw,version)=client.small_get(Some(&key),&[],MAX_MANIFEST)?;
+    let query=requested.map(|v|vec![("versionId",v)]).unwrap_or_default();
+    let (raw,version)=client.small_get(Some(&key),&query,MAX_MANIFEST)?;
+    if requested.is_some_and(|v|v!=version){
+        return Err("S3 returned a different manifest version than requested".into());
+    }
     if version.is_empty() || version=="null" {return Err("Manifest is not versioned".into());}
-    let record:Record=serde_json::from_str(&raw)?;
+    let mut record:Record=serde_json::from_str(&raw)?;
     if record.schema!=1 || record.id!=id
         || record.archive_key!=client.cfg.object_key(&format!("snapshots/{id}.tar.gz.age"))
         || record.sha256.len()!=64 || !record.sha256.bytes().all(|b|b.is_ascii_hexdigit())
@@ -345,6 +354,7 @@ fn read_record(client:&Client,id:&str)->Result<Record>{
     }
     client.assert_locked(&key,&version,&record.retain_until)?;
     client.assert_locked(&record.archive_key,&record.archive_version,&record.retain_until)?;
+    record.manifest_version=Some(version);
     Ok(record)
 }
 fn staged(client:&Client,record:&Record,where_to:&Path)->Result<std::path::PathBuf> {
@@ -356,9 +366,39 @@ fn staged(client:&Client,record:&Record,where_to:&Path)->Result<std::path::PathB
     }
     Ok(output)
 }
+/// Rescue a still-retained COMPLIANCE version even if an attacker placed an
+/// unversioned S3 delete marker over the current manifest. The version ID
+/// comes from an independently escrowed backup receipt, not a mutable LIST.
+pub fn verify_at_version(config:&Config,id:&str,manifest_version:&str,identity:&Path)->Result<Record>{
+    if manifest_version.is_empty()||manifest_version.len()>512||
+       manifest_version.bytes().any(|c|c.is_ascii_control()||c==b'/'||c==b'\\'){
+       return Err("Invalid pinned manifest version ID".into());
+    }
+    let client=Client::new(config)?;
+    let record=read_record(&client,id,Some(manifest_version))?;
+    let temp=tempfile::tempdir()?;
+    let file=staged(&client,&record,temp.path())?;
+    if archive::verify(&file,identity)?!=record.files{
+        return Err("Pinned WORM restore member count mismatch".into());
+    }
+    Ok(record)
+}
+pub fn restore_at_version(config:&Config,id:&str,manifest_version:&str,
+                          identity:&Path,destination:&Path)->Result<Record>{
+    if fs::symlink_metadata(destination).is_ok(){
+        return Err("Pinned WORM restore cannot overwrite an existing path".into());
+    }
+    let record=verify_at_version(config,id,manifest_version,identity)?;
+    let client=Client::new(config)?;
+    let temporary=tempfile::tempdir()?;
+    let file=staged(&client,&record,temporary.path())?;
+    archive::extract(&file,identity,destination)?;
+    Ok(record)
+}
+
 pub fn verify(config:&Config,id:&str,identity:&Path)->Result<Record>{
     let client=Client::new(config)?;
-    let record=read_record(&client,id)?;
+    let record=read_record(&client,id,None)?;
     let temp=tempfile::tempdir()?;
     let file=staged(&client,&record,temp.path())?;
     let actual=archive::verify(&file,identity)?;
@@ -370,7 +410,7 @@ pub fn restore(config:&Config,id:&str,identity:&Path,destination:&Path)->Result<
         return Err("S3 vault restore destination must not exist".into());
     }
     let client=Client::new(config)?;
-    let record=read_record(&client,id)?;
+    let record=read_record(&client,id,None)?;
     let temp=tempfile::tempdir()?;
     let file=staged(&client,&record,temp.path())?;
     let actual=archive::verify(&file,identity)?;
@@ -383,7 +423,7 @@ pub fn restore(config:&Config,id:&str,identity:&Path,destination:&Path)->Result<
 /// Native GUI path: the unlocked age identity stays in RAM, never on disk.
 pub fn verify_from_memory(config:&Config,id:&str,secret:&[u8])->Result<Record>{
     let client=Client::new(config)?;
-    let record=read_record(&client,id)?;
+    let record=read_record(&client,id,None)?;
     let temp=tempfile::tempdir()?;
     let file=staged(&client,&record,temp.path())?;
     let actual=archive::verify_from_memory(&file,secret)?;
@@ -396,7 +436,7 @@ pub fn restore_from_memory(config:&Config,id:&str,secret:&[u8],destination:&Path
         return Err("S3 restore destination must not exist".into());
     }
     let client=Client::new(config)?;
-    let record=read_record(&client,id)?;
+    let record=read_record(&client,id,None)?;
     let temp=tempfile::tempdir()?;
     let file=staged(&client,&record,temp.path())?;
     let actual=archive::verify_from_memory(&file,secret)?;
@@ -413,6 +453,14 @@ mod tests {
             region:"us-east-1".into(),bucket:"vault-worm".into(),
             prefix:"tenant/backup".into(),recipient:format!("age1{}", "q".repeat(40)),
             retention_days:30,allow_loopback_http_for_testing:false}
+    }
+    #[test]
+    fn manifest_version_escrow_is_optional_for_legacy_receipts(){
+        let old=r#"{"schema":1,"id":"0123456789abcdef0123456789abcdef",
+           "archive_key":"snapshots/id.tar.gz.age","archive_version":"v1",
+           "sha256":"x","bytes":5,"files":0,"retain_until":"2026-12-31T00:00:00Z"}"#;
+        let parsed:Record=serde_json::from_str(old).unwrap();
+        assert!(parsed.manifest_version.is_none());
     }
     #[test]
     fn refuses_insecure_remote_and_unsafe_paths(){
