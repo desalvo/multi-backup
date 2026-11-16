@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/ci-requests/patroni-ha-r093.request'
       - '.github/ci-requests/patroni-ha-r096.request'
+      - '.github/ci-requests/patroni-ha-r100.request'
   workflow_dispatch:
 permissions:
   contents: read

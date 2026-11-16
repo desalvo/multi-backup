@@ -1,0 +1,1 @@
+One-shot loopback TLS etcd peer handshake diagnostic and real Patroni PG16 acceptance. No weakened TLS, no production endpoints.
