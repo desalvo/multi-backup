@@ -822,3 +822,12 @@ One-line English commit summary: Exercise native Rust Prometheus HTTPS and beare
 - Do not claim the HTTP/TLS+Bearer integration PASS before the new job completes.
 
 One-line English commit summary: Write newline-free random Prometheus tokens for the real native HTTPS acceptance.
+
+
+## r135 — fix genuine Rust TLS startup panic on multi-feature CryptoProvider
+
+- The real compiled Rust Prometheus HTTPS acceptance [43885139657](https://github.com/desalvo/multi-backup/actions/runs/43885139657) initially **FAILED** despite Rust unit tests PASS: `rustls 0.23.46` panicked during the initial HTTPS listener setup because both `ring` and `aws-lc-rs` features were enabled in the dependency graph and no process-wide `CryptoProvider` had been installed.
+- Explicitly depend on compatible `rustls 0.23` with `aws_lc_rs` and install its default provider before starting enabled Prometheus/REST HTTPS monitoring; remain fail-closed on real initialization errors, no insecure TLS fallback. Adds Rust unit check that the global provider is selected.
+- Trigger exactly one new disposable, real-native-server HTTPS certificate/bearer negative acceptance (r135 request). This repairs a genuine runtime defect in both monitoring HTTPS endpoints, not a documentation-only or synthetic harness adjustment. No success claimed before a full real PASS.
+
+One-line English commit summary: Select the rustls aws-lc-rs process provider before starting native HTTPS monitoring.

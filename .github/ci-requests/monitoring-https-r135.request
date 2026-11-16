@@ -1,0 +1,1 @@
+One shot: native Rust server HTTPS metrics with explicit rustls CryptoProvider, real X.509 and negative auth/HTTP tests.

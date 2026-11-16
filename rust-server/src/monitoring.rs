@@ -10,6 +10,19 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 type ErrBox=Box<dyn Error+Send+Sync>;
 
+fn initialize_tls_crypto_provider()->Result<(),ErrBox>{
+    // axum-server and other dependencies may enable both aws-lc-rs and
+    // ring features transitively. rustls then panics when it cannot infer
+    // one default. Install a deliberate process-wide provider before
+    // parsing any HTTPS PEM/serving any monitoring request.
+    if rustls::crypto::CryptoProvider::get_default().is_none(){
+        let installed=rustls::crypto::aws_lc_rs::default_provider().install_default();
+        if installed.is_err() && rustls::crypto::CryptoProvider::get_default().is_none(){
+            return Err("Could not install safe rustls cryptographic provider".into());
+        }
+    }
+    Ok(())
+}
 fn flag(key:&str)->Result<bool,ErrBox>{
     match env::var(key).as_deref(){
         Ok("true"|"1")=>Ok(true),
@@ -232,6 +245,10 @@ pub async fn revoke(State(state):State<AppState>,headers:HeaderMap,Json(req):Jso
     }
 }
 pub async fn start(state:AppState)->Result<(),ErrBox>{
+    if flag("MULTI_BACKUP_PROMETHEUS_ENABLED")?||
+       flag("MULTI_BACKUP_REST_API_ENABLED")?{
+        initialize_tls_crypto_provider()?;
+    }
     if flag("MULTI_BACKUP_PROMETHEUS_ENABLED")?{
         let ip=binding("MULTI_BACKUP_PROMETHEUS_BIND",9502)?;
         let key=prometheus_key()?;
@@ -303,6 +320,10 @@ pub fn snmp_status()->Result<(),ErrBox>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn multi_feature_rustls_default_is_unambiguously_initialized(){
+        initialize_tls_crypto_provider().unwrap();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
     #[test]fn remote_prometheus_refuses_cleartext_or_no_bearer(){
         let private:std::net::SocketAddr = "10.70.0.11:9502".parse().unwrap();
         let localhost:std::net::SocketAddr = "127.0.0.1:9502".parse().unwrap();

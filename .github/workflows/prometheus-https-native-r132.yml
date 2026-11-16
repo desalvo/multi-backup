@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/ci-requests/monitoring-https-r132.request'
       - '.github/ci-requests/monitoring-https-r133.request'
+      - '.github/ci-requests/monitoring-https-r135.request'
   workflow_dispatch:
 permissions:
   contents: read
