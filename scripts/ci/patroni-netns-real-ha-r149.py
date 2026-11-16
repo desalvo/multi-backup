@@ -22,61 +22,61 @@ def sudo(*args, check=True):
 class Lab:
     def __init__(self):
         prefix = f"mbh{os.getpid()%100000}"
-        self.bridge = prefix+"br"
         self.names = [prefix+f"n{i}" for i in range(3)]
         self.peers = [prefix+f"h{i}" for i in range(3)]
         self.created = []
         self.rules = []
-        self.host_bridge_rule = False
+        self.host_forward_rule = False
+        self.host_ip_forward_original = None
         self.children = []
         self.uid, self.gid = os.getuid(), os.getgid()
 
     def create(self):
-        sudo("ip","link","add",self.bridge,"type","bridge")
-        self.created.append(("bridge",self.bridge))
-        sudo("ip","addr","add","10.239.143.1/24","dev",self.bridge)
-        sudo("ip","link","set",self.bridge,"up")
+        # No L2 bridge: GitHub's hosted runner dropped ARP between bridge
+        # ports. Give each namespace a dedicated point-to-point veth pair
+        # and an independently advertised /32 loopback address.
         for i,ns in enumerate(self.names):
+            host_ip=f"10.239.143.{30+2*i}"
+            peer_ip=f"10.239.143.{31+2*i}"
             sudo("ip","netns","add",ns)
             self.created.append(("ns",ns))
             sudo("ip","link","add",self.peers[i],"type","veth",
                  "peer","name","mb-eth")
+            self.created.append(("host",self.peers[i]))
             sudo("ip","link","set","mb-eth","netns",ns)
-            sudo("ip","link","set",self.peers[i],"master",self.bridge)
+            sudo("ip","addr","add",host_ip+"/31","dev",self.peers[i])
             sudo("ip","link","set",self.peers[i],"up")
-            sudo("ip","-n",ns,"addr","add",IPS[i]+"/24","dev","mb-eth")
-            sudo("ip","-n",ns,"link","set","lo","up")
+            sudo("ip","-n",ns,"addr","add",peer_ip+"/31","dev","mb-eth")
             sudo("ip","-n",ns,"link","set","mb-eth","up")
-            result=sudo("ip","-n",ns,"addr","show","mb-eth").stdout
-            if IPS[i] not in result: raise RuntimeError("Namespace interface not configured")
-        # GitHub Ubuntu runners may apply a DROP policy to traffic
-        # bridged between veth ports. Permit ONLY the ephemeral /24 across
-        # our isolated bridge; restore this exact host firewall rule on exit.
-        sudo("iptables","-I","FORWARD","-i",self.bridge,"-o",self.bridge,
-             "-s","10.239.143.0/24","-d","10.239.143.0/24","-j","ACCEPT")
-        self.host_bridge_rule=True
+            sudo("ip","-n",ns,"link","set","lo","up")
+            sudo("ip","-n",ns,"addr","add",IPS[i]+"/32","dev","lo")
+            sudo("ip","route","add",IPS[i]+"/32","via",peer_ip,
+                 "dev",self.peers[i])
+            sudo("ip","-n",ns,"route","add","10.239.143.0/24",
+                 "via",host_ip,"dev","mb-eth","src",IPS[i])
+        before=sudo("sysctl","-n","net.ipv4.ip_forward").stdout.strip()
+        if before not in ("0","1"):raise RuntimeError("Unknown host forwarding policy")
+        self.host_ip_forward_original=before
+        if before=="0":
+            sudo("sysctl","-w","net.ipv4.ip_forward=1")
+        # Scope the ephemeral host forwarding rule to ONLY the three lab
+        # addresses (not Docker, user applications, or public networks).
+        sudo("iptables","-I","FORWARD","-s","10.239.143.0/24",
+             "-d","10.239.143.0/24","-j","ACCEPT")
+        self.host_forward_rule=True
         for i,ns in enumerate(self.names):
             for j,peer in enumerate(IPS):
                 if i==j: continue
-                probe=sudo("ip","netns","exec",ns,
-                           "ping","-c","1","-W","2",peer,check=False)
-                if probe.returncode:
-                    diagnostics={
-                        "probe_stdout":probe.stdout[-400:],
-                        "probe_stderr":probe.stderr[-400:],
-                        "source_routes":sudo("ip","-n",ns,"route",check=False).stdout[-400:],
-                        "source_arp":sudo("ip","-n",ns,"neigh",check=False).stdout[-400:],
-                        "dest_link":sudo("ip","-n",self.names[j],"addr","show",
-                                         check=False).stdout[-400:],
-                        "bridge":sudo("ip","-d","link","show",self.bridge,
-                                      check=False).stdout[-400:],
-                        "host_forward":sudo("iptables","-S","FORWARD",
-                                            check=False).stdout[-700:]
-                    }
-                    raise RuntimeError(f"Preflight veth {i+1}->{j+1} ICMP fails: {diagnostics}")
-        print("PROOF: all six directed namespace-to-namespace ICMP probes passed",
-              flush=True)
-        print("PROOF: three real network namespaces with separate veth stacks",flush=True)
+                ping=sudo("ip","netns","exec",ns,"ping","-c","1","-W","2",
+                          peer,check=False)
+                if ping.returncode:
+                    routes=sudo("ip","-n",ns,"route",check=False).stdout
+                    arp=sudo("ip","-n",ns,"neigh",check=False).stdout
+                    host=sudo("ip","route","show",check=False).stdout
+                    raise RuntimeError(f"P2P netns preflight {i+1}->{j+1} failed: "
+                        f"{ping.stdout[-250:]} routes={routes[-250:]}, "
+                        f"arp={arp[-250:]}, host={host[-350:]}")
+        print("PROOF: all six cross-namespace probes succeeded over routed P2P veth",flush=True)
 
     def start(self, logfile, *command):
         if command[0]=="etcd":
@@ -126,11 +126,12 @@ class Lab:
         try: self.reconnect()
         except Exception as e:
             print("Disposable rule cleanup warning:",type(e).__name__,flush=True)
-        if self.host_bridge_rule:
-            sudo("iptables","-D","FORWARD","-i",self.bridge,"-o",self.bridge,
-                 "-s","10.239.143.0/24","-d","10.239.143.0/24","-j","ACCEPT",
-                 check=False)
-            self.host_bridge_rule=False
+        if self.host_forward_rule:
+            sudo("iptables","-D","FORWARD","-s","10.239.143.0/24",
+                 "-d","10.239.143.0/24","-j","ACCEPT",check=False)
+            self.host_forward_rule=False
+        if self.host_ip_forward_original=="0":
+            sudo("sysctl","-w","net.ipv4.ip_forward=0",check=False)
         for p in self.children:
             if p.poll() is None:
                 try: os.killpg(p.pid,signal.SIGTERM)

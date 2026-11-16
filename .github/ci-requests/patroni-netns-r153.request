@@ -1,0 +1,1 @@
+Use three direct point-to-point routed veths with /32 service IPs after hosted-runner bridge ARP failure. Full TLS etcd and Patroni partition acceptance.
