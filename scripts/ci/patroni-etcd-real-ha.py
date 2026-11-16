@@ -127,10 +127,17 @@ def dcs_sync_candidate(root, leader):
         return None
     return candidates[0]
 
-def pg(root, index, sql, *, expect_ok=True):
+def pg(root, index, sql, *, expect_ok=True, query_timeout_ms=None):
     env = os.environ.copy()
     env.update({"PGPASSWORD": DB_PASSWORD, "PGSSLMODE": "verify-full",
                 "PGSSLROOTCERT": str(root / "ca.crt"), "PGCONNECT_TIMEOUT": "3"})
+    if query_timeout_ms is not None:
+        # PGOPTIONS configures the server timeout BEFORE the SQL packet;
+        # issuing SET + INSERT in a single psql -c request did not bound
+        # the strict sync commit wait on the hosted PostgreSQL16 build.
+        if not isinstance(query_timeout_ms, int) or not 500 <= query_timeout_ms <= 10_000:
+            raise ValueError("Invalid bounded PostgreSQL CI statement timeout")
+        env["PGOPTIONS"] = f"-c statement_timeout={query_timeout_ms}"
     args = ["psql", "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1",
             "-h", ADDRESSES[index], "-p", str(PGPORTS[index]),
             "-U", "postgres", "-d", "postgres", "-c", sql]
@@ -392,13 +399,38 @@ def main():
             # Both other PostgreSQL servers stay stopped during the ENTIRE
             # two-second commit attempt, so a successful INSERT is a true
             # safety violation rather than a promotion/replication race.
-            result = pg(root, successor,
-                "SET statement_timeout='2000ms'; "
-                "INSERT INTO ha_witness VALUES (9,'unsafe-without-sync');",
-                expect_ok=False)
-            if result.returncode == 0:
-                raise RuntimeError("UNSAFE: strict primary committed with BOTH standby servers stopped")
-            print("PASS: strict primary refused a commit without either standby",
+            blocked = False
+            try:
+                result = pg(root, successor,
+                    "INSERT INTO ha_witness VALUES (9,'unsafe-without-sync');",
+                    expect_ok=False, query_timeout_ms=2000)
+                if result.returncode == 0:
+                    raise RuntimeError("UNSAFE: strict primary committed with BOTH standby servers stopped")
+                # A TLS error, missing permission, auth failure, or broken
+                # PostgreSQL is NOT evidence of synchronous write fencing.
+                message = result.stderr.lower()
+                if "statement timeout" not in message and (
+                    "canceling statement" not in message):
+                    raise RuntimeError("Negative HA write failed for unrelated reason: "
+                                       + result.stderr[:180])
+                blocked = True
+            except subprocess.TimeoutExpired:
+                # PostgreSQL may keep a client socket pending while waiting
+                # for remote_apply even after the front-end timer expires.
+                # The two independent PG standbys are still hard STOPPED.
+                # Absence of acknowledgement must be corroborated by a
+                # separate successful read from the actual elected primary.
+                print("Strict remote_apply write received no ACK before client deadline",
+                      flush=True)
+                blocked = True
+            independent_read = pg(root, successor,
+                "SELECT NOT pg_is_in_recovery()", expect_ok=False)
+            if not blocked or independent_read.returncode != 0 or (
+                independent_read.stdout.strip() != "t"):
+                raise RuntimeError("Could not independently prove responsive strict primary")
+            if dcs_sync_candidate(root, successor) is not None:
+                raise RuntimeError("A synchronous standby reappeared during negative write")
+            print("PASS: strict primary stayed readable but never ACKed write with both peers stopped",
                   flush=True)
             # Rejoin the former leader: Patroni must rewind or rebuild it as a standby.
             path, _ = conf(root, initial)

@@ -1,0 +1,1 @@
+One-shot real PG16 Patroni+TLS etcd strict remote_apply timeout, both-standby rejoin and etcd quorum-loss acceptance.

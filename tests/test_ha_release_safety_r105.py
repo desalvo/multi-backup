@@ -54,6 +54,11 @@ class HASafetyPolicy(unittest.TestCase):
         self.assertIn("proven absence of ALL synchronous PostgreSQL peers", source)
         self.assertIn("UNSAFE: strict primary committed with BOTH standby servers stopped", source)
         self.assertIn("PASS: both original standby nodes reintegrated", source)
+        self.assertIn("query_timeout_ms=2000", source)
+        self.assertIn("PGOPTIONS", source)
+        self.assertIn("except subprocess.TimeoutExpired:", source)
+        self.assertIn("Could not independently prove responsive strict primary", source)
+        self.assertIn("strict primary stayed readable but never ACKed write", source)
 
     def test_ephemeral_postgres_and_replication_passwords(self):
         import ast

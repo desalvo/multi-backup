@@ -755,3 +755,12 @@ One-line English commit summary: Install CI-only PyYAML before all Python test s
 - Scope: three real PG/Patroni processes and three actual TLS etcd members on one runner, not physical three-host failure domains. No RC or HA certification unless this entire exact-SHA real job passes.
 
 One-line English commit summary: Prove strict Patroni fencing with both genuine standbys stopped and require both nodes to rejoin before quorum fault injection.
+
+
+## r130 — HA strict-sync client timeout vs real write fence
+
+- The exact [real HA r128 run 43882693772](https://github.com/desalvo/multi-backup/actions/runs/43882693772) proved a new PostgreSQL primary held `synchronous_standby_names='*'` and `synchronous_commit='remote_apply'` after **both physical standby PostgreSQL processes were stopped**; the timed INSERT never ACKed and `subprocess.run` raised `TimeoutExpired` after nine seconds. Thus the prior complete CI job is **FAIL because the test harness did not handle a blocked client**, not because a committed write bypassed strict replication.
+- The negative probe now configures statement timeout before SQL via `PGOPTIONS`; a PostgreSQL cancellation is accepted only when it specifically reports statement timeout/cancellation. If the backend continues waiting until the client deadline, only this deliberate subprocess timeout is accepted. In both cases the test independently proves the elected primary still answers read-only SQL and no DCS synchronous replica returned. A successful write or unrelated TLS/auth/permission failure remains an immediate HA failure.
+- The test continues after this negative fence and must verify old-leader rejoin, the former second standby's rejoin, acknowledged post-rejoin writes, and failure of stale writes after etcd majority loss. No change to production Patroni strict settings or emergency fail-open override; run one focused bounded real lab r130. GPFS unchanged suspended/out of RC.
+
+One-line English commit summary: Treat validated strict PostgreSQL commit blocking as expected and complete rejoin plus DCS-majority fault injection.
