@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, plugins, plugin_executor, backup_chain};
+use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, plugins, plugin_executor, backup_chain};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -56,6 +56,9 @@ struct Fields {
     selected_archive: String,
     destination: String,
     vault_path: String,
+    immutable_vault_root: String,
+    immutable_vault_source: String,
+    immutable_vault_snapshot: String,
     password: String,
     password_confirm: String,
     recovery_path: String,
@@ -226,6 +229,9 @@ impl NativeApp {
             output: default_output_path.clone(),
             recipient: age_recipient,
             vault_path: vault_path.display().to_string(),
+            immutable_vault_root: String::new(),
+            immutable_vault_source: String::new(),
+            immutable_vault_snapshot: String::new(),
             max_runs: max_runs.to_string(),
             chunk_root: default_output_path.clone(),
             chunk_label: "Backup completo".into(),
@@ -733,6 +739,54 @@ impl NativeApp {
             }
         });
     }
+    fn run_immutable_vault(&mut self, action: &str) {
+        if self.active {return;}
+        let root=PathBuf::from(self.fields.immutable_vault_root.trim());
+        let source=PathBuf::from(self.fields.immutable_vault_source.trim());
+        let target=PathBuf::from(self.fields.destination.trim());
+        let id=self.fields.immutable_vault_snapshot.trim().to_owned();
+        let recipient=self.fields.recipient.trim().to_owned();
+        let identity=self.fields.identity.trim().to_owned();
+        let secret=self.session_identity.clone();
+        let action=action.to_string();
+        let (tx,rx)=mpsc::channel();
+        self.receiver=Some(rx);
+        self.active=true;
+        self.started=Instant::now();
+        self.last_activity=Instant::now();
+        self.status="Vault anti-ransomware: verifica e operazione in corso…".into();
+        thread::spawn(move||{
+            let result: Result<String,String>=(||{
+                match action.as_str(){
+                    "init"=>immutable_vault::init(&root,&recipient)
+                        .map(|_|"Deposito cifrato append-only creato (WORM esterno non verificato)".into())
+                        .map_err(|e|e.to_string()),
+                    "backup"=>immutable_vault::backup(&root,&source)
+                        .map(|r|format!("Backup vault cifrato {} - {} B",r.id,r.encrypted_bytes))
+                        .map_err(|e|e.to_string()),
+                    "list"=>immutable_vault::list(&root)
+                        .map(|v|format!("Vault: {} snapshot cifrati, nessuna API delete",v.len()))
+                        .map_err(|e|e.to_string()),
+                    "restore"=>{
+                        if let Some(secret)=&secret {
+                            immutable_vault::restore_from_memory(&root,&id,secret,&target)
+                                .map(|r|format!("Ripristino vault {} in {}",r.id,target.display()))
+                                .map_err(|e|e.to_string())
+                        }else if !identity.is_empty() {
+                            immutable_vault::restore(&root,&id,Path::new(&identity),&target)
+                                .map(|r|format!("Ripristino vault {} in {}",r.id,target.display()))
+                                .map_err(|e|e.to_string())
+                        }else{Err("Sblocca il vault della chiave age o specifica una identity".into())}
+                    },
+                    _=>Err("Operazione vault non supportata".into()),
+                }
+            })();
+            match result {
+                Ok(done)=>{let _=tx.send(Event::Success(done));},
+                Err(error)=>{let _=tx.send(Event::Failure(error));},
+            }
+        });
+    }
     fn vault(&mut self, ui: &mut egui::Ui) {
         ui.heading("Vault protetto");
         ui.label("Vault AES-256-GCM / scrypt, compatibile con le identità Python v1.");
@@ -780,6 +834,32 @@ impl NativeApp {
         ui.label(RichText::new(if self.vault_verified {
             "Vault sbloccato in RAM fino alla chiusura dell'app" }
             else { "Vault non sbloccato" }).color(MUTED));
+        ui.separator();
+        ui.heading("Deposito backup anti-ransomware");
+        ui.label("Archivi age append-only, identificativi univoci, verifica SHA256, recupero in cartella NUOVA.");
+        ui.label("La resistenza al ransomware richiede WORM/append-only su uno storage fisicamente indipendente. La sola directory locale NON è WORM.");
+        ui.label("Directory deposito (deve esistere, separata dalla sorgente)");
+        ui.text_edit_singleline(&mut self.fields.immutable_vault_root);
+        ui.label("Directory di origine da cifrare");
+        ui.text_edit_singleline(&mut self.fields.immutable_vault_source);
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(!self.active,egui::Button::new("Inizializza deposito")).clicked(){
+                self.run_immutable_vault("init");
+            }
+            if ui.add_enabled(!self.active,egui::Button::new("Backup nel vault")).clicked(){
+                self.run_immutable_vault("backup");
+            }
+            if ui.add_enabled(!self.active,egui::Button::new("Elenca snapshot")).clicked(){
+                self.run_immutable_vault("list");
+            }
+        });
+        ui.label("ID snapshot da ripristinare (32 caratteri esadecimali)");
+        ui.text_edit_singleline(&mut self.fields.immutable_vault_snapshot);
+        ui.label("Directory NUOVA di restore (usata anche nella pagina Ripristina)");
+        ui.text_edit_singleline(&mut self.fields.destination);
+        if ui.add_enabled(!self.active,egui::Button::new("Ripristina dallo snapshot vault")).clicked(){
+            self.run_immutable_vault("restore");
+        }
         ui.label(RichText::new(&self.status).color(INK));
     }
     /// Existing native Swift LocalAuthentication + device-bound Keychain
