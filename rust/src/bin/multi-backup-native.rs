@@ -23,7 +23,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins afs-restore-new --target-json NEW_VOLUME_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target CELL:SERVER:/vicepXX:NEWNAME [--max-transfer-bps RATE] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs|webdav|nfs|smb|cephfs|glusterfs|lustre --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|webdav|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--davfs-cache-not-on-remote] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
-       multi-backup-native plugins restore --input posix --output posix|nfs|smb|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
+       multi-backup-native plugins restore --input posix --output posix|nfs|smb|gpfs|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
        multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
@@ -482,14 +482,15 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             },
             "restore" => {
                 accepted(&flags, &["--input","--output","--root","--identity",
-                                    "--id","--destination","--selection"])?;
-                let count = plugin_executor::restore(
+                                    "--id","--destination","--selection","--output-gpfs-access"])?;
+                let count = plugin_executor::restore_with_gpfs_access(
                     required(&flags,"--input")?,required(&flags,"--output")?,
                     Path::new(required(&flags,"--root")?),
                     Path::new(required(&flags,"--identity")?),
                     required(&flags,"--id")?,
                     Path::new(required(&flags,"--destination")?),
-                    flags.get("--selection").copied())?;
+                    flags.get("--selection").copied(),
+                    flags.get("--output-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?)?;
                 if json { println!("{}",serde_json::json!({"restored_files":count})); }
                 else {println!("Restored {count} verified files to a new directory");}
             },

@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        protocol: [nfs, smb, glusterfs]
+        protocol: [nfs, smb, glusterfs, gpfs-nfs-compat, gpfs-smb-compat]
     steps:
       - uses: actions/checkout@v4
       - name: Install authentic protocol services and crypto tools
@@ -33,8 +33,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y age jq openssl
           case "${{ matrix.protocol }}" in
-            nfs) sudo apt-get install -y nfs-kernel-server nfs-common rpcbind ;;
-            smb) sudo apt-get install -y samba smbclient cifs-utils ;;
+            nfs|gpfs-nfs-compat) sudo apt-get install -y nfs-kernel-server nfs-common rpcbind ;;
+            smb|gpfs-smb-compat) sudo apt-get install -y samba smbclient cifs-utils ;;
             glusterfs) sudo apt-get install -y glusterfs-server glusterfs-client fuse3 ;;
           esac
           bash -n scripts/test-real-network-filesystems-r042.sh

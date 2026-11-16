@@ -1,0 +1,68 @@
+# Multi Backup — readiness RC Rust, server, HA, agenti e tutti i 33 plugin
+
+Data: 16 novembre 2026 — evidenze CI su SHA specifici, non ancora RC stabile.
+
+## Perimetro di certificazione
+
+La registry `rust/src/plugins.rs` distingue il *backup input* dal *backup output*. Il restore ha una matrice separata: poter ripristinare file su un mount NFS, Samba o GPFS protocol-only non equivale a implementare uno storage di backup remoto come output. Preview non significa pronto per produzione.
+
+## Readiness app
+
+| Area | Stato verificato | Blocco residuo |
+| --- | --- | --- |
+| GUI Rust (egui) | Catalogo 33 provider ricercabile, instradamento protetto, preferenze non segrete atomiche 0600; focused CI #43897809149 e #43900053687 PASS | DMG/PKG/EXE/RPM/DEB firmati, notarizzazione, aggiornamento installato e rollback reali, UI E2E |
+| Server/agent Rust | Controllo credenziali agenti, lease PG, limite 1..64 job per replica (default 4) CI #43897999559 PASS | Prova multi-host, resource limit reali e fencing di commit manifest su storage condiviso |
+| HA PostgreSQL 16, Patroni 3x, etcd TLS 3x | Crash primario, sync, rejoin, quorum fencing reali PASS #43883579584 su un host | Collega tre stack di rete indipendenti, real network partition, 3 macchine fisiche |
+| S3 WORM vault + restore | Ceph RGW 3 worker real #43873411605 PASS, RustFS+PG #43866257791 PASS | Linux WORM/software append-only contro root, credenziali e DR cross-host |
+| Prometheus/SNMPv3 | Native server HTTPS #43886988152 PASS; real SNMPv3 authPriv+native counters #43887445516 PASS | REST monitor.read token con PG real e VLAN |
+| Native Rust backup core | Encrypted age FULL/INC and POSIX RESTORE #43890856610 PASS | E2E multi-platform installer/restore |
+| GPFS NFS/SMB protocol client | 5 real kernel NFS/Samba/GlusterFS jobs PASS #43891408917; core CI #43891649347 PASS | IBM CES/ILM/fileset/ACL/snapshot/failover NOT tested; no IBM native certification |
+| Production Gate | Partial gates green | Full Production/security on final exact SHA not yet PASS |
+
+## Registry degli output backup — 33 plugin
+
+| Plugin | INPUT backup | OUTPUT backup | Evidenza reale / limiti |
+| --- | --- | --- | --- |
+| `github` | preview | non supportato | Rust backup preview; real account test unconfirmed |
+| `dropbox` | preview | pianificato | Rust client preview; live authenticated E2E still pending |
+| `google-drive` | pianificato | pianificato | Planned OAuth connector; no E2E |
+| `onedrive` | pianificato | pianificato | Planned Graph connector; no E2E |
+| `posix` | preview | preview | Real FULL/INC encrypted and recovery PASS #43890856610 |
+| `s3` | pianificato | preview | Real Ceph RGW COMPLIANCE WORM PASS #43873411605; RustFS+PG DR PASS #43866257791; generic S3 input planned |
+| `webdav` | preview | pianificato | davfs2 authenticated read-only source PASS #43890856865; output pending |
+| `nfs` | preview | pianificato | Real NFS FULL/INC and mounted create-only restore PASS #43891408917; generic encrypted NFS backup output pending |
+| `smb` | preview | non supportato | Real Samba SMB3 FULL/INC and mounted create-only restore PASS #43891408917; dedicated encrypted SMB output unsupported |
+| `cephfs` | preview | pianificato | Mount adapter preview; true CephFS field acceptance still pending |
+| `glusterfs` | preview | pianificato | Real GlusterFS FULL/INC and mounted restore PASS #43891408917; archive output pending |
+| `lustre` | preview | pianificato | Isolation guards PASS #43890856887; true server acceptance open |
+| `gpfs` | preview | pianificato | Only standard NFS/SMB protocol client FULL/INC and create-only recovery PASS #43891408917; IBM CES/native GPFS NOT tested |
+| `hdfs` | pianificato | pianificato | API/streaming planned |
+| `afs` | preview | preview | Rust vos volume dump/restore preview; real cell acceptance open |
+| `alfresco` | pianificato | pianificato | REST content model planned |
+| `owncloud` | pianificato | pianificato | REST/DAV integration planned |
+| `nextcloud` | pianificato | pianificato | REST/DAV integration planned |
+| `rbd` | pianificato | non supportato | Ceph RBD block snapshot not field-tested |
+| `iscsi` | pianificato | pianificato | LUN snapshot and fencing planned |
+| `fc` | pianificato | pianificato | Fibre Channel SAN snapshot and fencing planned |
+| `nvmeof` | pianificato | pianificato | NVMe-oF block snapshot/restore planned |
+| `proxmox` | pianificato | non supportato | Rust PVE QEMU/LXC vzdump task + UPID status unit PASS #43885350815; archive/media/restore on real PVE open |
+| `pbs` | pianificato | pianificato | Rust PBS VM/CT/host snapshot listing unit PASS #43885350815; encrypted export+restore open |
+| `kubernetes` | pianificato | non supportato | Kubernetes/OpenShift backup/restore resources/PV planned |
+| `vmware` | pianificato | non supportato | Rust vCenter VM-only inventory unit PASS #43887673635; VADP/CBT backup+restore missing; no CT |
+| `ovirt` | pianificato | non supportato | Rust oVirt Engine VM-only inventory unit PASS #43887673635; disk transfer backup+restore missing; no CT |
+| `mysql` | preview | non supportato | Rust logical dump+new-target restore preview; real DB acceptance pending |
+| `postgresql` | preview | non supportato | Real PG16 and RustFS encrypted paired DB/data recovery PASS #43866257791; PITR pending |
+| `oracle` | pianificato | non supportato | RMAN fail-closed checks PASS #43890856887; real Oracle field test pending |
+| `ssh` | pianificato | pianificato | SSH/SCP/SFTP real protocol PASS #43890856669; generalized backup target integration planned |
+| `sshfs` | preview | pianificato | Real SSHFS read-only FUSE backup PASS #43890856669; output pending |
+| `anti-ransomware-vault` | non supportato | preview | Rust S3 WORM real Ceph/RustFS PASS; separate root-resistant Linux vault field hardening remains |
+
+## Note di sicurezza e gate RC
+
+1. No stable tag, signed release or main merge until full exact-SHA Production Gate is green.
+2. Patroni network isolation CI is **NOT yet PASS**: hosted runner virtual-bridge L2 ARP forwarding failed. Current dedicated P2P netns path is under acceptance. Three physical hosts remain separate.
+3. PVE/PBS native backup archive export and real create-only VM/LXC restore still pending; VMware/oVirt VM-only native backup and restore still pending and no CT allowed without documented support.
+4. GPFS may enter only the **open NFS/SMB client protocol compatibility** profile; IBM Storage Scale native server behavior unqualified.
+5. Rust GUI still requires actual signed cross-platform native installers, update/rollback and visual/UX acceptance.
+
+English commit summary: Integrate tested Rust GUI, bounded server workers and GPFS NFS/SMB while recording every plugin readiness gate.

@@ -117,10 +117,36 @@ fn execute(db:Database,replica:String,lease:Lease){
 /// With a local volume, the PG claim guarantees that only its registered
 /// owner replica can take the work; shared storage jobs may run on any
 /// registered capable healthy replica.
+fn maximum_active_jobs(raw:Option<&str>)->Result<usize,String>{
+    let max=match raw{
+        Some(value)=>value.parse::<usize>()
+            .map_err(|_|"MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS must be 1..64")?,
+        None=>4
+    };
+    if !(1..=64).contains(&max){
+        return Err("MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS must be 1..64".into());
+    }
+    Ok(max)
+}
+/// Every active job holds a local permit from BEFORE the PostgreSQL claim
+/// until all lease and result reconciliation has finished. This prevents
+/// unbounded spawn_blocking tasks and false resource-limit compliance.
 pub async fn spawn(db:Database,replica:String){
+    let max=match maximum_active_jobs(
+        std::env::var("MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS").ok().as_deref()){
+        Ok(max)=>max,
+        Err(error)=>{eprintln!("Cluster worker disabled: {error}");return;}
+    };
+    let permits=Arc::new(tokio::sync::Semaphore::new(max));
     let mut timer=tokio::time::interval(Duration::from_secs(3));
     loop{
         timer.tick().await;
+        // Never claim another durable queued job if all local execution
+        // slots are occupied. The queued job stays recoverable in PG.
+        let permit=match permits.clone().try_acquire_owned(){
+            Ok(permit)=>permit,
+            Err(_)=>continue,
+        };
         let local=db.clone();
         let id=replica.clone();
         let next=tokio::task::spawn_blocking(move||{
@@ -134,16 +160,40 @@ pub async fn spawn(db:Database,replica:String){
             Ok(Ok(Some(lease)))=>{
                 let db=db.clone();
                 let id=replica.clone();
-                tokio::task::spawn_blocking(move||execute(db,id,lease));
+                tokio::task::spawn_blocking(move||{
+                    // Keep permit across the complete sync executor,
+                    // heartbeat stop/join and PostgreSQL finish.
+                    let _permit=permit;
+                    execute(db,id,lease);
+                });
             }
-            Ok(Ok(None))=>(),
-            _=>eprintln!("Cluster queue unavailable; refusing new assignment")
+            Ok(Ok(None))=>{drop(permit);}
+            _=>{
+                drop(permit);
+                eprintln!("Cluster queue unavailable; refusing new assignment");
+            }
         }
     }
 }
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn bounded_worker_slots_fail_closed_on_invalid_config(){
+        assert_eq!(maximum_active_jobs(None).unwrap(),4);
+        assert_eq!(maximum_active_jobs(Some("1")).unwrap(),1);
+        assert_eq!(maximum_active_jobs(Some("64")).unwrap(),64);
+        for invalid in ["","0","65","-1","99","not-a-number","1.2"]{
+            assert!(maximum_active_jobs(Some(invalid)).is_err());
+        }
+    }
+    #[tokio::test]
+    async fn local_semaphore_exhaustion_does_not_grant_extra_job_claims(){
+        let slots=Arc::new(tokio::sync::Semaphore::new(1));
+        let occupied=slots.clone().try_acquire_owned().unwrap();
+        assert!(slots.clone().try_acquire_owned().is_err());
+        drop(occupied);
+        assert!(slots.clone().try_acquire_owned().is_ok());
+    }
     #[test]fn nonlocal_and_unsupported_work_is_denied(){
         let make=|plugin:&str,transport:&str|Lease{
             job_id:"j1".into(),plugin_id:plugin.into(),storage_id:"s".into(),

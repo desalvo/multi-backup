@@ -41,6 +41,18 @@ impl Page {
         }
     }
 }
+/// The GUI lists the authoritative Rust registry, not a hardcoded two-item
+/// provider subset. Search is read-only and never grants execution rights.
+fn matching_providers(query:&str)->Vec<&'static plugins::PluginDescriptor>{
+    let needle=query.trim().to_lowercase();
+    plugins::CATALOG.iter().filter(|provider|{
+        needle.is_empty()||
+        provider.id.to_lowercase().contains(&needle)||
+        provider.title.to_lowercase().contains(&needle)||
+        provider.notes.to_lowercase().contains(&needle)
+    }).collect()
+}
+
 enum Event {
     Status(String),
     Progress(f32, String),
@@ -90,6 +102,7 @@ struct Fields {
     plugin_namespace: String,
     plugin_gpfs_access: String,
     plugin_snapshot_attested: bool,
+    plugin_search: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -145,6 +158,99 @@ fn read_legacy_settings() -> Result<serde_json::Value, String> {
     if !data.is_object() { return Err("Invalid legacy settings JSON object".into()); }
     Ok(data)
 }
+/// Native app preferences are always a non-secret allowlist. In particular
+/// neither the decrypted vault identity nor tokens/passwords are serialized.
+fn native_settings_path()->PathBuf{
+    default_vault_path().parent().and_then(Path::parent)
+        .unwrap_or_else(||Path::new(".")).join("native-settings.json")
+}
+fn build_native_prefs(fields:&Fields,provider:&str,channel:&str)
+    ->Result<serde_json::Value,String>{
+    if !matches!(provider,"github"|"dropbox") ||
+       !matches!(channel,"stable"|"early-release") ||
+       fields.output.len()>4096 || fields.dropbox_path.len()>4096 ||
+       fields.recipient.len()>256{
+        return Err("Invalid native setting".into());
+    }
+    let runs=fields.max_runs.parse::<u64>()
+        .map_err(|_|"GitHub CI limit must be an integer")?;
+    if runs>1000{return Err("GitHub CI limit out of range".into());}
+    Ok(serde_json::json!({
+        "version":1,
+        "output_directory":fields.output,
+        "default_recipient":fields.recipient,
+        "enabled_backends":[provider],
+        "backup_ci_runs":runs,
+        "dropbox_path":fields.dropbox_path,
+        "update_channel":channel
+    }))
+}
+fn native_read()->Result<serde_json::Value,String>{
+    let path=native_settings_path();
+    let meta=match std::fs::symlink_metadata(&path){
+        Ok(md)=>md,
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return read_legacy_settings(),
+        Err(e)=>return Err(e.to_string()),
+    };
+    if !meta.file_type().is_file()||meta.len()>128*1024{
+        return Err("Unsafe native settings file".into());
+    }
+    #[cfg(unix)]{
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode()&0o077!=0{
+            return Err("Native settings must have 0600 permissions".into());
+        }
+    }
+    let value:serde_json::Value=serde_json::from_reader(
+        std::fs::File::open(path).map_err(|e|e.to_string())?)
+        .map_err(|e|e.to_string())?;
+    if value["version"]!=1 || !value.is_object(){
+        return Err("Unknown native settings version".into());
+    }
+    Ok(value)
+}
+fn native_save_at(path:&Path,value:&serde_json::Value)->Result<(),String>{
+    let directory=path.parent().ok_or("No native settings directory")?;
+    std::fs::create_dir_all(directory).map_err(|e|e.to_string())?;
+    let dir=std::fs::symlink_metadata(directory).map_err(|e|e.to_string())?;
+    if !dir.is_dir()||dir.file_type().is_symlink(){
+        return Err("Refusing symlinked settings directory".into());
+    }
+    #[cfg(unix)]{
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory,
+            std::fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;
+    }
+    if let Ok(existing)=std::fs::symlink_metadata(path){
+        if !existing.file_type().is_file()||existing.file_type().is_symlink(){
+            return Err("Refusing unsafe existing settings path".into());
+        }
+    }
+    let body=serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?;
+    if body.len()>128*1024{return Err("Oversized settings".into());}
+    let tick=std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?
+        .as_nanos();
+    let temporary=directory.join(format!(".multi-backup-prefs-{}-{tick}.tmp",
+                                        std::process::id()));
+    let outcome=(||->Result<(),String>{
+        let mut open=std::fs::OpenOptions::new();
+        open.create_new(true).write(true);
+        #[cfg(unix)]{
+            use std::os::unix::fs::OpenOptionsExt;
+            open.mode(0o600);
+        }
+        let mut f=open.open(&temporary).map_err(|e|e.to_string())?;
+        f.write_all(&body).map_err(|e|e.to_string())?;
+        f.sync_all().map_err(|e|e.to_string())?;
+        drop(f);
+        std::fs::rename(&temporary,path).map_err(|e|e.to_string())?;
+        Ok(())
+    })();
+    if outcome.is_err(){let _=std::fs::remove_file(temporary);}
+    outcome
+}
+
 fn imported_provider(preferences: &serde_json::Value) -> String {
     if let Some(list) = preferences["enabled_backends"].as_array() {
         for item in list {
@@ -210,7 +316,7 @@ impl NativeApp {
         });
         let vault_path = default_vault_path();
         let must_unlock_on_start = std::fs::symlink_metadata(&vault_path).is_ok();
-        let migrated = read_legacy_settings();
+        let migrated = native_read();
         let empty_prefs = serde_json::Value::Null;
         let prefs = migrated.as_ref().unwrap_or(&empty_prefs);
         let output = prefs["output_directory"].as_str()
@@ -254,7 +360,7 @@ impl NativeApp {
             provider,
             status: match migrated {
                 Ok(serde_json::Value::Null) => "Nessun backup attivo".into(),
-                Ok(_) => "Impostazioni r018 importate in sola lettura".into(),
+                Ok(_) => "Preferenze caricate dal formato nativo o legacy".into(),
                 Err(error) => format!("Impostazioni legacy non importate: {error}"),
             },
             active: false, started: Instant::now(),
@@ -728,17 +834,56 @@ impl NativeApp {
         self.draw_progress(ui);
     }
     fn plugins(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Provider nativi");
-        Self::card(ui, "GitHub", |ui| {
-            ui.label("Git mirror, metadata e Actions CI tramite gh/git con Rust.");
-            if ui.button("Seleziona GitHub").clicked() {
-                self.provider = "github".into(); self.page = Page::Backup;
-            }
+        ui.heading("Catalogo plugin Rust");
+        ui.label("Input = origine del backup; Output = destinazione dell'archivio. "
+            .to_owned() + "Le operazioni di restore hanno uno stato separato.");
+        ui.horizontal(|ui| {
+            ui.label("Cerca provider:");
+            ui.add(egui::TextEdit::singleline(&mut self.fields.plugin_search)
+                .hint_text("Nome, ID o funzionalità…").desired_width(280.0));
+            if ui.button("Pulisci").clicked() {self.fields.plugin_search.clear();}
         });
-        Self::card(ui, "Dropbox", |ui| {
-            ui.label("Download TLS read-only, revisioni e archivi cifrati.");
-            if ui.button("Seleziona Dropbox").clicked() {
-                self.provider = "dropbox".into(); self.page = Page::Backup;
+        let visible=matching_providers(&self.fields.plugin_search);
+        ui.label(RichText::new(format!("{} di {} provider — contratto dal motore Rust",
+            visible.len(),plugins::CATALOG.len())).color(MUTED));
+        ui.label(RichText::new("Preview NON significa collaudo produttivo. "
+            .to_owned() + "Nessun comando di backup viene avviato soltanto selezionando un provider.")
+            .small().color(MUTED));
+        ui.separator();
+        egui::ScrollArea::vertical().max_height(700.0).show(ui,|ui|{
+            for descriptor in visible {
+                egui::CollapsingHeader::new(format!("{} — {}",descriptor.id,descriptor.title))
+                    .default_open(matches!(descriptor.id,"github"|"dropbox"))
+                    .show(ui,|ui|{
+                        ui.horizontal_wrapped(|ui|{
+                            ui.label(format!("Backup input: {:?}",descriptor.backup_input));
+                            ui.label(format!("Backup output: {:?}",descriptor.backup_output));
+                        });
+                        ui.horizontal_wrapped(|ui|{
+                            ui.label(format!("Restore input: {:?}",descriptor.restore_input));
+                            ui.label(format!("Restore output: {:?}",descriptor.restore_output));
+                        });
+                        ui.label(RichText::new(descriptor.notes).color(MUTED).small());
+                        ui.label(RichText::new(format!("Coerenza: {}",descriptor.consistency))
+                            .color(MUTED).small());
+                        if matches!(descriptor.id,"github"|"dropbox"){
+                            if ui.add_enabled(!self.active,
+                                egui::Button::new("Apri backup nativo")).clicked(){
+                                self.provider=descriptor.id.into();
+                                self.page=Page::Backup;
+                            }
+                        }else if matches!(descriptor.id,"posix"|"nfs"|"smb"|"sshfs"|"gpfs"){
+                            if ui.add_enabled(!self.active,
+                                egui::Button::new("Configura sorgente montata")).clicked(){
+                                self.fields.plugin_input=descriptor.id.into();
+                                self.page=Page::Storage;
+                            }
+                        }else{
+                            ui.label(RichText::new(
+                                "Nessun comando generico abilitato dalla GUI per questo provider.")
+                                .color(MUTED).small());
+                        }
+                    });
             }
         });
     }
@@ -1502,7 +1647,15 @@ impl NativeApp {
         ui.text_edit_singleline(&mut self.fields.max_runs);
         ui.label("Cartella Dropbox di origine");
         ui.text_edit_singleline(&mut self.fields.dropbox_path);
-        ui.label("Le password private non vengono mai salvate nel file di configurazione.");
+        ui.label("Le impostazioni salvate contengono soltanto preferenze NON segrete.");
+        if ui.add_enabled(!self.active,egui::Button::new("Salva impostazioni")).clicked(){
+            match build_native_prefs(&self.fields,&self.provider,&self.update_channel)
+                .and_then(|prefs|native_save_at(&native_settings_path(),&prefs)){
+                Ok(())=>self.status="Impostazioni native salvate in file privato".into(),
+                Err(error)=>self.status=format!("Impostazioni rifiutate: {error}"),
+            }
+        }
+        ui.label(RichText::new(&self.status).color(MUTED));
         if ui.button("Aggiorna archivi").clicked() {
             self.rescan();
             self.status = "Inventario aggiornato".into();
@@ -1758,6 +1911,8 @@ fn main() -> eframe::Result {
         assert!(image::load_from_memory(include_bytes!("../../assets/icon-256.png")).is_ok());
         assert_eq!(progress_rgb(0.), (232,32,32));
         assert_eq!(progress_rgb(100.), (32,232,32));
+        assert_eq!(matching_providers("").len(),plugins::CATALOG.len());
+        assert!(matching_providers("gpfs").iter().any(|p|p.id=="gpfs"));
         println!("Native Rust GUI self-test OK"); return Ok(());
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
@@ -1770,4 +1925,60 @@ fn main() -> eframe::Result {
     };
     eframe::run_native("Multi Backup", options,
         Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))))
+}
+
+#[cfg(test)]
+mod provider_gui_tests{
+    use super::*;
+    #[test]
+    fn every_catalog_plugin_is_discoverable_and_missing_plugins_are_not_invented(){
+        assert_eq!(matching_providers("").len(),plugins::CATALOG.len());
+        assert_eq!(matching_providers("   ").len(),plugins::CATALOG.len());
+        assert_eq!(matching_providers("GPFS").len(),1);
+        assert_eq!(matching_providers("missing-provider-not-registered").len(),0);
+        for id in ["github","dropbox","pbs","proxmox","vmware","ovirt",
+                   "gpfs","nfs","smb","postgresql","anti-ransomware-vault"]{
+            assert!(matching_providers(id).iter().any(|d|d.id==id));
+        }
+    }
+    #[test]
+    fn native_settings_include_no_secret_and_are_privately_written(){
+        let mut fields=Fields::default();
+        fields.output="/tmp/backup".into();
+        fields.max_runs="5".into();
+        fields.password="SECRET_PASSWORD_NEVER_SAVE".into();
+        fields.identity="SECRET_AGE_IDENTITY_NEVER_SAVE".into();
+        let prefs=build_native_prefs(&fields,"github","stable").unwrap();
+        assert!(!prefs.to_string().contains("SECRET_PASSWORD"));
+        assert!(!prefs.to_string().contains("SECRET_AGE_IDENTITY"));
+        let d=std::env::temp_dir().join(format!("mb-desktop-prefs-{}-{}",
+            std::process::id(),std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path=d.join("prefs.json");
+        native_save_at(&path,&prefs).unwrap();
+        let saved:serde_json::Value=serde_json::from_reader(
+            std::fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(saved["backup_ci_runs"],5);
+        #[cfg(unix)]{
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode()&0o777,0o600);
+        }
+        std::fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn bad_provider_or_limits_cannot_be_persisted(){
+        let mut fields=Fields::default();
+        fields.max_runs="5000".into();
+        assert!(build_native_prefs(&fields,"github","stable").is_err());
+        fields.max_runs="5".into();
+        assert!(build_native_prefs(&fields,"unregistered","stable").is_err());
+        assert!(build_native_prefs(&fields,"github","beta").is_err());
+    }
+    #[test]
+    fn no_catalog_source_is_implicitly_production_ready(){
+        assert!(!plugins::CATALOG.is_empty());
+        assert!(plugins::CATALOG.iter().all(|p|
+            p.backup_input!=plugins::Stage::Ready &&
+            p.backup_output!=plugins::Stage::Ready));
+    }
 }

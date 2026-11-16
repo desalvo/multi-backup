@@ -853,3 +853,15 @@ Consolidated code-level acceptance:
 **No complete RC:** entire full Production/security gate still NOT PASS on final SHA (earlier failed environment bootstrap fixed in r127 but no final full run); signed/notarized cross-platform native installers and update/rollback, 3-independent-host PostgreSQL/etcd partition/fencing, real REST monitor.read HTTPS+PG lifecycle, and real native hypervisor backup archive+create-only restore remain open. GPFS suspended and excluded from required RC gates. No main merge, release tag or stable publication occurred.
 
 One-line English commit summary: Record green native Rust/SNMP integration evidence and explicit remaining RC release gates.
+
+
+## r154 — integrate parallel tested Rust GUI, server/agents and GPFS protocol plugin (16 Nov 2026)
+
+- GUI r147/r150: real Rust eframe all-provider searchable registry and safe navigation, nonsecret native prefs atomic owner-only 0600. Native GUI focused compile CI [#43897809149](https://github.com/desalvo/multi-backup/actions/runs/43897809149) PASS; updated prefs [#43900053687](https://github.com/desalvo/multi-backup/actions/runs/43900053687) PASS. This is not a finished signed installer/GUI E2E.
+- Server r148: Rust cluster replica now obtains a bounded 1..64 job execution permit **before** claim; default max 4, queued work left durable in PostgreSQL when at capacity. Focused Rust server CI [#43897999559](https://github.com/desalvo/multi-backup/actions/runs/43897999559) PASS. Distributed actual multi-machine and storage manifest fencing remain RC gates.
+- Plugin r143–r145: GPFS client compatibility using standard NFS or Samba mounted protocol, FULL/INC age encrypted and create-only network recovery. Real five-job [#43891408917](https://github.com/desalvo/multi-backup/actions/runs/43891408917) PASS and focused Rust core [#43891649347](https://github.com/desalvo/multi-backup/actions/runs/43891649347) PASS. Explicitly **NOT** real IBM CES/native GPFS certification.
+- Created `docs/PLUGIN_READINESS_R154_IT.md` with all 33 registered input/output source/target statuses and verified CI references. No claims that catalog-only Planned stages imply executable backup.
+- Dedicated Patroni separate-stack netns fault injection being debugged in independent branch; latest documented original functional three-process same-host HA remains PASS #43883579584, physical host HA unqualified. This integration deliberately excludes unpassed netns script.
+- Repeat focused Rust GUI+server+core tests and real NFS/SMB matrix on this exact SHA before any RC promotion. No publication/merge to main.
+
+One-line English commit summary: Integrate verified Rust desktop, guarded server workers and GPFS protocol-only NFS/SMB with a complete 33-plugin readiness matrix.
