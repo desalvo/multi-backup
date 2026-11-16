@@ -158,14 +158,13 @@ def wait_primary(root, live, procs, seconds=110):
         if len(elected) != 1:
             return None
         candidate = elected[0]
-        synced = pg(root, candidate,
-                    "SELECT count(*) FROM pg_stat_replication WHERE sync_state='sync'",
+        writer = pg(root, candidate,
+                    "SELECT NOT pg_is_in_recovery()",
                     expect_ok=False)
-        if synced.returncode == 0 and synced.stdout.strip().isdigit() and (
-                int(synced.stdout.strip()) >= 1):
+        if writer.returncode == 0 and writer.stdout.strip() == "t":
             return candidate
         return None
-    return wait_for("one synchronous Patroni primary", choose, procs, seconds)
+    return wait_for("one elected writable Patroni primary", choose, procs, seconds)
 
 
 def start(log, *cmd):
@@ -338,6 +337,12 @@ def main():
                 lambda: dcs_sync_candidate(root, initial), processes, 50)
             print(f"Patroni sync candidate acknowledged in DCS: mb-node{candidate+1}",
                   flush=True)
+            # Validate that this is an actual PostgreSQL synchronous sender,
+            # not just a stale DCS state; do not crash an unqualified leader.
+            confirmed = pg(root, initial,
+                "SELECT count(*) FROM pg_stat_replication WHERE sync_state='sync'")
+            if not confirmed.stdout.strip().isdigit() or int(confirmed.stdout.strip()) < 1:
+                raise RuntimeError("DCS candidate has no PostgreSQL synchronous sender")
             pg(root, initial, "CREATE TABLE ha_witness(id integer PRIMARY KEY, payload text NOT NULL);")
             pg(root, initial, "INSERT INTO ha_witness VALUES (1,'acknowledged-before-failover');")
             # Ensure DCS still owns the candidate after the committed write;
@@ -357,6 +362,10 @@ def main():
             successor = wait_primary(root, survivors, processes, 90)
             if successor == initial:
                 raise RuntimeError("Original dead primary was not fenced")
+            new_sync = wait_for("new leader has DCS-confirmed synchronous standby",
+                lambda: dcs_sync_candidate(root, successor), processes, 60)
+            if new_sync not in survivors or new_sync == successor:
+                raise RuntimeError("No independent standby on new primary")
             if pg(root, successor, "SELECT payload FROM ha_witness WHERE id=1").stdout.strip() != (
                     "acknowledged-before-failover"):
                 raise RuntimeError("Acknowledged synchronous transaction missing after promotion")
