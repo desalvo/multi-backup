@@ -1,0 +1,1 @@
+One-shot retry: real 3-member mTLS etcd quorum without runner HTTP proxy, Patroni PostgreSQL16 synchronous replication, promotion and fencing. Fail closed.
