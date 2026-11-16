@@ -1,37 +1,72 @@
 #!/usr/bin/env bash
-# Real MinIO WORM wire-protocol acceptance. Never uses production buckets.
+# REAL MinIO Community Server: build from pinned upstream source, not removed images.
+# Self-contained ephemeral test on a GitHub hosted runner only; never touch real buckets.
 set -Eeuo pipefail
+umask 077
+if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+  echo "Refusing to execute S3 destructive negative tests outside GitHub hosted CI" >&2
+  exit 3
+fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NATIVE="$ROOT/rust/target/debug/multi-backup-native"
+test -x "$NATIVE"
+command -v go >/dev/null
+command -v aws >/dev/null
+command -v age-keygen >/dev/null
 TMP="$(mktemp -d)"
-CONTAINER="multi-backup-worm-$$"
-MC_IMAGE="${MC_IMAGE:-quay.io/minio/mc:latest}"
-MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:latest}"
-cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; rm -rf "$TMP"; }
-trap cleanup EXIT
-
-: "${AWS_ACCESS_KEY_ID:=ci-vault-access}"
-: "${AWS_SECRET_ACCESS_KEY:=ci-vault-strong-secret-not-production}"
-export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
-
-docker run -d --rm --name "$CONTAINER" \
-    -p 127.0.0.1:9000:9000 \
-    -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
-    -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
-    "$MINIO_IMAGE" server /data >/dev/null
-mc() {
-  docker run --rm --network host --entrypoint /bin/sh \
-    -e "MINIO_USER=$AWS_ACCESS_KEY_ID" \
-    -e "MINIO_PASSWORD=$AWS_SECRET_ACCESS_KEY" "$MC_IMAGE" \
-    -c 'mc alias set lab http://127.0.0.1:9000 "$MINIO_USER" "$MINIO_PASSWORD" >/dev/null && mc "$@"' -- "$@"
+SERVER_PID=""
+cleanup() {
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" 2>/dev/null || :; wait "$SERVER_PID" 2>/dev/null || :
+  fi
+  rm -rf -- "$TMP"
 }
-for i in $(seq 1 45); do
-    if mc ls lab >/dev/null 2>&1; then break; fi
-    sleep 1
+trap cleanup EXIT
+export GOBIN="$TMP/bin"
+mkdir -p "$GOBIN" "$TMP/disk1" "$TMP/disk2" "$TMP/disk3" "$TMP/disk4"
+echo "Building MinIO from pinned official open-source release"
+go install github.com/minio/minio@RELEASE.2025-10-15T17-29-55Z
+test -x "$GOBIN/minio"
+# CI credentials are short-lived per job; not set in source code or stored in backups.
+export AWS_ACCESS_KEY_ID="ci-r047-access-$$"
+export AWS_SECRET_ACCESS_KEY="$(openssl rand -hex 24)"
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_EC2_METADATA_DISABLED=true AWS_PAGER=""
+MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+  "$GOBIN/minio" server "$TMP/disk1" "$TMP/disk2" "$TMP/disk3" "$TMP/disk4" \
+  --address 127.0.0.1:9000 --console-address 127.0.0.1:9001 \
+  > "$TMP/minio.log" 2>&1 &
+SERVER_PID=$!
+s3() { aws --endpoint-url http://127.0.0.1:9000 --region us-east-1 s3api "$@"; }
+ready=0
+for n in $(seq 1 60); do
+  if s3 list-buckets >/dev/null 2>&1; then ready=1; break; fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+  sleep 1
 done
-mc mb --with-lock lab/vault-worm
-mc retention set --default COMPLIANCE 30d lab/vault-worm
-mc mb lab/vault-no-lock
+if [ "$ready" -ne 1 ]; then
+  echo "FAIL: actual MinIO server did not become available" >&2
+  sed -n '1,90p' "$TMP/minio.log" >&2
+  exit 1
+fi
+echo "PASS: official MinIO source binary started"
+
+# Both buckets are created INSIDE this temporary MinIO instance only.
+s3 create-bucket --bucket vault-worm --object-lock-enabled-for-bucket >/dev/null
+s3 put-bucket-versioning --bucket vault-worm --versioning-configuration Status=Enabled >/dev/null
+s3 put-object-lock-configuration --bucket vault-worm \
+  --object-lock-configuration '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"COMPLIANCE","Days":30}}}' >/dev/null
+s3 create-bucket --bucket vault-no-lock >/dev/null
+# A genuine ability to delete from an unlocked control bucket rules out
+# an unavailable S3 endpoint or missing administrative permissions.
+echo 'delete control' > "$TMP/control.txt"
+s3 put-object --bucket vault-no-lock --key disposable --body "$TMP/control.txt" >/dev/null
+s3 delete-object --bucket vault-no-lock --key disposable >/dev/null
+if s3 head-object --bucket vault-no-lock --key disposable >/dev/null 2>&1; then
+  echo "FAIL: ordinary control object was not deleted" >&2; exit 1
+fi
+echo "PASS: admin delete control against an unlocked test bucket"
+
 age-keygen -o "$TMP/identity" >/dev/null 2>&1
 age-keygen -o "$TMP/wrong-identity" >/dev/null 2>&1
 RECIPIENT="$(age-keygen -y "$TMP/identity")"
@@ -41,34 +76,36 @@ import json,os
 base={"provider":"minio","endpoint":"http://localhost:9000","region":"us-east-1",
       "bucket":"vault-worm","prefix":"ci/test-r047","recipient":os.environ["RECIPIENT"],
       "retention_days":2,"allow_loopback_http_for_testing":True}
-with open(os.path.join(os.environ["TMP"],"s3.json"),"w",encoding="utf-8") as f: json.dump(base,f)
+with open(os.path.join(os.environ["TMP"],"s3.json"),"w",encoding="utf8") as f: json.dump(base,f)
 base["bucket"]="vault-no-lock"
-with open(os.path.join(os.environ["TMP"],"unsafe.json"),"w",encoding="utf-8") as f: json.dump(base,f)
+with open(os.path.join(os.environ["TMP"],"unsafe.json"),"w",encoding="utf8") as f: json.dump(base,f)
 PY
+
 "$NATIVE" s3-vault preflight --config "$TMP/s3.json"
 if "$NATIVE" s3-vault preflight --config "$TMP/unsafe.json"; then
-    echo "FAIL: S3 vault accepted bucket without Object Lock" >&2; exit 1
+  echo "FAIL: S3 vault accepted bucket without Object Lock" >&2; exit 1
 fi
-mkdir "$TMP/source"
+mkdir -p "$TMP/source"
 printf 'immutable S3 vault sample\n' > "$TMP/source/hello.txt"
 "$NATIVE" s3-vault backup --config "$TMP/s3.json" --source "$TMP/source" > "$TMP/result.json"
 ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "$TMP/result.json")"
 VER="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["archive_version"])' "$TMP/result.json")"
 "$NATIVE" s3-vault verify --config "$TMP/s3.json" --id "$ID" --identity "$TMP/identity"
 if "$NATIVE" s3-vault verify --config "$TMP/s3.json" --id "$ID" --identity "$TMP/wrong-identity"; then
-    echo "FAIL: incorrect identity passed verification" >&2; exit 1
+  echo "FAIL: bad age identity passed verification" >&2; exit 1
 fi
 "$NATIVE" s3-vault restore --config "$TMP/s3.json" --id "$ID" \
-    --identity "$TMP/identity" --destination "$TMP/restored"
+  --identity "$TMP/identity" --destination "$TMP/restored"
 test "$(find "$TMP/restored" -type f | wc -l)" -eq 1
 grep -Rq 'immutable S3 vault sample' "$TMP/restored"
 if "$NATIVE" s3-vault restore --config "$TMP/s3.json" --id "$ID" \
-    --identity "$TMP/identity" --destination "$TMP/restored"; then
-    echo "FAIL: restore overwrote existing path" >&2; exit 1
+  --identity "$TMP/identity" --destination "$TMP/restored"; then
+  echo "FAIL: S3 restore overwrote an existing directory" >&2; exit 1
 fi
-# Privileged root must NOT be able to delete the exact retained object version.
-if mc rm --version-id "$VER" "lab/vault-worm/ci/test-r047/snapshots/$ID.tar.gz.age"; then
-    echo "FAIL: protected COMPLIANCE version was deleted" >&2; exit 1
+# Version-specific deletion MUST be denied by MinIO, including the root user.
+if s3 delete-object --bucket vault-worm --key "ci/test-r047/snapshots/$ID.tar.gz.age" \
+    --version-id "$VER" >/dev/null 2>&1; then
+  echo "FAIL: COMPLIANCE-retained archive version was deleted" >&2; exit 1
 fi
 "$NATIVE" s3-vault verify --config "$TMP/s3.json" --id "$ID" --identity "$TMP/identity"
-echo "PASS: MinIO real S3 backup/verify/restore + locked-version delete rejection"
+echo "PASS: real MinIO source build, Object Lock COMPLIANCE negative delete, encrypted backup/verify/restore"
