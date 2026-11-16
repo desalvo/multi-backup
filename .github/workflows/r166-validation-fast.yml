@@ -1,0 +1,24 @@
+name: Multi Backup - r166 HA field preflight self-tests
+on:
+  push:
+    branches: ["feature/r166-ha-gui-agents-acceptance"]
+    paths:
+      - "scripts/ci/ha-three-host-field-r166.py"
+      - ".github/workflows/r166-validation-fast.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  three-host-negative-fixtures:
+    name: Three independent kernel attestation and split-view rejection fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate parser and reject duplicated identities, divergent primary, unsafe host names
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci/ha-three-host-field-r166.py
+          python3 scripts/ci/ha-three-host-field-r166.py --self-test
+      - name: Field evidence limitation
+        run: echo 'Offline parser fixtures are not a genuine three-host outage and must not be counted as HA PASS.' >> "$GITHUB_STEP_SUMMARY"

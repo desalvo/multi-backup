@@ -889,3 +889,13 @@ One-line English commit summary: Verify native Rust egui GUI startup and renderi
 - Branch: `feature/r164-protected-hypervisor-config`, parent branch `feature/r163-desktop-real-xvfb-smoke` (Linux Xvfb real GUI #43906909522 PASS), upstream RC PR #22 remains DRAFT. Read-only PVE/PBS/VMware/oVirt API credential JSON now uses shared Unix O_NOFOLLOW, fd inode/mode check, strict size cap, and zeroized input. No hypervisor backup or VM/CT restore is thereby certified.
 - Initial focused Rust #43908977857 failed only a new 0644 test fixture; 114 tests passed. Fix sets 0600 in fixture; check follow-up exact-SHA CI before any integration. Keep GPFS protocol-only NFS/SMB, native GPFS postponed.
 - Outstanding RC gates: signed native Mac/Windows/Linux packages, installed updater/rollback, real multi-machine agent quotas and fenced shared-storage manifests, physical 3-host PG16 Patroni/etcd acceptance, live hypervisor backups/restores, REST external TLS/PG token acceptance, final security/Production CI. No main merge/tag/stable release.
+
+
+### r166 — Native GUI/server/agent integration and three-host HA field preflight (16 Nov 2026)
+
+- Continue from `feature/r166-ha-gui-agents-acceptance` (parent r164, r163 native Xvfb run PASS). Full integration is intentionally Draft until exact SHA CI passes; code source and new tests must be reviewed before merge.
+- `rust-desktop/src/main.rs`: added Server e agenti page querying HTTPS /v1/status and /v1/agents with independently supplied 0600 `mbmon_` token path. No token in native settings. Invalid origins with HTTP/userinfo/query/fragment or path fail closed.
+- `rust-server/src/monitoring.rs`: monitor.read protected agent aggregate counters only, no username or profile hash. `rust-server/src/agent_api.rs`: atomic no-overwrite hardlink ciphertext publication, private append-only behavior at file namespace level, full backup receipt still requires PostgreSQL commit; no WORM certification.
+- `rust/src/bin/multi-backup-agent.rs`: use shared bounded O_NOFOLLOW secure file reader; first-use credentials use persist_noclobber; existing sequence counter intentionally retains atomic replacement under lock.
+- `scripts/ci/ha-three-host-field-r166.py` and manual field workflow: three genuine remote kernels required; real outage/split-brain and independent physical fault domains cannot be certified without a dedicated operator-provided lab. Run self-test first.
+- Remaining: live 3-host Patroni/etcd failover and fence, server+agent E2E ciphertext/restore on independent hosts, GUI Mac/Windows/Linux signed installation/upgrades/rollback, final full Production Gate on exact SHA. No release/tag/main merge.
