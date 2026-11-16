@@ -19,6 +19,26 @@ un filesystem locale resta assegnato soltanto alla replica che lo possiede.</p>
 <div><h3>Job e agenti</h3><div id="cluster-jobs"></div><div id="cluster-agents"></div></div>
 </div>
 </section>
+<section id="monitoring">
+<div class="controls"><h2>Monitoraggio e API di stato</h2>
+<button id="monitoring-tokens-refresh" type="button">Aggiorna token</button></div>
+<p class="muted">Prometheus 9502 e REST HTTPS 8443 sono abilitabili separatamente
+nella configurazione del server; SNMP usa Net-SNMP con accesso read-only.
+La REST accetta solo token scope monitor.read generati dall'applicazione,
+revocabili e salvati nel database soltanto come hash SHA-256.</p>
+<div class="controls">
+<label>Descrizione token <input id="monitor-token-name" maxlength="128" type="text" placeholder="Grafana / monitoring"></label>
+<label>Durata
+<select id="monitor-token-days"><option value="1">1 giorno</option>
+<option value="7">7 giorni</option><option value="30" selected>30 giorni</option>
+<option value="90">90 giorni</option><option value="365">365 giorni</option></select></label>
+<button type="button" id="monitor-token-create">Crea token REST</button>
+</div>
+<p class="muted">La creazione/revoca richiede il codice offline di approvazione.
+Un nuovo token compare una sola volta: copiarlo in un secret manager.</p>
+<div id="monitor-token-result" role="status"></div>
+<div id="monitor-token-list"></div>
+</section>
 <section id="internal-db">
 <div class="controls"><h2>Database interno · PostgreSQL HA e disaster recovery</h2>
 <button id="internal-db-refresh" type="button">Aggiorna</button></div>
