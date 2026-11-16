@@ -150,6 +150,9 @@ fi
 "$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
   --manifest-version "$MANIFEST_VER" --identity "$TMP/key.age" --destination "$TMP/pinned-restore"
 cmp "$TMP/source/binary.bin" "$TMP/pinned-restore/multi-backup/s3-vault/$ID/binary.bin"
+export MB_DR_CI_TMP="$TMP" MB_DR_CI_NATIVE="$NATIVE" MB_DR_CI_PUB="$PUB" \
+  MB_DR_CI_KEY="$TMP/key.age" MB_DR_CI_BUCKET="$BUCKET"
+bash "$ROOT/scripts/ci/db-disaster-rustfs-live.sh"
 echo "PASS real RustFS versioned COMPLIANCE, verified age backup and pinned recovery after delete marker"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ];then
   {

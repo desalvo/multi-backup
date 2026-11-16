@@ -8,6 +8,8 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/ci/s3-worm-rustfs-live.sh'
+      - 'scripts/ci/db-disaster-rustfs-live.sh'
+      - 'scripts/db-disaster-restore.sh'
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,9 +28,11 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y age
+          sudo apt-get install -y age postgresql-client-16
           python3 -m pip install 'awscli>=1.42,<2'
           bash -n scripts/ci/s3-worm-rustfs-live.sh
+          bash -n scripts/ci/db-disaster-rustfs-live.sh
+          bash -n scripts/db-disaster-restore.sh
       - name: Build and unit test native Rust S3 vault with rustfs provider
         run: |
           cargo test --manifest-path rust/Cargo.toml --lib s3_vault

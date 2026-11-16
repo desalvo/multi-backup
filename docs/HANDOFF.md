@@ -685,3 +685,12 @@ One-line English commit summary: Harden PostgreSQL WORM leases, certify Rocky 9 
 - **Not a live DR qualification**: these tests use mocked commands. Combined DB+data consistency and genuine pg_dump→age→S3 WORM→pg_restore in an isolated PostgreSQL cluster remain a blocking RC acceptance. Patroni HA / split brain / release signing / final Production Gate also remain outstanding.
 
 One-line English commit summary: Preserve pinned WORM manifest versions across database and data disaster restores, refuse unsafe staging, and add seven isolated RC regression drills.
+
+
+## r084 — disposable real DB+data disaster-restore acceptance lab (16 Nov 2026)
+
+- Added `scripts/ci/db-disaster-rustfs-live.sh` to the existing **real RustFS S3 WORM** CI suite (reuses its actual disposable RustFS 1.0.3 bucket/container to avoid a second expensive provider spin-up). The test provisions a separate ephemeral PostgreSQL 16 instance and a source/empty target database; streams a real `pg_dump -Fc` into age, commits both the encrypted PostgreSQL dump and associated data archive through the native Rust S3 WORM adapter.
+- The test creates unversioned S3 delete markers over **both** retained manifests, invokes the hardened offline DR script with independent pinned `manifest_version` receipts, compares restored SQL rows and files byte-for-byte, and checks refusal of a second restore to a now-populated target. Host-only credentials, loopback-only ports, container cleanup, ephemeral keys and fresh data.
+- **Qualification is pending** until the real GitHub Actions job completes successfully on this SHA. A syntactically correct script does NOT count as a successful PostgreSQL/RustFS test. Even PASS will certify only this ephemeral RustFS+PG16 lab, not synchronized production DB+data snapshots, Patroni failover, Ceph RGW, physical failure domains, release signing or cross-OS installers.
+
+One-line English commit summary: Add a real ephemeral PostgreSQL-to-RustFS WORM disaster-restore drill with pinned DB/data receipts and fail-closed repeated-restore checks.
