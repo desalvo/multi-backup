@@ -89,9 +89,16 @@ class Lab:
             if name is None: raise RuntimeError("Wrong Patroni identity")
             i=int(name.group(1))-1
         else: raise RuntimeError("Unauthorized netns executable")
+        # sudo sets HOME=/root, while setpriv later drops UID. libpq then
+        # tries /root/.postgresql/postgresql.crt and refuses a valid client
+        # because the path is inaccessible. Restore the original unprivileged
+        # account's HOME, USER and LOGNAME without putting credentials in argv.
+        import pwd
+        user=pwd.getpwuid(self.uid)
         argv=["sudo","-n","ip","netns","exec",self.names[i],
               "setpriv","--reuid",str(self.uid),"--regid",str(self.gid),
-              "--clear-groups","--",*command]
+              "--clear-groups","--","env",f"HOME={user.pw_dir}",
+              f"USER={user.pw_name}",f"LOGNAME={user.pw_name}",*command]
         with logfile.open("a") as log:
             p=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=log,
                                stderr=subprocess.STDOUT,start_new_session=True)

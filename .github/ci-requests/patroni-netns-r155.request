@@ -1,0 +1,1 @@
+Rerun real 3 netns etcd Patroni PG16 after fixing sudo/setpriv HOME from /root to runner account; prove primary partition and WAL.

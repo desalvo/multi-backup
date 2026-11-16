@@ -7,6 +7,7 @@ on:
       - ".github/ci-requests/patroni-netns-r151.request"
       - ".github/ci-requests/patroni-netns-r152.request"
       - ".github/ci-requests/patroni-netns-r153.request"
+      - ".github/ci-requests/patroni-netns-r155.request"
   workflow_dispatch:
 permissions:
   contents: read
