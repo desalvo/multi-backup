@@ -242,6 +242,66 @@ document.addEventListener("visibilitychange",()=>{
   if(!document.hidden)loadCluster();
 });
 
+// Browser token management is independent of the monitoring listener.
+// Raw monitoring tokens are displayed once, never saved in localStorage.
+async function loadMonitoringTokens(){
+  const list=document.getElementById("monitor-token-list");
+  const r=await fetch("/api/monitoring/tokens",{credentials:"same-origin",cache:"no-store"});
+  list.replaceChildren();
+  if(!r.ok){list.append(el("p","Registro token non disponibile.","muted"));return;}
+  const data=await r.json();
+  for(const token of (data.tokens||[])){
+    const box=el("div",undefined,"cluster-record");
+    box.append(el("strong",String(token.name)+" · "+(token.revoked?"revocato":"attivo")),
+      el("small","Scadenza "+String(token.expires_at)+" · "+String(token.id),"muted"));
+    if(!token.revoked){
+      const b=el("button","Revoca");
+      b.addEventListener("click",async()=>{
+        const code=document.getElementById("recovery-authorization");
+        const headers={"Content-Type":"application/json","X-CSRF-Token":csrf,
+          "X-Multi-Backup-Recovery-Authorization":code.value.trim()};
+        code.value="";
+        const resp=await fetch("/api/monitoring/tokens/revoke",{
+          method:"POST",credentials:"same-origin",headers,
+          body:JSON.stringify({id:token.id})});
+        headers["X-Multi-Backup-Recovery-Authorization"]="";
+        document.getElementById("monitor-token-result").textContent=
+          resp.ok?"Token revocato":"Revoca rifiutata (serve approvazione offline).";
+        loadMonitoringTokens();
+      });
+      box.append(b);
+    }
+    list.append(box);
+  }
+}
+document.getElementById("monitoring-tokens-refresh").addEventListener("click",loadMonitoringTokens);
+document.getElementById("monitor-token-create").addEventListener("click",async()=>{
+  const display=document.getElementById("monitor-token-result");
+  display.replaceChildren();
+  const approval=document.getElementById("recovery-authorization");
+  const headers={"Content-Type":"application/json","X-CSRF-Token":csrf,
+    "X-Multi-Backup-Recovery-Authorization":approval.value.trim()};
+  approval.value="";
+  const response=await fetch("/api/monitoring/tokens",{
+    method:"POST",credentials:"same-origin",headers,
+    body:JSON.stringify({
+      name:document.getElementById("monitor-token-name").value.trim(),
+      lifetime_days:Number(document.getElementById("monitor-token-days").value)
+    })
+  });
+  headers["X-Multi-Backup-Recovery-Authorization"]="";
+  if(!response.ok){display.textContent="Creazione token rifiutata.";return;}
+  const data=await response.json();
+  display.append(el("strong","Token creato: copialo ORA, non sarà più recuperabile."));
+  const input=el("input");input.readOnly=true;input.type="text";input.value=String(data.token||"");
+  display.append(input);
+  const copy=el("button","Copia token");
+  copy.addEventListener("click",()=>navigator.clipboard.writeText(input.value));
+  display.append(copy);
+  loadMonitoringTokens();
+});
+loadMonitoringTokens().catch(()=>{});
+
 // PostgreSQL-authoritative backup metadata, identical on each bare-metal
 // server or Kubernetes replica. Never offer a local restore for a remote
 // node-local volume; that needs an authenticated owner routing operation.
