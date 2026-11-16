@@ -74,6 +74,17 @@ CREATE INDEX IF NOT EXISTS mb_cluster_jobs_pending
  ON mb_cluster_jobs(status,priority DESC,created_at);
 CREATE INDEX IF NOT EXISTS mb_cluster_jobs_lease
  ON mb_cluster_jobs(replica_id,lease_until) WHERE status='running';
+CREATE TABLE IF NOT EXISTS mb_cluster_backups (
+  storage_id TEXT NOT NULL REFERENCES mb_cluster_storage(storage_id),
+  backup_id TEXT NOT NULL,
+  owner_replica TEXT NOT NULL REFERENCES mb_cluster_replicas(replica_id),
+  label TEXT NOT NULL,
+  files JSONB NOT NULL,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(storage_id,backup_id)
+);
+CREATE INDEX IF NOT EXISTS mb_cluster_backups_owner
+  ON mb_cluster_backups(owner_replica,storage_id);
 CREATE TABLE IF NOT EXISTS mb_agent_registry (
   agent_id TEXT PRIMARY KEY,
   owner_user TEXT NOT NULL,
@@ -481,6 +492,90 @@ impl Database {
             &[&job,&replica,&token,&status,result])?;
         Ok(n==1)
     }
+
+    /// Publish authenticated, verified logical backup inventory from THIS
+    /// replica only. Node-local entries must belong to this exact replica;
+    /// an unregistered storage or a shared-store path is never inferred.
+    /// This is metadata only: remote restore is NOT silently routed.
+    pub fn publish_backups(&self,replica:&str,storage:&str,items:&[Value])
+        ->Result<(),BoxError>{
+        if !ident(replica)||!ident(storage)||items.len()>1000{
+            return Err(error("Invalid cluster backup inventory identity or size"));
+        }
+        let mut conn=self.connect()?;
+        let mut tx=conn.transaction()?;
+        let row=tx.query_opt("SELECT visibility,owner_replica
+             FROM mb_cluster_storage WHERE storage_id=$1 FOR UPDATE",
+             &[&storage])?.ok_or_else(||error("Storage is not registered"))?;
+        let visibility:String=row.get(0);
+        let owner:Option<String>=row.get(1);
+        if visibility=="node_local" && owner.as_deref()!=Some(replica){
+            return Err(error("Another node owns this node-local backup storage"));
+        }
+        let exists=tx.query_opt("SELECT replica_id FROM mb_cluster_replicas
+             WHERE replica_id=$1 AND last_seen>now()-interval '90 seconds'",
+             &[&replica])?;
+        if exists.is_none(){return Err(error("Publishing replica heartbeat expired"));}
+        let mut ids=std::collections::HashSet::new();
+        for item in items {
+            let id=item["id"].as_str().ok_or_else(||error("Missing backup ID"))?;
+            if id.len()!=64||!id.bytes().all(|c|c.is_ascii_hexdigit()&&!c.is_ascii_uppercase())
+                ||!ids.insert(id.to_string()){
+                return Err(error("Invalid or duplicate backup ID"));
+            }
+            let label=item["label"].as_str().ok_or_else(||error("Missing backup label"))?;
+            if label.len()>256||label.chars().any(char::is_control){
+                return Err(error("Unsafe backup label"));
+            }
+            let files=item["files"].as_array().ok_or_else(||error("Missing backup files"))?;
+            if files.len()>50000{return Err(error("Backup inventory exceeds per-snapshot limit"));}
+            for entry in files{
+                let path=entry["path"].as_str().ok_or_else(||error("Missing file path"))?;
+                if path.is_empty()||path.len()>4096||path.starts_with('/')||
+                   path.split('/').any(|p|p=="."||p=="..")||path.chars().any(char::is_control)||
+                   !entry["size"].is_u64(){
+                    return Err(error("Unsafe cluster file metadata"));
+                }
+            }
+            let data=Value::Array(files.clone());
+            tx.execute("INSERT INTO mb_cluster_backups
+                (storage_id,backup_id,owner_replica,label,files,observed_at)
+                VALUES ($1,$2,$3,$4,$5,now())
+                ON CONFLICT (storage_id,backup_id) DO UPDATE SET
+                owner_replica=EXCLUDED.owner_replica,
+                label=EXCLUDED.label,files=EXCLUDED.files,observed_at=now()",
+                &[&storage,&id,&replica,&label,&data])?;
+        }
+        // Explicitly retire only THIS replica's stale inventory, never a
+        // disconnected peer's catalog (offline entries remain visible).
+        let keep:Vec<String>=ids.into_iter().collect();
+        tx.execute("DELETE FROM mb_cluster_backups WHERE
+            storage_id=$1 AND owner_replica=$2 AND NOT (backup_id=ANY($3))",
+            &[&storage,&replica,&keep])?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Consistent operator view on ANY replica. The server identity and
+    /// storage location are mandatory; a remote node-local entry is
+    /// browsable metadata, NOT an implicitly accessible recovery path.
+    pub fn backup_inventory(&self)->Result<Value,BoxError>{
+        let mut db=self.connect()?;
+        let rows=db.query("SELECT b.storage_id,b.backup_id,b.owner_replica,
+            b.label,b.files,r.last_seen>now()-interval '90 seconds',
+            s.visibility FROM mb_cluster_backups b
+            JOIN mb_cluster_storage s ON s.storage_id=b.storage_id
+            LEFT JOIN mb_cluster_replicas r ON r.replica_id=b.owner_replica
+            ORDER BY b.observed_at DESC LIMIT 1000",&[])?;
+        Ok(json!({"backups":rows.iter().map(|r|json!({
+            "storage_id":r.get::<_,String>(0),
+            "id":r.get::<_,String>(1),"owner_replica":r.get::<_,String>(2),
+            "label":r.get::<_,String>(3),"files":r.get::<_,Value>(4),
+            "owner_online":r.get::<_,Option<bool>>(5).unwrap_or(false),
+            "visibility":r.get::<_,String>(6),
+            "remote_export_supported":false
+        })).collect::<Vec<_>>(),"read_only_remote":true}))
+    }
+
     pub fn status(&self)->Result<Value,BoxError>{
         let mut db=self.connect()?;
         let nodes=db.query("SELECT replica_id,max_jobs,storage_ids,
@@ -534,6 +629,11 @@ mod tests {
         assert!(SCHEMA.contains("owner_replica"));
         assert!(SCHEMA.contains("node_local"));
         assert!(SCHEMA.contains("storage_ids"));
+    }
+    #[test]fn cluster_inventory_is_not_an_unscoped_local_export(){
+        assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS mb_cluster_backups"));
+        assert!(SCHEMA.contains("PRIMARY KEY(storage_id,backup_id)"));
+        assert!(SCHEMA.contains("REFERENCES mb_cluster_replicas"));
     }
     #[test]fn expired_distributed_writers_must_be_quarantined(){
         assert!(SCHEMA.contains("needs_reconciliation"));
