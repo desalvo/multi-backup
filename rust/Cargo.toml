@@ -35,3 +35,6 @@ reed-solomon-erasure = "6.0"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 url = "2.5"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
+
+# S3 Object Lock PutObject requires Content-MD5 on many endpoints.
+md-5 = "0.10"
