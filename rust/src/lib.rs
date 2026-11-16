@@ -21,6 +21,7 @@ pub mod s3_vault;
 pub mod plugins;
 pub mod virtualization_inventory;
 pub mod hypervisor_inventory;
+pub mod protected_config;
 pub mod plugin_executor;
 pub mod backup_policy;
 pub mod backup_chain;
