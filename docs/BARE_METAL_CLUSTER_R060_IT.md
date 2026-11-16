@@ -75,7 +75,8 @@ Per SNMPv3 creare il relativo utente con `net-snmp-create-v3-user` o le procedur
 sudo dnf install ./multi-backup-server-*.rpm
 # oppure: sudo apt install ./multi-backup-server_*_amd64.deb
 sudo install -d -m0700 -o multi-backup -g multi-backup /var/lib/multi-backup/data /var/lib/multi-backup/exports /var/lib/multi-backup/db-staging
-sudo install -d -m0700 /etc/multi-backup/secrets
+sudo install -d -m0750 -o root -g multi-backup /etc/multi-backup/secrets
+# Segreti: root:multi-backup mode 0640; nessun accesso ad altri utenti.
 sudoedit /etc/multi-backup/server.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now multi-backup-server
