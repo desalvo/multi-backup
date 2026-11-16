@@ -236,6 +236,19 @@ impl Store {
                                kind:BackupKind,parent_id:Option<&str>,
                                live:&dyn Fn(bool)->Result<(),String>)
         ->Res<LogicalBackup> {
+        self.backup_in_namespace_mode_guard_filtered(
+            identity,label,top_namespace,sources,kind,parent_id,false,live)
+    }
+    /// The davfs2 virtual recovery directory is not WebDAV server data.
+    /// Exclusion must be requested explicitly by the provider adapter and
+    /// independently attested absent on the remote server. Other paths,
+    /// including unreadable ones, remain fatal; no silent partial backups.
+    pub fn backup_in_namespace_mode_guard_filtered(&self,identity:&Path,label:&str,
+                               top_namespace:&str,sources:&[Source],
+                               kind:BackupKind,parent_id:Option<&str>,
+                               exclude_attested_davfs_cache:bool,
+                               live:&dyn Fn(bool)->Result<(),String>)
+        ->Res<LogicalBackup> {
         live(false)?;
         if !top_namespace.is_empty() && !crate::backup_policy::safe_namespace(top_namespace) {
             return Err("Unsafe top namespace".into());
@@ -267,9 +280,13 @@ impl Store {
             if !fs::symlink_metadata(&src.directory)?.file_type().is_dir() {
                 return Err("Source must be a directory, not symlink".into());
             }
-            for file in WalkDir::new(&src.directory).follow_links(false).max_depth(64) {
+            for file in WalkDir::new(&src.directory).follow_links(false).max_depth(64)
+                .into_iter().filter_entry(|entry| {
+                    !(exclude_attested_davfs_cache && entry.depth()==1
+                      && entry.file_name()==std::ffi::OsStr::new("lost+found"))
+                }) {
                 live(false)?;
-                let file = file?;
+                let file = file.map_err(|e|format!("Scanning mounted source {}: {e}",src.directory.display()))?;
                 if file.file_type().is_dir() { continue; }
                 if !file.file_type().is_file() { return Err("Symlink/special file rejected".into()); }
                 let relative = file.path().strip_prefix(&src.directory)?;
@@ -285,13 +302,15 @@ impl Store {
                 if !safe_path(&vpath) || !visited.insert(vpath.clone()) {
                     return Err("Unsafe/duplicate logical file".into());
                 }
-                let mut input = File::open(file.path())?;
+                let mut input = File::open(file.path())
+                    .map_err(|e|format!("Opening mounted source file {}: {e}",file.path().display()))?;
                 let mut chunks = Vec::new();
                 let mut bytes = 0u64;
                 loop {
                     live(false)?;
                     let mut block = Vec::new();
-                    (&mut input).take(self.cfg.chunk_bytes as u64).read_to_end(&mut block)?;
+                    (&mut input).take(self.cfg.chunk_bytes as u64).read_to_end(&mut block)
+                        .map_err(|e|format!("Reading mounted source file {}: {e}",file.path().display()))?;
                     if block.is_empty() { break; }
                     bytes = bytes.checked_add(block.len() as u64).ok_or("File too large")?;
                     chunks.push(self.save_chunk(identity, &block)?);

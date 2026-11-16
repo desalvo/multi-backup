@@ -102,6 +102,27 @@ jobs:
       - name: Rust r038 operator documentation contract
         run: python scripts/check-documentation-consistency.py
 
+  s3-vault-minio-real:
+    name: S3 vault - real MinIO Object Lock roundtrip
+    runs-on: ubuntu-24.04
+    needs: [production-gate]
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install pinned open-source MinIO CI prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          python3 -m pip install 'awscli>=1.42,<2'
+          bash -n scripts/ci/s3-worm-minio-live.sh
+      - name: Build native Rust vault executable
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Test REAL MinIO WORM + backup + restore + negative deletion
+        run: bash scripts/ci/s3-worm-minio-live.sh
+
   rust-server-validation:
     name: Rust web server, storage and OCI image build verification
     needs: [production-gate]
@@ -164,7 +185,7 @@ jobs:
 
   publish-container:
     name: Push Multi Backup OCI image to Docker Hub
-    needs: [production-gate, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
+    needs: [production-gate, s3-vault-minio-real, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
     runs-on: ubuntu-24.04
     if: >-
       github.event_name != 'pull_request' &&
@@ -616,7 +637,7 @@ jobs:
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)
-    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
+    needs: [production-gate, s3-vault-minio-real, macos-smoke, publications-smoke, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&

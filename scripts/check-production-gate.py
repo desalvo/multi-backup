@@ -160,14 +160,17 @@ def validate():
                   'gc-collect','verify-chain'):
         assert token in publisher, f'PDF manual generator missing Rust r038: {token}'
     assert "for manual in docs/manuals/*.pdf" in doc_steps, 'PDF r038 content smoke missing'
+    assert 's3-vault-minio-real' in jobs, 'Missing real S3 WORM acceptance job'
+    assert jobs['s3-vault-minio-real']['needs']==['production-gate'], 'S3 test bypasses Production Gate'
+    assert 's3-worm-minio-live.sh' in str(jobs['s3-vault-minio-real']['steps']), 'Missing real MinIO test'
     assert jobs['native-release']['needs']==[
-        'production-gate','macos-smoke','publications-smoke',
+        'production-gate','s3-vault-minio-real','macos-smoke','publications-smoke',
         'rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
         'rust-linux-rpm-native-preview','rust-linux-debian-native-preview'
     ], 'Native release cannot bypass Rust-only cross-platform acceptance'
     assert jobs['publish-container']['needs']==[
-        'production-gate','rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
+        'production-gate','s3-vault-minio-real','rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
         'rust-linux-rpm-native-preview','rust-linux-debian-native-preview','publications-smoke'
     ], 'Docker Hub publication cannot bypass Rust-only cross-platform acceptance'

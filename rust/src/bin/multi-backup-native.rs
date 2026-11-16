@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -17,7 +17,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins afs-restore-plan --target-json NEW_VOLUME_TARGET.json [--json]\n\
        multi-backup-native plugins afs-restore-new --target-json NEW_VOLUME_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target CELL:SERVER:/vicepXX:NEWNAME [--max-transfer-bps RATE] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs|webdav|nfs|smb|cephfs|glusterfs|lustre --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
-       multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|webdav|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|webdav|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--davfs-cache-not-on-remote] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins restore --input posix --output posix|nfs|smb|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
        multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
        multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
@@ -61,6 +61,7 @@ fn usage() -> &'static str {
        multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
        multi-backup-native restore github --archive ARCHIVE --vault PROTECTED.agevault --target OWNER/NEW --confirm CREATE-NEW [--password-stdin]\n\
        multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
+       multi-backup-native s3-vault preflight|backup|verify|restore --config CONFIG.json [--source DIR] [--id ID --identity AGE_KEY --destination NEW_DIR]\n\
        multi-backup-native vault-store init --root EXISTING_DIR --recipient age1PUBLIC\n\
        multi-backup-native vault-store backup --root VAULT_DIR --source DIR [--json]\n\
        multi-backup-native vault-store list|status --root VAULT_DIR [--json]\n\
@@ -88,7 +89,7 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
-        if ["--dry-run","--source-snapshot-attested","--no-chain","--rebase-dependents","--force"].contains(&args[pos].as_str()) {
+        if ["--dry-run","--source-snapshot-attested","--davfs-cache-not-on-remote","--no-chain","--rebase-dependents","--force"].contains(&args[pos].as_str()) {
             let flag=args[pos].as_str();
             if parsed.insert(flag,"true").is_some() {
                 return Err(format!("Duplicate {flag} flag"));
@@ -136,6 +137,37 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "s3-vault" {
+        if password_stdin {return Err("S3 vault never receives account passwords".into());}
+        let config=s3_vault::Config::load(Path::new(required(&flags,"--config")?))?;
+        match command {
+            "preflight" => {
+                accepted(&flags,&["--config"])?;
+                s3_vault::preflight(&config)?;
+                println!("S3 bucket versioning + default COMPLIANCE Object Lock preflight: PASS");
+            },
+            "backup" => {
+                accepted(&flags,&["--config","--source"])?;
+                let item=s3_vault::backup(&config,Path::new(required(&flags,"--source")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            "verify" => {
+                accepted(&flags,&["--config","--id","--identity"])?;
+                let item=s3_vault::verify(&config,required(&flags,"--id")?,
+                    Path::new(required(&flags,"--identity")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            "restore" => {
+                accepted(&flags,&["--config","--id","--identity","--destination"])?;
+                let item=s3_vault::restore(&config,required(&flags,"--id")?,
+                    Path::new(required(&flags,"--identity")?),
+                    Path::new(required(&flags,"--destination")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
     if family == "vault-store" {
         if password_stdin { return Err("Vault store does not accept plaintext passwords".into()); }
         match command {
@@ -344,11 +376,12 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "backup" => {
                 accepted(&flags, &["--input","--output","--source","--root",
                                     "--identity","--label","--namespace","--top-namespace",
-                                    "--source-snapshot-attested","--input-gpfs-access",
+                                    "--source-snapshot-attested","--davfs-cache-not-on-remote","--input-gpfs-access",
                                     "--mode","--parent"])?;
                 let kind=chunk_store::BackupKind::parse(
                     flags.get("--mode").copied().unwrap_or("full"))?;
-                let snapshot = plugin_executor::backup_with_mode(
+                let snapshot = if flags.contains_key("--davfs-cache-not-on-remote") {
+                    plugin_executor::backup_with_mode_davfs_cache_attested(
                     required(&flags,"--input")?,required(&flags,"--output")?,
                     Path::new(required(&flags,"--source")?),
                     Path::new(required(&flags,"--root")?),
@@ -358,7 +391,20 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     flags.get("--top-namespace").copied().unwrap_or(""),
                     flags.contains_key("--source-snapshot-attested"),
                     flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?,
-                    kind,flags.get("--parent").copied())?;
+                    kind,flags.get("--parent").copied())
+                } else {
+                    plugin_executor::backup_with_mode(
+                    required(&flags,"--input")?,required(&flags,"--output")?,
+                    Path::new(required(&flags,"--source")?),
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--label")?,
+                    flags.get("--namespace").copied().unwrap_or("files"),
+                    flags.get("--top-namespace").copied().unwrap_or(""),
+                    flags.contains_key("--source-snapshot-attested"),
+                    flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?,
+                    kind,flags.get("--parent").copied())
+                }?;
                 if json { println!("{}",serde_json::to_string_pretty(&snapshot)?); }
                 else {println!("Verified encrypted plugin backup {} ({} files)",
                               snapshot.id,snapshot.entries.len());}

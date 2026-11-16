@@ -43,10 +43,49 @@ fi
 printf "%s %s %s\n" "https://localhost:18919/" mbci "$PASSWORD" | sudo tee -a /etc/davfs2/secrets >/dev/null
 sudo chmod 0600 /etc/davfs2/secrets
 unset PASSWORD
+# davfs2 1.7.1 on newer Linux kernels may mount successfully but return
+# EINVAL from getdents64/readdir due to an undersized FUSE buffer.
+# Official davfs2 fix is 1.7.2; documented compatibility workaround: buf_size 64.
+# Apply ONLY inside the disposable GitHub-hosted runner, before mounting.
+printf '\n# Multi Backup CI: davfs2 kernel/FUSE readdir compatibility\nbuf_size 64\n' \
+  | sudo tee -a /etc/davfs2/davfs2.conf >/dev/null
 sudo mount -t davfs -o ro "https://localhost:18919/" "$RO"
-test "$(findmnt -rn -T "$RO" -o FSTYPE)" = fuse.davfs
+# Do not mask readdir errors or accept an empty mounted directory.
+if ! ls -la "$RO" > "$WORK/davfs-directory-list.txt"; then
+  echo "FAIL: actual davfs2 directory readdir failed (check buf_size/kernel)" >&2
+  exit 1
+fi
+test -r "$RO/nested/data.txt" && test -r "$RO/test.bin" || {
+  echo "FAIL: expected authenticated WebDAV fixture is not readable" >&2; exit 1;
+}
+FSTYPE="$(findmnt -rn -T "$RO" -o FSTYPE)"
+MOUNT_SOURCE="$(findmnt -rn -T "$RO" -o SOURCE)"
+case "$FSTYPE" in
+    fuse.davfs) ;;
+    fuse)
+      # Ubuntu's genuine davfs2 helper exposes a generic FUSE type.
+      # The exact HTTPS source plus the Rust mountinfo attestation must agree.
+      test "$MOUNT_SOURCE" = "https://localhost:18919/" || {
+        echo "FAIL generic FUSE mount lacks exact HTTPS WebDAV origin" >&2; exit 1;
+      } ;;
+    *) printf 'FAIL unexpected WebDAV FSTYPE %s\n' "$FSTYPE" >&2; exit 1 ;;
+esac
 "$CLI" plugins probe --plugin webdav --mount "$RO" --json > "$WORK/probe.json"
-test "$(jq -er '.rw_mount_option == false and .fs_type == "fuse.davfs"' "$WORK/probe.json")" = true
+if ! jq -e '.rw_mount_option == false and (.fs_type == "fuse.davfs" or .fs_type == "fuse")' "$WORK/probe.json" >/dev/null; then
+  echo "FAIL WebDAV probe did not attest read-only HTTPS davfs2 mount" >&2
+  cat "$WORK/probe.json" >&2
+  exit 1
+fi
+# davfs2 shows a LOCAL recovery/cache directory named lost+found at mount
+# root. Prove that it is not a remote WebDAV collection before excluding it.
+HTTP_CODE="$(curl -sS -u "mbci:$(sudo awk '$1=="https://localhost:18919/" {print $3}' /etc/davfs2/secrets | tail -1)" \
+  -X PROPFIND -H 'Depth: 0' -o "$WORK/virtual-davfs-response" \
+  -w '%{http_code}' 'https://localhost:18919/lost+found/')"
+test "$HTTP_CODE" = 404 || {
+  echo "FAIL: davfs recovery directory is present on server or unverifiable; do not exclude" >&2
+  exit 1
+}
+echo "PASS: WebDAV server has no lost+found; davfs2 generated local recovery directory can be excluded"
 if "$CLI" plugins backup --input webdav --output posix --source "$RO" \
   --root "$STORE" --identity "$IDENTITY" --label not-attested >/dev/null 2>&1; then
   echo "FAIL WebDAV allowed backup without external snapshot attestation" >&2; exit 1
@@ -56,7 +95,8 @@ RECEIVER=$(sed -n 's/^# public key: //p' "$IDENTITY" | head -1)
 "$CLI" storage init --root "$STORE" --recipient "$RECEIVER" >/dev/null
 "$CLI" plugins backup --input webdav --output posix --source "$RO" \
   --root "$STORE" --identity "$IDENTITY" --label "genuine davfs2 input" \
-  --namespace data --source-snapshot-attested --json > "$WORK/result.json"
+  --namespace data --source-snapshot-attested --davfs-cache-not-on-remote \
+  --json > "$WORK/result.json"
 SNAPSHOT=$(jq -er '.id | select(length==64)' "$WORK/result.json")
 "$CLI" storage verify-chain --root "$STORE" --identity "$IDENTITY" --id "$SNAPSHOT" >/dev/null
 "$CLI" plugins restore --input posix --output posix --root "$STORE" \

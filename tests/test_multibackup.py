@@ -497,12 +497,12 @@ class PluginTests(unittest.TestCase):
         self.assertIn('    needs: [production-gate]',ci)
         self.assertIn('  publications-smoke:',ci)
         self.assertIn(
-            '    needs: [production-gate, macos-smoke, publications-smoke, '
+            '    needs: [production-gate, s3-vault-minio-real, macos-smoke, publications-smoke, '
             'rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, '
             'rust-windows-native-preview, rust-linux-rpm-native-preview, '
             'rust-linux-debian-native-preview]', ci)
         self.assertIn(
-            '    needs: [production-gate, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, '
+            '    needs: [production-gate, s3-vault-minio-real, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, '
             'rust-macos-native-preview, rust-windows-native-preview, '
             'rust-linux-rpm-native-preview, rust-linux-debian-native-preview, '
             'publications-smoke]', ci)

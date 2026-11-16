@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, plugins, plugin_executor, backup_chain};
+use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -59,6 +59,7 @@ struct Fields {
     immutable_vault_root: String,
     immutable_vault_source: String,
     immutable_vault_snapshot: String,
+    s3_vault_config: String,
     password: String,
     password_confirm: String,
     recovery_path: String,
@@ -232,6 +233,7 @@ impl NativeApp {
             immutable_vault_root: String::new(),
             immutable_vault_source: String::new(),
             immutable_vault_snapshot: String::new(),
+            s3_vault_config: String::new(),
             max_runs: max_runs.to_string(),
             chunk_root: default_output_path.clone(),
             chunk_label: "Backup completo".into(),
@@ -787,6 +789,63 @@ impl NativeApp {
             }
         });
     }
+    fn run_s3_vault(&mut self, action:&str) {
+        if self.active {return;}
+        let config_path=PathBuf::from(self.fields.s3_vault_config.trim());
+        let source=PathBuf::from(self.fields.immutable_vault_source.trim());
+        let target=PathBuf::from(self.fields.destination.trim());
+        let snapshot=self.fields.immutable_vault_snapshot.trim().to_owned();
+        let identity=self.fields.identity.trim().to_owned();
+        let secret=self.session_identity.clone();
+        let action=action.to_owned();
+        let (tx,rx)=mpsc::channel();
+        self.receiver=Some(rx);
+        self.active=true;
+        self.started=Instant::now();
+        self.last_activity=Instant::now();
+        self.status="S3 Vault WORM: verifica Object Lock e trasferimento cifrato...".into();
+        thread::spawn(move|| {
+            let result:Result<String,String>=(||{
+                let config=s3_vault::Config::load(&config_path)
+                    .map_err(|e|e.to_string())?;
+                match action.as_str() {
+                    "preflight"=>s3_vault::preflight(&config)
+                        .map(|_|"Ceph RGW/MinIO: versioning + COMPLIANCE preflight PASS".into())
+                        .map_err(|e|e.to_string()),
+                    "backup"=>s3_vault::backup(&config,&source)
+                        .map(|r|format!("S3 backup {} cifrato e trattenuto fino a {}",r.id,r.retain_until))
+                        .map_err(|e|e.to_string()),
+                    "verify"=>{
+                        if let Some(secret)=&secret {
+                            s3_vault::verify_from_memory(&config,&snapshot,secret)
+                                .map(|r|format!("S3: snapshot {} verificato, {} B",r.id,r.bytes))
+                                .map_err(|e|e.to_string())
+                        }else if !identity.is_empty(){
+                            s3_vault::verify(&config,&snapshot,Path::new(&identity))
+                                .map(|r|format!("S3: snapshot {} verificato",r.id))
+                                .map_err(|e|e.to_string())
+                        }else{Err("Sblocca il vault age oppure specifica una identity privata".into())}
+                    },
+                    "restore"=>{
+                        if let Some(secret)=&secret {
+                            s3_vault::restore_from_memory(&config,&snapshot,secret,&target)
+                                .map(|r|format!("Restore S3 {} in {}",r.id,target.display()))
+                                .map_err(|e|e.to_string())
+                        }else if !identity.is_empty(){
+                            s3_vault::restore(&config,&snapshot,Path::new(&identity),&target)
+                                .map(|r|format!("Restore S3 {} in {}",r.id,target.display()))
+                                .map_err(|e|e.to_string())
+                        }else{Err("Sblocca il vault age oppure specifica una identity privata".into())}
+                    },
+                    _=>Err("Azione S3 non riconosciuta".into())
+                }
+            })();
+            match result {
+                Ok(done)=>{let _=tx.send(Event::Success(done));},
+                Err(error)=>{let _=tx.send(Event::Failure(error));},
+            }
+        });
+    }
     fn vault(&mut self, ui: &mut egui::Ui) {
         ui.heading("Vault protetto");
         ui.label("Vault AES-256-GCM / scrypt, compatibile con le identità Python v1.");
@@ -860,6 +919,25 @@ impl NativeApp {
         if ui.add_enabled(!self.active,egui::Button::new("Ripristina dallo snapshot vault")).clicked(){
             self.run_immutable_vault("restore");
         }
+        ui.separator();
+        ui.heading("Vault Ceph RGW / MinIO S3 (anteprima)");
+        ui.label("Richiede bucket dedicato con versioning e Object Lock COMPLIANCE. Credenziali solo dal keyring/ambiente isolato, mai nel file JSON.");
+        ui.label("Configurazione S3 JSON (senza secret)");
+        ui.text_edit_singleline(&mut self.fields.s3_vault_config);
+        ui.horizontal_wrapped(|ui|{
+            if ui.add_enabled(!self.active,egui::Button::new("Controlla S3 WORM")).clicked(){
+                self.run_s3_vault("preflight");
+            }
+            if ui.add_enabled(!self.active,egui::Button::new("Backup S3 cifrato")).clicked(){
+                self.run_s3_vault("backup");
+            }
+            if ui.add_enabled(!self.active,egui::Button::new("Verifica snapshot S3")).clicked(){
+                self.run_s3_vault("verify");
+            }
+            if ui.add_enabled(!self.active,egui::Button::new("Restore S3 nuovo")).clicked(){
+                self.run_s3_vault("restore");
+            }
+        });
         ui.label(RichText::new(&self.status).color(INK));
     }
     /// Existing native Swift LocalAuthentication + device-bound Keychain

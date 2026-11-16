@@ -8,11 +8,13 @@ use std::{fs, path::Path};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn regular_directory(path: &Path) -> Result<std::path::PathBuf> {
-    let kind = fs::symlink_metadata(path)?.file_type();
+    let kind = fs::symlink_metadata(path)
+        .map_err(|e|format!("Metadata of plugin source/destination {}: {e}",path.display()))?.file_type();
     if !kind.is_dir() || kind.is_symlink() {
         return Err("Plugin path must be an existing real directory (not a symlink)".into());
     }
-    Ok(fs::canonicalize(path)?)
+    Ok(fs::canonicalize(path)
+        .map_err(|e|format!("Canonicalize plugin path {}: {e}",path.display()))?)
 }
 
 fn regular_identity(identity: &Path) -> Result<std::path::PathBuf> {
@@ -66,7 +68,33 @@ pub fn backup_with_mode_guard(input: &str, output: &str, source: &Path,
               gpfs_access: Option<GpfsAccess>,kind:BackupKind,
               parent_id:Option<&str>,live:&dyn Fn(bool)->std::result::Result<(),String>)
               -> Result<LogicalBackup> {
+    backup_with_mode_guard_filtered(input,output,source,root,identity,label,
+        namespace,top_namespace,snapshot_attested,gpfs_access,kind,parent_id,
+        false,live)
+}
+/// Explicit davfs2 backup-directory exception; usable only when the operator
+/// separately attested the WebDAV remote has no corresponding lost+found.
+/// Never automatically skip permission errors or arbitrary unreadable paths.
+pub fn backup_with_mode_davfs_cache_attested(input: &str, output: &str, source: &Path,
+              root: &Path, identity: &Path, label: &str, namespace: &str,
+              top_namespace: &str, snapshot_attested: bool,
+              gpfs_access: Option<GpfsAccess>,kind:BackupKind,
+              parent_id:Option<&str>) -> Result<LogicalBackup> {
+    backup_with_mode_guard_filtered(input,output,source,root,identity,label,
+        namespace,top_namespace,snapshot_attested,gpfs_access,kind,parent_id,
+        true,&|_|Ok(()))
+}
+fn backup_with_mode_guard_filtered(input: &str, output: &str, source: &Path,
+              root: &Path, identity: &Path, label: &str, namespace: &str,
+              top_namespace: &str, snapshot_attested: bool,
+              gpfs_access: Option<GpfsAccess>,kind:BackupKind,
+              parent_id:Option<&str>,exclude_attested_davfs_cache:bool,
+              live:&dyn Fn(bool)->std::result::Result<(),String>)
+              -> Result<LogicalBackup> {
     live(false)?;
+    if exclude_attested_davfs_cache && input!="webdav" {
+        return Err("Davfs2 cache exclusion is only valid for a verified WebDAV input".into());
+    }
     supported_pair(Mode::Backup, input, output)?;
     let source = regular_directory(source)?;
     if input == "posix" {
@@ -94,9 +122,9 @@ pub fn backup_with_mode_guard(input: &str, output: &str, source: &Path,
         return Err("Backup requires a nonempty label".into());
     }
     let store = Store::open(&root, &identity)?;
-    let snapshot = store.backup_in_namespace_mode_guard(&identity,label,top_namespace,
+    let snapshot = store.backup_in_namespace_mode_guard_filtered(&identity,label,top_namespace,
         &[Source { namespace: namespace.to_owned(), directory: source }],
-        kind,parent_id,live)?;
+        kind,parent_id,exclude_attested_davfs_cache,live)?;
     if !store.verify(&identity, &snapshot.id)?.healthy {
         return Err("Created backup did not pass encrypted integrity verification".into());
     }
