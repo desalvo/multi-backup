@@ -1,0 +1,33 @@
+name: Multi Backup - real MinIO S3 Object Lock Rust acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/ci/s3-worm-minio-live.sh'
+      - '.github/workflows/s3-minio-live-r048.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-s3-worm-${ github.ref }
+  cancel-in-progress: true
+jobs:
+  minio-real:
+    name: Actual MinIO server, Compliance Object Lock, encrypted Rust restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Prepare isolated official-source MinIO and native backup tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          python3 -m pip install 'awscli>=1.42,<2'
+          bash -n scripts/ci/s3-worm-minio-live.sh
+      - name: Compile native Rust vault executable
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Execute REAL MinIO S3 WORM acceptance (no mock, no release)
+        run: bash scripts/ci/s3-worm-minio-live.sh
