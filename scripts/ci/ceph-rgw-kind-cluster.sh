@@ -231,6 +231,7 @@ kubectl -n rook-ceph rollout status deploy/rook-ceph-tools --timeout=900s
 ready=0
 cluster_errors=0
 crush_fixed=0
+osd_pod_fixed=0
 for attempt in $(seq 1 40); do
   if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status -f json \
       > "$TEMP/ceph-status.json" 2>/dev/null &&
@@ -238,6 +239,28 @@ for attempt in $(seq 1 40); do
       > "$TEMP/osd-tree.json" 2>/dev/null &&
      python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" \
       >/dev/null 2>&1; then ready=1;break;fi
+  # A shared host kernel exposes disposable loop devices to every kind
+  # worker. Rook may schedule an OSD onto the WRONG virtual worker despite
+  # using the correct device. Repair Kubernetes *pod placement first*,
+  # validated against real daemon IDs, unique dedicated loop paths and
+  # the explicitly allocated worker/device bindings. Never change a real
+  # storage cluster; ensure this is our disposable kind context.
+  if [ "$osd_pod_fixed" -eq 0 ] && [ "$attempt" -ge 8 ] &&
+     [ -s "$TEMP/ceph-status.json" ] && [ -s "$TEMP/osd-tree.json" ];then
+    if kubectl -n rook-ceph get pods -l app=rook-ceph-osd -o json            > "$TEMP/osd-pods.json" 2>/dev/null &&
+       python3 "$ROOT/scripts/ci/ceph-osd-node-align.py"            "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" "$TEMP/osd-pods.json"            "${WORKERS[0]}:${OSD_NAMES[0]}"            "${WORKERS[1]}:${OSD_NAMES[1]}"            "${WORKERS[2]}:${OSD_NAMES[2]}"            > "$TEMP/pod-node-moves" 2> "$TEMP/pod-node-guard.err";then
+      osd_pod_fixed=1
+      if [ -s "$TEMP/pod-node-moves" ];then
+        test "$(kubectl config current-context)" = "kind-$NAME"
+        echo "Fixing real OSD pod placement to its verified disposable loop device's owning kind worker"
+        while read -r osdid worker;do
+          kubectl -n rook-ceph patch deployment "rook-ceph-osd-$osdid"             --type merge             -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"$worker\"}}}}}"
+        done < "$TEMP/pod-node-moves"
+        sleep 8
+        continue
+      fi
+    fi
+  fi
   # Work around a Ceph kind auto-placement defect ONLY after actual
   # three-node running OSD/device identity is independently verified.
   # Never change CRUSH on untrusted operator clusters or emulate OSDs.
@@ -278,6 +301,7 @@ if [ "$ready" -ne 1 ]; then
     echo "::endgroup::" >&2
   fi
   [ ! -s "$TEMP/osd-tree.json" ] || python3 -m json.tool "$TEMP/osd-tree.json" >&2 || true
+  [ ! -s "$TEMP/pod-node-guard.err" ] || cat "$TEMP/pod-node-guard.err" >&2 || true
   [ ! -s "$TEMP/crush-guard.err" ] || cat "$TEMP/crush-guard.err" >&2 || true
   on_error
   exit 1

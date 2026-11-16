@@ -44,6 +44,8 @@ jobs:
           python3 -m unittest discover -s tests -p test_ceph_rgw_ci_attestation.py -v
           python3 -m unittest discover -s tests -p test_ceph_osd_crush_alignment.py -v
           python3 -m py_compile scripts/ci/ceph-osd-crush-align.py
+          python3 -m unittest discover -s tests -p test_ceph_osd_node_alignment.py -v
+          python3 -m py_compile scripts/ci/ceph-osd-node-align.py
       - name: Compile Rust engine that will operate the genuine Ceph cluster
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
       - name: Start physical Ceph daemons on 3 disposable kind workers and verify S3 WORM

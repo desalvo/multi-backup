@@ -5,6 +5,8 @@ on:
     paths:
       - 'scripts/ci/ceph-osd-crush-align.py'
       - 'tests/test_ceph_osd_crush_alignment.py'
+      - 'scripts/ci/ceph-osd-node-align.py'
+      - 'tests/test_ceph_osd_node_alignment.py'
       - '.github/workflows/**'
       - 'tests/test_ci_cost_policy.py'
       - 'docs/CI_MINUTES_POLICY_R051_IT.md'
@@ -29,6 +31,9 @@ jobs:
           python3 -m pip install --quiet 'PyYAML>=6,<7'
           python3 -m unittest discover -s tests -p test_ci_cost_policy.py -v
           python3 -m unittest discover -s tests -p test_ceph_osd_crush_alignment.py -v
+          python3 -m unittest discover -s tests -p test_ceph_osd_node_alignment.py -v
+          python3 -m unittest discover -s tests -p test_rust_release_collection.py -v
+          python3 scripts/check-production-gate.py
           python3 - <<'PY'
           from pathlib import Path
           import yaml
