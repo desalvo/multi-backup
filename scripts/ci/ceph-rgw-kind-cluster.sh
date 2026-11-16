@@ -25,7 +25,19 @@ on_error(){
   echo "::error::Real Ceph RGW qualification failed (no PASS or release)." >&2
   kubectl -n rook-ceph get cephcluster,cephobjectstore,cephobjectstoreuser,pods,deployments,svc -o wide 2>&1 || true
   kubectl -n rook-ceph get events --sort-by=.lastTimestamp 2>&1 | tail -50 || true
-  kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=100 2>&1 || true
+  kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=180 2>&1 || true
+  kubectl -n rook-ceph get cephcluster mb-ceph -o yaml 2>&1 | tail -170 || true
+  kubectl -n rook-ceph get pods -o wide 2>&1 || true
+  # Ceph must diagnose actual MON and OSD failures, not just a generic timeout.
+  for selector in 'app=rook-ceph-mon' 'app=rook-ceph-osd' 'app=rook-ceph-osd-prepare'; do
+    kubectl -n rook-ceph get pods -l "$selector" --no-headers 2>&1 || true
+    for pod in $(kubectl -n rook-ceph get pods -l "$selector" -o name 2>/dev/null | head -5); do
+      echo "::group::Diagnostic log $pod" >&2
+      kubectl -n rook-ceph logs "$pod" --all-containers=true --tail=90 2>&1 || true
+      kubectl -n rook-ceph describe "$pod" 2>&1 | tail -100 || true
+      echo "::endgroup::" >&2
+    done
+  done
   kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s 2>&1 || true
 }
 trap on_error ERR
@@ -195,10 +207,12 @@ for attempt in $(seq 1 40); do
 done
 if [ "$ready" -ne 1 ]; then
   echo "FAIL: genuine Ceph 3-MON 3-OSD quorum never reached after 320s" >&2
-  kubectl -n rook-ceph get pods -o wide >&2 || true
-  kubectl -n rook-ceph describe cephcluster mb-ceph >&2 || true
-  kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s >&2 || true
-  kubectl -n rook-ceph get events --sort-by=.lastTimestamp 2>&1 | tail -50 >&2 || true
+  if [ -s "$TEMP/ceph-status.json" ]; then
+    echo "::group::Ceph final status JSON" >&2
+    python3 -m json.tool "$TEMP/ceph-status.json" | head -100 >&2 || true
+    echo "::endgroup::" >&2
+  fi
+  on_error
   exit 1
 fi
 python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json"
