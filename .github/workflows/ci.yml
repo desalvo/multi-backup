@@ -29,7 +29,7 @@ jobs:
         uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - name: Install runtime dependencies for Python 3.11
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt 'PyYAML>=6,<7'
       - name: Python 3.11 tests
         run: |
           python -m compileall -q .
@@ -38,7 +38,7 @@ jobs:
         uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - name: Install runtime dependencies for Python 3.12
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt 'PyYAML>=6,<7'
       - name: Python 3.12 tests and CLI smoke
         run: |
           python -m compileall -q .
@@ -51,7 +51,7 @@ jobs:
         uses: actions/setup-python@v5
         with: {python-version: '3.13'}
       - name: Install runtime dependencies for Python 3.13
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt 'PyYAML>=6,<7'
       - name: Python 3.13 tests
         run: |
           python -m compileall -q .

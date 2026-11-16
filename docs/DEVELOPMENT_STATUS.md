@@ -767,3 +767,12 @@ One-line English commit summary: Certify genuine three-worker Ceph RGW Object Lo
 - Ceph real Rook-Ceph RGW WORM [43873411605](https://github.com/desalvo/multi-backup/actions/runs/43873411605) remains PASS on exact SHA and scope in r115; full signed RC and physical-host HA acceptance remain separate.
 
 One-line English commit summary: Qualify real Ceph RGW WORM and SNMPv3 authPriv, and harden genuine Patroni synchronous failover and quorum-fencing acceptance without relaxing release gates.
+
+
+## r127 — Production Gate Python matrix PyYAML bootstrap repair
+
+- The exact [full Production CI failure 43881879293](https://github.com/desalvo/multi-backup/actions/runs/43881879293) on the security fix PR is a reproducible **CI environment error**: Python 3.11 test discovery loads `tests/test_db_network_isolation_r081.py` which imports `scripts/ci/check-private-db-exposure.py`, requiring `yaml`, but PyYAML was installed only *later* in the security-audit setup. The 158 discovered tests stopped with `ModuleNotFoundError: No module named 'yaml'`.
+- Install `PyYAML>=6,<7` in the **three existing Python runtime setup steps** (3.11, 3.12, 3.13) before their unit suite, avoiding CI-only dependency additions to the shipped application. Added an independent cheap workflow-regression test that checks all three environment setups.
+- Full Production Gate remains **NOT CERTIFIED** until a successful exact-candidate-SHA run; this repair only removes the evidenced environment blocker. The previously verified PostgreSQL/MinIO/RustFS/Ceph test results and HA failures retain their own scope. GPFS remains suspended/outside the RC.
+
+One-line English commit summary: Install CI-only PyYAML before all Python test suites and prevent production-gate dependency regression.

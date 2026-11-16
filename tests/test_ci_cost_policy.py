@@ -17,6 +17,18 @@ class CostPolicyTests(unittest.TestCase):
         self.assertIn('rust-only-*',release)
         self.assertIn('rust-agent-*',release)
         self.assertNotIn('cargo build',release)
+    def test_python_matrix_provisions_yaml_before_loading_all_tests(self):
+        # The PostgreSQL isolation suite imports scripts/ci/check-private-db-exposure.py
+        # which imports yaml at module load time. Installing it only in the later
+        # security-audit environment is too late for Python 3.11/3.12/3.13.
+        s=self.read('ci.yml')
+        for minor in ('11','12','13'):
+            name=f"Install runtime dependencies for Python 3.{minor}"
+            self.assertIn(name,s)
+            section=s.split(name,1)[1].split("      - name:",1)[0]
+            self.assertIn("requirements.txt 'PyYAML>=6,<7'",section,
+                          f"Missing PyYAML before Python 3.{minor} unittest discovery")
+
     def test_heavy_s3_is_manual_or_labeled(self):
         for wf,label in [('ceph-rgw-s3-real-r049.yml','run-ceph-ci'),('s3-minio-live-r048.yml','run-minio-ci')]:
             with self.subTest(wf=wf):
