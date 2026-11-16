@@ -209,6 +209,7 @@ if [ "$success" -ne 1 ]; then
  tail -25 "$TEMP/port-forward.log" >&2
  exit 1
 fi
+export CEPH_REAL_CLUSTER_ATTESTED=true
 bash "$ROOT/scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh" "$TEMP"
 echo "PASS: real multi-node Ceph RGW S3 native Rust WORM acceptance"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
