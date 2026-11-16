@@ -156,7 +156,6 @@ spec:
   cephConfig:
     global:
       osd_pool_default_size: "3"
-      osd_memory_target: "805306368"
   monitoring:
     enabled: false
 ---
@@ -196,6 +195,7 @@ kubectl -n rook-ceph rollout status deploy/rook-ceph-tools --timeout=900s
 # Poll Ceph itself, not just pod readiness. Require 3 MON quorum, 3 UP+IN
 # OSD and three distinct CRUSH hosts. No MOCK/skip/single-OSD fallback.
 ready=0
+cluster_errors=0
 for attempt in $(seq 1 40); do
   if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status -f json \
       > "$TEMP/ceph-status.json" 2>/dev/null &&
@@ -203,6 +203,20 @@ for attempt in $(seq 1 40); do
       > "$TEMP/osd-tree.json" 2>/dev/null &&
      python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" \
       >/dev/null 2>&1; then ready=1;break;fi
+  # Stop early if operator has persistently rejected an invalid cluster config.
+  # This avoids burning CI minutes on a deployment that cannot progress.
+  state="$(kubectl -n rook-ceph get cephcluster mb-ceph -o jsonpath='{.status.state}' 2>/dev/null || true)"
+  message="$(kubectl -n rook-ceph get cephcluster mb-ceph -o jsonpath='{.status.message}' 2>/dev/null || true)"
+  if [ "$state" = Error ]; then
+    cluster_errors=$((cluster_errors + 1))
+    if [ "$cluster_errors" -ge 3 ]; then
+      echo "FAIL: Rook CephCluster reports a persistent configuration error: $message" >&2
+      on_error
+      exit 1
+    fi
+  else
+    cluster_errors=0
+  fi
   sleep 8
 done
 if [ "$ready" -ne 1 ]; then
