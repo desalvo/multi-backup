@@ -20,17 +20,8 @@ impl Drop for Config {
 }
 impl Config {
     pub fn load(path:&Path)->Result<Self>{
-        let md=fs::symlink_metadata(path)?;
-        if !md.file_type().is_file()||md.len()>16_384{
-            return Err("Hypervisor session config must be a bounded regular file".into());
-        }
-        #[cfg(unix)]{
-            use std::os::unix::fs::PermissionsExt;
-            if md.permissions().mode()&0o077!=0{
-                return Err("Hypervisor session config must be owner-only 0600".into());
-            }
-        }
-        let config:Self=serde_json::from_slice(&fs::read(path)?)?;
+        let bytes=crate::protected_config::read_owner_only(path,16_384)?;
+        let config:Self=serde_json::from_slice(&bytes)?;
         config.validate()?;
         Ok(config)
     }
