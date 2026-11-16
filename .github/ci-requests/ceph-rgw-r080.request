@@ -1,0 +1,1 @@
+Authorized focused retest (r080) of disposable real Rook-Ceph: 3 MON quorum, 3 OSD UP+IN on unique kind workers, strict pod node/device alignment and CRUSH host attestation, RGW S3 COMPLIANCE encrypted backup/verify/restore and negative delete. No production data. No full CI. Fail closed if any stage cannot prove real support.

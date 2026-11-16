@@ -4,6 +4,7 @@ on:
     branches: ["feature/r060-baremetal-server-cluster-vault"]
     paths:
       - '.github/ci-requests/ceph-rgw-r076.request'
+      - '.github/ci-requests/ceph-rgw-r080.request'
   pull_request:
     types: [labeled]
   workflow_dispatch:
