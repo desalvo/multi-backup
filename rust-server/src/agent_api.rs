@@ -215,6 +215,65 @@ pub async fn recover_cluster_job(State(state):State<AppState>,headers:HeaderMap,
         _=>error(StatusCode::BAD_REQUEST,"unsafe_cluster_job_recovery_rejected")
     }
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InternalDbPolicyUpdate {
+    pub enabled:bool,
+    pub interval_minutes:i32,
+    pub target:String,
+}
+pub async fn internal_db_backup_status(
+    State(state):State<AppState>,headers:HeaderMap)->Response{
+    let db=match admin(&state,&headers,false).await {Ok(v)=>v,Err(e)=>return e};
+    match tokio::task::spawn_blocking(move||db.db_backup_dashboard()).await{
+        Ok(Ok(value))=>response(StatusCode::OK,value),
+        _=>error(StatusCode::SERVICE_UNAVAILABLE,"internal_db_backup_catalog_unavailable")
+    }
+}
+pub async fn internal_db_backup_policy(
+    State(state):State<AppState>,headers:HeaderMap,
+    Json(req):Json<InternalDbPolicyUpdate>)->Response{
+    let db=match admin(&state,&headers,true).await {Ok(v)=>v,Err(e)=>return e};
+    if !state.0.security.recovery_ok(&headers) {
+        return error(StatusCode::FORBIDDEN,"offline_recovery_approval_required");
+    }
+    if req.enabled {
+        if crate::internal_db_backup::require_ready().is_err(){
+            return error(StatusCode::SERVICE_UNAVAILABLE,"db_s3_worm_backup_not_configured");
+        }
+    }
+    let enabled=req.enabled;let interval=req.interval_minutes;let target=req.target;
+    match tokio::task::spawn_blocking(move||
+         db.configure_db_backups(enabled,interval,&target)).await{
+        Ok(Ok(()))=>response(StatusCode::OK,json!({"configured":true})),
+        _=>error(StatusCode::BAD_REQUEST,"db_backup_policy_rejected")
+    }
+}
+pub async fn internal_db_backup_now(
+    State(state):State<AppState>,headers:HeaderMap)->Response{
+    let db=match admin(&state,&headers,true).await {Ok(v)=>v,Err(e)=>return e};
+    if !state.0.security.recovery_ok(&headers){
+        return error(StatusCode::FORBIDDEN,"offline_recovery_approval_required");
+    }
+    if crate::internal_db_backup::require_ready().is_err(){
+        return error(StatusCode::SERVICE_UNAVAILABLE,"db_s3_worm_backup_not_configured");
+    }
+    let replica=match std::env::var("MULTI_BACKUP_REPLICA_ID"){
+        Ok(s)=>s,Err(_)=>return error(StatusCode::SERVICE_UNAVAILABLE,"cluster_replica_id_not_set")
+    };
+    let copy=db.clone();
+    let id=replica.clone();
+    let claim=tokio::task::spawn_blocking(move||copy.claim_db_backup(&id,true)).await;
+    let lease=match claim {
+        Ok(Ok(Some(lease)))=>lease,
+        Ok(Ok(None))=>return error(StatusCode::CONFLICT,"database_backup_busy_or_requires_reconciliation"),
+        _=>return error(StatusCode::SERVICE_UNAVAILABLE,"database_backup_lease_failed"),
+    };
+    let job=lease.split(':').next().unwrap_or("").to_string();
+    tokio::task::spawn_blocking(move||crate::internal_db_backup::execute(db,replica,lease));
+    response(StatusCode::ACCEPTED,json!({"accepted":true,"job_id":job,"state":"running"}))
+}
+
 pub async fn cluster_backups(State(state):State<AppState>,headers:HeaderMap)->Response{
     let db=match admin(&state,&headers,false).await{Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||db.backup_inventory()).await{
