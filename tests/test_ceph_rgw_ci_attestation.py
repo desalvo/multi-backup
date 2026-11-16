@@ -70,6 +70,21 @@ class CephRealClusterAttestationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.attest(status, tree)
 
+    def test_ceph20_2_4_status_compact_monmap_uses_real_num_mons(self):
+        status, tree = fixture()
+        status["monmap"] = {"epoch":4,"num_mons":3,
+                             "min_mon_release_name":"tentacle"}
+        result = module.attest(status, tree)
+        self.assertEqual(result["mons"],3)
+        self.assertEqual(result["pgs"],18)
+
+    def test_ceph20_2_4_mon_count_cannot_hide_missing_quorum(self):
+        status, tree = fixture()
+        status["monmap"] = {"num_mons":3}
+        status["quorum_names"]=["a","b"]
+        with self.assertRaises(ValueError):
+            module.attest(status, tree)
+
     def test_osd_down_on_one_host_fails(self):
         status, tree = fixture()
         tree["nodes"][-1]["status"] = "down"

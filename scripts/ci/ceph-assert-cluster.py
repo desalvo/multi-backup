@@ -7,11 +7,18 @@ import sys
 
 def attest(status: dict, tree: dict) -> dict:
     monmap = status.get("monmap") or {}
-    mons = monmap.get("mons") or []
+    # Ceph 20.2.x 'ceph status -f json' often includes num_mons but not
+    # monmap.mons; do not reject a genuinely healthy cluster for missing the
+    # optional array. Require explicit count+quorum+unique names.
+    mons = monmap.get("mons")
+    count = monmap.get("num_mons")
+    mon_count = int(count) if count is not None else len(mons or [])
     quorum = status.get("quorum") or []
     quorum_names = status.get("quorum_names") or []
-    if len(mons) < 3 or len(quorum) < 3 or len(set(quorum_names)) < 3:
+    if mon_count < 3 or len(quorum) < 3 or len(set(quorum_names)) < 3:
         raise ValueError("Ceph MON membership/quorum smaller than three")
+    if mons is not None and len(mons) != mon_count:
+        raise ValueError("Ceph MON membership list/count disagreement")
     osd = (status.get("osdmap") or {}).get("osdmap") or status.get("osdmap") or {}
     if any(int(osd.get(key, 0)) < 3
            for key in ("num_osds", "num_up_osds", "num_in_osds")):
@@ -49,7 +56,7 @@ def attest(status: dict, tree: dict) -> dict:
         for row in states
     ):
         raise ValueError("Ceph PGs are not all active+clean")
-    return {"mons": len(mons), "quorum": len(quorum),
+    return {"mons": mon_count, "quorum": len(quorum),
             "osds": len(osds), "hosts": active_hosts, "pgs": num_pgs}
 
 
