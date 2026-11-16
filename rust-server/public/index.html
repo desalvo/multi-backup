@@ -19,6 +19,37 @@ un filesystem locale resta assegnato soltanto alla replica che lo possiede.</p>
 <div><h3>Job e agenti</h3><div id="cluster-jobs"></div><div id="cluster-agents"></div></div>
 </div>
 </section>
+<section id="internal-db">
+<div class="controls"><h2>Database interno · PostgreSQL HA e disaster recovery</h2>
+<button id="internal-db-refresh" type="button">Aggiorna</button></div>
+<p class="muted">La primaria PostgreSQL e le repliche Patroni sono comuni a tutti i server fisici
+e Kubernetes. I dump schedulati vengono cifrati prima della scrittura su disco
+e conservati nel vault S3 con Object Lock COMPLIANCE. La ricostruzione del
+database avviene soltanto in manutenzione offline, non da una pagina web.</p>
+<div id="internal-db-health" role="status" class="cluster-summary"></div>
+<div id="internal-db-standbys" class="cluster-columns"></div>
+<div class="controls">
+<label><input id="internal-db-enabled" type="checkbox"> Backup automatico database</label>
+<label>Ogni
+<select id="internal-db-interval">
+<option value="60">1 ora</option>
+<option value="360">6 ore</option>
+<option value="720">12 ore</option>
+<option value="1440" selected>24 ore</option>
+<option value="10080">7 giorni</option>
+</select></label>
+<label>Destinazione
+<select id="internal-db-target"><option value="s3_worm">Vault S3 COMPLIANCE (obbligatorio)</option></select>
+</label>
+<button id="internal-db-save" type="button">Salva piano</button>
+<button id="internal-db-run" type="button">Backup database adesso</button>
+</div>
+<p class="muted">Le operazioni richiedono amministratore, token CSRF e autorizzazione offline
+già inserita nell'area esportazione. Una replica che perde il lease viene posta in
+riconciliazione: non viene eseguito automaticamente un secondo writer.</p>
+<div id="internal-db-feedback" role="status"></div>
+<div id="internal-db-history"></div>
+</section>
 <section id="immutable-vault">
 <div class="controls"><h2>Vault backup anti-ransomware</h2><button id="vault-refresh" type="button">Aggiorna vault</button></div>
 <p class="muted">Lato server: copia cifrata verificabile dello store Multi Backup in uno storage separato. Ogni versione è nuova; nessuna API di delete o overwrite. Protezione ransomware effettiva solo con WORM/append-only applicato fuori dal processo.</p>
