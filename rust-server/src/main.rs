@@ -692,6 +692,11 @@ fn read_hash(path:&str)->Result<String,Box<dyn std::error::Error+Send+Sync>> {
 }
 #[tokio::main]
 async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
+    if std::env::args().any(|x|x=="--version"){
+        println!("multi-backup-server {}-r066-native-preview (build {})",
+            env!("CARGO_PKG_VERSION"),option_env!("GITHUB_SHA").unwrap_or("local"));
+        return Ok(());
+    }
     if std::env::args().any(|x|x=="hash-password") {
         let password=rpassword::prompt_password("Admin password (>=12 chars): ")?;
         if password.len()<12{return Err("Password too short".into());}
