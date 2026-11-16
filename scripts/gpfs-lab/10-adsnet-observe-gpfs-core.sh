@@ -7,7 +7,7 @@ case "$(hostname -f)" in
   *) echo "FAIL: this audit may run only on three ADSNET GPFS nodes" >&2; exit 2 ;;
 esac
 . /etc/os-release
-test "$ID" = rhel && "$VERSION_ID" = 9.8 || { echo "FAIL: expected RHEL 9.8" >&2; exit 2; }
+test "$ID" = rhel && test "$VERSION_ID" = 9.8 || { echo "FAIL: expected RHEL 9.8" >&2; exit 2; }
 echo "HOST=$(hostname -f) OS=$PRETTY_NAME KERNEL=$(uname -r)"
 fail=0
 for command_name in mmgetstate mmlscluster mmlsnsd mmlsfs; do
