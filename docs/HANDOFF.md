@@ -933,3 +933,11 @@ The existing PG16 ignored acceptance test now includes real database-backed `mon
 - `scripts/ci/normalize-rust-native-artifacts-r175.sh` normalizes only those two known filenames after verifying input regular file and absence of symlink, and compares byte/sha256. Negative tests in `tests/test_rc_windows_normalize_r175.py`. Existing r174 workflow made **manual-only** with same normalization, avoiding repeating live monitoring tests.
 - `.github/workflows/rc-publish-r175.yml` auto-triggers on its own addition; pins original binary source `1f1a726a3ffed7b46a7498b99891bfb935570865` run `43932195582` 32/32 required jobs, pins live RC run `43945759433` four successes and expected failed collector only; releases `rc-0.1.0-rc.1` prerelease with manifest and SHA256SUMS only if all fail-closed checks pass. Does NOT rerun native builds or Patroni/Prometheus/SNMP, and does NOT publish stable.
 - When reporting, verify actual new RC run/release outcome. Do not claim three physical hosts, root-proof vault, all 33 providers, Windows publisher signing or Apple notarization as complete.
+
+
+### r177 — verified GitHub RC1 publication
+
+- **DONE:** https://github.com/desalvo/multi-backup/releases/tag/rc-0.1.0-rc.1 is publicly visible as a GitHub prerelease (non-draft), pinned to binary source `1f1a726a3ffed7b46a7498b99891bfb935570865`. Exactly 31 complete uploaded assets incl all 27 Rust-native builds + SHA256SUMS + manifest + RC documentation.
+- **CI final publisher PASS:** https://github.com/desalvo/multi-backup/actions/runs/43947524553 (2/2). Prior r174 completed four service/security/HA functional jobs all PASS; r177 uses their exact evidence rather than rerunning. Production matrix 32 PASS https://github.com/desalvo/multi-backup/actions/runs/43932195582 .
+- Signatures/notarization are waived ONLY for explicit RC preview, not stable. Do not confuse real NetNS Patroni partitions with three independent physical hosts. The app has 33 provider contracts but not all generic plugin executors. Field-only and stable signing blockers remain unclosed.
+- `main` unmodified. PR #30 remains Draft; do not silently merge or promote prerelease to stable without qualification.

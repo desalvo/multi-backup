@@ -991,3 +991,14 @@ One-line English commit summary: Release gated Rust-native RC1 from proven one-S
 - RC is a **software prerelease scope**. Three independent physical hosts, remote multi-machine TLS for agents, root-resistant vault trust-domain separation and vendor plugin integrations remain outside the certified CI scope and must stay described explicitly as open.
 
 One-line English commit summary: Normalize nested Windows installer artifacts byte-for-byte and publish only the already qualified native Rust RC without re-running monitored HA tests.
+
+
+## r177 — RC1 PUBLISHED, exact evidence and remaining external qualification (16 Nov 2026)
+
+- GitHub prerelease **published and API-verified** at https://github.com/desalvo/multi-backup/releases/tag/rc-0.1.0-rc.1 . It is an actual non-draft GitHub release with `prerelease=true` and `target_commitish=1f1a726a3ffed7b46a7498b99891bfb935570865`.
+- Production source CI https://github.com/desalvo/multi-backup/actions/runs/43932195582 **PASS** (32 required successful build/security/platform jobs); additional functional RC run https://github.com/desalvo/multi-backup/actions/runs/43945759433 individually **PASS** for Prometheus HTTPS, SNMPv3 authPriv and real PostgreSQL16/Patroni/etcd NetNS partition/fencing. Its old publisher failed on Windows artifact path; after byte-identical nested/flat layout normalization and regression tests, the final RC publisher https://github.com/desalvo/multi-backup/actions/runs/43947524553 completed **SUCCESS** (2/2 jobs). No duplicated service/HA/production tests in publisher continuation.
+- GitHub release API verified **31 uploaded, nonempty assets**: 12 RPM, 8 DEB, 2 macOS DMG, 2 macOS PKG, 2 Windows EXE, 1 Linux tar.gz, 1 Windows zip, `SHA256SUMS`, `release-manifest.json`, `README-RC-IT.md`. All 27 Rust-native artifact groups are included and all executable binaries are sourced from the one previously certified SHA.
+- **RC-only** exception: macOS notarization and publisher signing omitted per operator request, tagged prerelease (not `v*` stable), stable Production Gate unchanged. `main` unchanged, PR #30 remains Draft for further field work.
+- **Field qualification OPEN:** independent 3-physical-host HA failover, external machine-to-machine agent HTTPS field, WORM Linux root-resistant trust-domain security, full vendor authenticated plugin E2E, Windows/macOS stable-code-signing/notarization and updater rollback. Do not promote such components to physical-production `Ready` based on the software RC.
+
+One-line English commit summary: Record published native Rust RC1 with 31 verified release assets and preserve clear physical/third-party qualification exclusions.
