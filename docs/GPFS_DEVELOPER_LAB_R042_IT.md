@@ -22,7 +22,7 @@ Per un laboratorio di sviluppo personale è disponibile la [Red Hat Developer Su
 
 | VM | OS | CPU | RAM | Dischi |
 |---|---|---:|---:|---|
-| mb-gpfs-01 | RHEL 9.x x86_64 supportato da IBM | 6 vCPU | 16 GiB | 80 GiB sistema + 150 GiB NSD |
+| mb-gpfs-01 | RHEL 9.x x86_64 supportato da IBM | 6 vCPU per laboratorio; verificare CPU/socket IBM | **128 GiB consigliati per CES NFS+SMB** | 80 GiB sistema + 150 GiB NSD |
 | mb-gpfs-02 | RHEL 9.x x86_64 supportato da IBM | 6 vCPU | 16 GiB | 80 GiB sistema + 150 GiB NSD |
 | mb-gpfs-03 | RHEL 9.x x86_64 supportato da IBM | 4 vCPU | 12 GiB | 80 GiB sistema + 150 GiB NSD |
 | mb-gpfs-ci | Ubuntu 24.04 x86_64 | 4 vCPU | 8 GiB | 80 GiB sistema |
