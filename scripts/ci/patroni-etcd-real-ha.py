@@ -136,7 +136,7 @@ def conf(root, index):
     number = index + 1
     data = root / f"postgres-{number}"
     patroni_dir = root / f"patroni-{number}"
-    patroni_dir.mkdir(mode=0o700)
+    patroni_dir.mkdir(mode=0o700, exist_ok=True)
     ca = root / "ca.crt"
     cert = root / f"node-{index}.crt"
     key = root / f"node-{index}.key"
