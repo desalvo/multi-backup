@@ -6,7 +6,6 @@ on:
       - 'rust/src/s3_vault.rs'
       - 'rust/src/archive.rs'
       - 'rust/src/lib.rs'
-      - 'rust/src/bin/multi-backup-native.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/ci/s3-worm-rustfs-live.sh'

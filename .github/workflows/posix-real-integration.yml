@@ -8,7 +8,6 @@ on:
       - 'rust/src/backup_chain.rs'
       - 'rust/src/backup_policy.rs'
       - 'rust/src/archive.rs'
-      - 'rust/src/bin/multi-backup-native.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-posix-real-roundtrip.sh'

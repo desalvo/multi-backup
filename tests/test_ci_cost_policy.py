@@ -25,6 +25,7 @@ class CostPolicyTests(unittest.TestCase):
                 self.assertNotIn("- 'rust/**'",s)
                 self.assertNotIn('      - "rust/**"',s)
                 self.assertIn('workflow_dispatch:',s)
+                self.assertNotIn('rust/src/bin/multi-backup-native.rs',s)
                 self.assertIn('  push:',s)
                 self.assertNotIn("      - '.github/workflows/"+wf+"'",s)
     def test_fast_component_selection(self):

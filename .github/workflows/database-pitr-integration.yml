@@ -6,7 +6,6 @@ on:
       - 'rust/src/database.rs'
       - 'rust/src/archive.rs'
       - 'rust/src/chunk_store.rs'
-      - 'rust/src/bin/multi-backup-native.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-postgresql-wal-pitr.sh'

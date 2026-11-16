@@ -6,7 +6,6 @@ on:
       - 'rust/src/plugin_executor.rs'
       - 'rust/src/mount_probe.rs'
       - 'rust/src/chunk_store.rs'
-      - 'rust/src/bin/multi-backup-native.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-real-network-filesystems-r042.sh'
