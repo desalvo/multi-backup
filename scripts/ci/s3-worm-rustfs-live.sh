@@ -18,7 +18,7 @@ export AWS_ACCESS_KEY_ID="rustfs-ci-$(openssl rand -hex 8)"
 export AWS_SECRET_ACCESS_KEY="$(openssl rand -hex 24)"
 export AWS_DEFAULT_REGION=us-east-1 AWS_EC2_METADATA_DISABLED=true AWS_PAGER=""
 docker pull "$IMAGE" >/dev/null
-IMAGE_SHA="$(docker image inspect "$IMAGE" --format '${.Id}')"
+IMAGE_SHA="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
 docker run -d --rm --name "$CONTAINER" \
   --security-opt no-new-privileges:true -p 127.0.0.1:9000:9000 \
   --tmpfs /data:rw,nosuid,nodev,uid=10001,gid=10001,size=512m \
@@ -30,7 +30,7 @@ s3(){ aws --endpoint-url http://127.0.0.1:9000 --region us-east-1 s3api "$@"; }
 ready=0
 for n in $(seq 1 90);do
   if s3 list-buckets >/dev/null 2>&1;then ready=1;break;fi
-  if [ "$(docker inspect -f '${.State.Running}' "$CONTAINER" 2>/dev/null || true)" != true ];then break;fi
+  if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" != true ];then break;fi
   sleep 1
 done
 if [ "$ready" -ne 1 ];then
