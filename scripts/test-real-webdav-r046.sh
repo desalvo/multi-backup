@@ -76,6 +76,16 @@ if ! jq -e '.rw_mount_option == false and (.fs_type == "fuse.davfs" or .fs_type 
   cat "$WORK/probe.json" >&2
   exit 1
 fi
+# davfs2 shows a LOCAL recovery/cache directory named lost+found at mount
+# root. Prove that it is not a remote WebDAV collection before excluding it.
+HTTP_CODE="$(curl -sS -u "mbci:$(sudo awk '$1=="https://localhost:18919/" {print $3}' /etc/davfs2/secrets | tail -1)" \
+  -X PROPFIND -H 'Depth: 0' -o "$WORK/virtual-davfs-response" \
+  -w '%{http_code}' 'https://localhost:18919/lost+found/')"
+test "$HTTP_CODE" = 404 || {
+  echo "FAIL: davfs recovery directory is present on server or unverifiable; do not exclude" >&2
+  exit 1
+}
+echo "PASS: WebDAV server has no lost+found; davfs2 generated local recovery directory can be excluded"
 if "$CLI" plugins backup --input webdav --output posix --source "$RO" \
   --root "$STORE" --identity "$IDENTITY" --label not-attested >/dev/null 2>&1; then
   echo "FAIL WebDAV allowed backup without external snapshot attestation" >&2; exit 1
@@ -85,7 +95,8 @@ RECEIVER=$(sed -n 's/^# public key: //p' "$IDENTITY" | head -1)
 "$CLI" storage init --root "$STORE" --recipient "$RECEIVER" >/dev/null
 "$CLI" plugins backup --input webdav --output posix --source "$RO" \
   --root "$STORE" --identity "$IDENTITY" --label "genuine davfs2 input" \
-  --namespace data --source-snapshot-attested --json > "$WORK/result.json"
+  --namespace data --source-snapshot-attested --davfs-cache-not-on-remote \
+  --json > "$WORK/result.json"
 SNAPSHOT=$(jq -er '.id | select(length==64)' "$WORK/result.json")
 "$CLI" storage verify-chain --root "$STORE" --identity "$IDENTITY" --id "$SNAPSHOT" >/dev/null
 "$CLI" plugins restore --input posix --output posix --root "$STORE" \
