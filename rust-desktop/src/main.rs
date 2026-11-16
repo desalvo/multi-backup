@@ -12,7 +12,8 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const VERSION: &str = "0.1.0-r038-native-preview";
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-r057-native-preview");
+const BUILD_SHA: &str = match option_env!("GITHUB_SHA") { Some(v) => v, None => "local" };
 const AUTHOR: &str = "Alessandro De Salvo";
 const REPO: &str = "https://github.com/desalvo/multi-backup";
 const NAVY: Color32 = Color32::from_rgb(10, 26, 60);
@@ -1575,6 +1576,7 @@ impl NativeApp {
                 ui.label("Native Rust desktop");
                 ui.separator();
                 ui.label(format!("Versione: {VERSION}"));
+                ui.label(format!("Build: {BUILD_SHA}"));
                 ui.label(format!("Autore: {AUTHOR}"));
                 ui.label("Licenza: EUPL-1.2");
                 ui.label("Sicurezza: age / scrypt / AES-256-GCM");
