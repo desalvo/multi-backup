@@ -1,0 +1,1 @@
+One-shot genuine Patroni PostgreSQL16 and TLS 3-member etcd quorum acceptance: synchronous failover, old primary rejoin, fail-closed on DCS quorum loss. GitHub-hosted disposable loopback only; no physical HA certification.
