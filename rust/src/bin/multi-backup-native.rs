@@ -61,7 +61,7 @@ fn usage() -> &'static str {
        multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
        multi-backup-native restore github --archive ARCHIVE --vault PROTECTED.agevault --target OWNER/NEW --confirm CREATE-NEW [--password-stdin]\n\
        multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
-       multi-backup-native s3-vault preflight|backup|verify|restore --config CONFIG.json [--source DIR] [--id ID --identity AGE_KEY --destination NEW_DIR]\n\
+       multi-backup-native s3-vault preflight|backup|verify|restore --config CONFIG.json [--source DIR] [--id ID --identity AGE_KEY --manifest-version PINNED_VERSION --destination NEW_DIR]\n\
        multi-backup-native vault-store init --root EXISTING_DIR --recipient age1PUBLIC\n\
        multi-backup-native vault-store backup --root VAULT_DIR --source DIR [--json]\n\
        multi-backup-native vault-store list|status --root VAULT_DIR [--json]\n\
@@ -152,16 +152,22 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("{}",serde_json::to_string_pretty(&item)?);
             },
             "verify" => {
-                accepted(&flags,&["--config","--id","--identity"])?;
-                let item=s3_vault::verify(&config,required(&flags,"--id")?,
-                    Path::new(required(&flags,"--identity")?))?;
+                accepted(&flags,&["--config","--id","--identity","--manifest-version"])?;
+                let id=required(&flags,"--id")?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let item=if let Some(version)=flags.get("--manifest-version"){
+                    s3_vault::verify_at_version(&config,id,version,key)?
+                }else{s3_vault::verify(&config,id,key)?};
                 println!("{}",serde_json::to_string_pretty(&item)?);
             },
             "restore" => {
-                accepted(&flags,&["--config","--id","--identity","--destination"])?;
-                let item=s3_vault::restore(&config,required(&flags,"--id")?,
-                    Path::new(required(&flags,"--identity")?),
-                    Path::new(required(&flags,"--destination")?))?;
+                accepted(&flags,&["--config","--id","--identity","--destination","--manifest-version"])?;
+                let id=required(&flags,"--id")?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let dest=Path::new(required(&flags,"--destination")?);
+                let item=if let Some(version)=flags.get("--manifest-version"){
+                    s3_vault::restore_at_version(&config,id,version,key,dest)?
+                }else{s3_vault::restore(&config,id,key,dest)?};
                 println!("{}",serde_json::to_string_pretty(&item)?);
             },
             _ => return Err(usage().into()),
