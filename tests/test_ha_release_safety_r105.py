@@ -59,6 +59,8 @@ class HASafetyPolicy(unittest.TestCase):
         self.assertIn("except subprocess.TimeoutExpired:", source)
         self.assertIn("Could not independently prove responsive strict primary", source)
         self.assertIn("strict primary stayed readable but never ACKed write", source)
+        self.assertIn('os.environ.get("MULTI_BACKUP_HA_NETWORK_ISOLATION_REQUIRED")', source)
+        self.assertIn("Network isolation required but no genuine fault injection installed", source)
 
     def test_ephemeral_postgres_and_replication_passwords(self):
         import ast

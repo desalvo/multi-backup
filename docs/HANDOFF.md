@@ -834,3 +834,14 @@ One-line English commit summary: Record green native Rust/SNMP integration evide
 - Repeat focused Rust GUI+server+core tests and real NFS/SMB matrix on this exact SHA before any RC promotion. No publication/merge to main.
 
 One-line English commit summary: Integrate verified Rust desktop, guarded server workers and GPFS protocol-only NFS/SMB with a complete 33-plugin readiness matrix.
+
+
+## r157 — genuine three-namespace real network Patroni/etcd acceptance integrated
+
+- [Real HA run 43901963939](https://github.com/desalvo/multi-backup/actions/runs/43901963939) **PASS** with three actual PostgreSQL 16/Patroni and three mutually TLS-authenticated etcd members, each on an independently routed Linux network namespace and point-to-point veth stack on one disposable hosted runner.
+- Six namespace reachability probes PASS; witness transaction ACKed on strict synchronous primary; real `iptables DROP` severed the primary from both peers; surviving etcd majority elected a new primary; previously ACKed WAL remained readable; old isolated primary did NOT acknowledge a write; after healing the old leader rejoined as replica and exactly one primary remained. Explicit teardown cleans only ephemeral host subnetwork/forwarding and namespaces.
+- Earlier [functional HA 43883579584](https://github.com/desalvo/multi-backup/actions/runs/43883579584) remains PASS for leader process crash, strict no-sync write fencing, both standby rejoin and DCS majority-loss blocking.
+- This is **NOT 3 physical hosts/racks or certified external network appliance fault domains**; it certifies genuine isolated Linux network stacks and real peer network partitions. This new integration triggers a one-shot exact-SHA rerun on the active RC feature branch.
+- This r157 work does not complete native installer notarization/signatures, hypervisor backup media+restore or final Production Gate. No main merge or release tag.
+
+One-line English commit summary: Integrate real isolated Patroni PG16 and TLS etcd partition, strict fencing and confirmed failover acceptance.
