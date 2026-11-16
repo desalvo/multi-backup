@@ -764,3 +764,12 @@ One-line English commit summary: Prove strict Patroni fencing with both genuine 
 - The test continues after this negative fence and must verify old-leader rejoin, the former second standby's rejoin, acknowledged post-rejoin writes, and failure of stale writes after etcd majority loss. No change to production Patroni strict settings or emergency fail-open override; run one focused bounded real lab r130. GPFS unchanged suspended/out of RC.
 
 One-line English commit summary: Treat validated strict PostgreSQL commit blocking as expected and complete rejoin plus DCS-majority fault injection.
+
+
+## r131 — native Rust monitoring TLS/private-key guardrails
+
+- Prometheus previously accepted bearer tokens over **unencrypted HTTP** on non-loopback private VLAN; a passive network observer could steal the reusable bearer. It now requires **both** a mode-0600 bearer and verified HTTPS TLS key/certificate for any remote/private address. Loopback-only unencrypted scraping remains available for local agents or TLS reverse proxies. The new optional environment variables are `MULTI_BACKUP_PROMETHEUS_TLS_CERT_FILE` and `MULTI_BACKUP_PROMETHEUS_TLS_KEY_FILE`.
+- Both Prometheus and REST HTTPS monitoring now reject public/wildcard/multicast bind addresses, symlink or empty/huge TLS PEMs, and group/world-readable **private TLS keys**; REST remains read-only and scoped via PostgreSQL monitor.read.
+- Rust unit tests verify the remote four-way TLS/bearer matrix and private-key permissions/symlink guard; Rust-server focused CI must compile/test before this feature is considered accepted. Native HTTPS probe against real PostgreSQL and external network attack test are separate remaining RC gates; no published stable release.
+
+One-line English commit summary: Require HTTPS and bearer for remote Prometheus and owner-only TLS keys for REST monitoring.
