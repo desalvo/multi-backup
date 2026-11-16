@@ -13,6 +13,7 @@ mod agent_registry;
 mod agent_api;
 mod cluster_worker;
 mod internal_db_backup;
+mod monitoring;
 use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
@@ -698,6 +699,10 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         println!("{}",Argon2::default().hash_password(password.as_bytes(),&salt)?);
         return Ok(());
     }
+    if std::env::args().any(|s|s=="monitor-snmp-status"){
+        tokio::task::spawn_blocking(monitoring::snmp_status).await??;
+        return Ok(());
+    }
     let name=std::env::var("MULTI_BACKUP_ADMIN_USER")?;
     let hash=read_hash(&std::env::var("MULTI_BACKUP_ADMIN_HASH_FILE")?)?;
     let origin=std::env::var("MULTI_BACKUP_PUBLIC_ORIGIN")?;
@@ -854,6 +859,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         last_smtp_test:Mutex::new(None),
         cluster,agent_proxy_key,
     }));
+    monitoring::start(state.clone()).await?;
     let app=Router::new().route("/healthz",get(health)).route("/readyz",get(readiness))
         .route("/login",get(login_page).post(do_login))
         .route("/oidc/start",get(oidc_start))
@@ -879,6 +885,8 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/api/internal-db/status",get(agent_api::internal_db_backup_status))
         .route("/api/internal-db/policy",post(agent_api::internal_db_backup_policy))
         .route("/api/internal-db/backup",post(agent_api::internal_db_backup_now))
+        .route("/api/monitoring/tokens",get(monitoring::tokens).post(monitoring::issue))
+        .route("/api/monitoring/tokens/revoke",post(monitoring::revoke))
         .route("/api/cluster/storage",post(agent_api::register_storage))
         .route("/api/cluster/jobs",post(agent_api::enqueue_cluster))
         .route("/api/cluster/jobs/recover",post(agent_api::recover_cluster_job))
