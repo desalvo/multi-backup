@@ -1,0 +1,1 @@
+Retry real netns HA with per-bridge restrictive FORWARD ACCEPT and six ICMP preflight probes, exact hosted runner only.

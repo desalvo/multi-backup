@@ -27,6 +27,7 @@ class Lab:
         self.peers = [prefix+f"h{i}" for i in range(3)]
         self.created = []
         self.rules = []
+        self.host_bridge_rule = False
         self.children = []
         self.uid, self.gid = os.getuid(), os.getgid()
 
@@ -48,6 +49,22 @@ class Lab:
             sudo("ip","-n",ns,"link","set","mb-eth","up")
             result=sudo("ip","-n",ns,"addr","show","mb-eth").stdout
             if IPS[i] not in result: raise RuntimeError("Namespace interface not configured")
+        # GitHub Ubuntu runners may apply a DROP policy to traffic
+        # bridged between veth ports. Permit ONLY the ephemeral /24 across
+        # our isolated bridge; restore this exact host firewall rule on exit.
+        sudo("iptables","-I","FORWARD","-i",self.bridge,"-o",self.bridge,
+             "-s","10.239.143.0/24","-d","10.239.143.0/24","-j","ACCEPT")
+        self.host_bridge_rule=True
+        for i,ns in enumerate(self.names):
+            for j,peer in enumerate(IPS):
+                if i==j: continue
+                probe=sudo("ip","netns","exec",ns,
+                           "ping","-c","1","-W","2",peer,check=False)
+                if probe.returncode:
+                    raise RuntimeError(f"Preflight veth {i+1}->{j+1} no ICMP: "
+                        + probe.stderr[-120:])
+        print("PROOF: all six directed namespace-to-namespace ICMP probes passed",
+              flush=True)
         print("PROOF: three real network namespaces with separate veth stacks",flush=True)
 
     def start(self, logfile, *command):
@@ -98,6 +115,11 @@ class Lab:
         try: self.reconnect()
         except Exception as e:
             print("Disposable rule cleanup warning:",type(e).__name__,flush=True)
+        if self.host_bridge_rule:
+            sudo("iptables","-D","FORWARD","-i",self.bridge,"-o",self.bridge,
+                 "-s","10.239.143.0/24","-d","10.239.143.0/24","-j","ACCEPT",
+                 check=False)
+            self.host_bridge_rule=False
         for p in self.children:
             if p.poll() is None:
                 try: os.killpg(p.pid,signal.SIGTERM)
