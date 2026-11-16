@@ -178,9 +178,16 @@ CREATE TABLE IF NOT EXISTS mb_internal_backup_history (
 CREATE INDEX IF NOT EXISTS mb_internal_backup_history_recent
   ON mb_internal_backup_history(started_at DESC);
 "#;
+const DB_BACKUP_LEASE_SCHEMA:&str=r#"
+ALTER TABLE mb_internal_backup_policy
+  ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ;
+ALTER TABLE mb_internal_backup_history
+  ADD COLUMN IF NOT EXISTS encrypted_bytes BIGINT;
+"#;
 const MIGRATIONS:&[(i64,&str)]=&[
     (1,SCHEMA),
     (2,DB_BACKUP_SCHEMA),
+    (3,DB_BACKUP_LEASE_SCHEMA),
 ];
 fn migrate_schema(db:&mut Client)->Result<(),BoxError>{
     let mut tx=db.transaction()?;
@@ -649,6 +656,136 @@ impl Database {
             "visibility":r.get::<_,String>(6),
             "remote_export_supported":false
         })).collect::<Vec<_>>(),"read_only_remote":true}))
+    }
+
+
+    pub fn db_backup_dashboard(&self)->Result<Value,BoxError>{
+        let mut conn=self.connect()?;
+        let row=conn.query_one("SELECT enabled,interval_minutes,target,
+            next_due::TEXT,lease_state,last_completed::TEXT,updated_at::TEXT,
+            lease_until::TEXT FROM mb_internal_backup_policy WHERE singleton=TRUE",&[])?;
+        let hist=conn.query("SELECT job_id,backup_id,target,status,replica_id,
+            started_at::TEXT,finished_at::TEXT,error_code,manifest
+            FROM mb_internal_backup_history ORDER BY started_at DESC LIMIT 50",&[])?;
+        let recovery:bool=conn.query_one("SELECT pg_is_in_recovery()",&[])?.get(0);
+        let (role,standbys)=if recovery {
+            ("replica",Vec::<Value>::new())
+        }else{
+            let rows=conn.query("SELECT application_name,state,sync_state,
+                COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(),replay_lsn),0)::BIGINT
+                FROM pg_stat_replication ORDER BY application_name",&[])?;
+            ("primary",rows.iter().map(|r|json!({
+                "name":r.get::<_,String>(0),"state":r.get::<_,String>(1),
+                "sync_state":r.get::<_,String>(2),"lag_bytes":r.get::<_,i64>(3)
+            })).collect::<Vec<_>>())
+        };
+        let sync=conn.query_one("SELECT current_setting('synchronous_commit'),
+            current_setting('synchronous_standby_names')",&[])?;
+        Ok(json!({
+          "enabled":row.get::<_,bool>(0),"interval_minutes":row.get::<_,i32>(1),
+          "target":row.get::<_,String>(2),"next_due":row.get::<_,String>(3),
+          "lease_state":row.get::<_,String>(4),
+          "last_completed":row.get::<_,Option<String>>(5),
+          "updated_at":row.get::<_,String>(6),
+          "lease_until":row.get::<_,Option<String>>(7),
+          "database":{"role":role,"standbys":standbys,
+            "synchronous_commit":sync.get::<_,String>(0),
+            "synchronous_standby_names":sync.get::<_,String>(1)},
+          "history":hist.iter().map(|r|json!({
+             "job_id":r.get::<_,String>(0),"backup_id":r.get::<_,Option<String>>(1),
+             "target":r.get::<_,String>(2),"status":r.get::<_,String>(3),
+             "replica":r.get::<_,String>(4),
+             "started_at":r.get::<_,String>(5),
+             "finished_at":r.get::<_,Option<String>>(6),
+             "error_code":r.get::<_,Option<String>>(7),
+             "manifest":r.get::<_,Option<Value>>(8)
+          })).collect::<Vec<_>>()
+        }))
+    }
+
+    pub fn configure_db_backups(&self,enabled:bool,interval:i32,target:&str)
+        ->Result<(),BoxError>{
+        if !(60..=43200).contains(&interval) || target!="s3_worm" {
+            return Err(error("Only S3 COMPLIANCE WORM is eligible for scheduled DB backups"));
+        }
+        let mut conn=self.connect()?;
+        let updated=conn.execute("UPDATE mb_internal_backup_policy SET
+            enabled=$1,interval_minutes=$2,target=$3,
+            next_due=CASE WHEN $1 THEN now() ELSE next_due END,
+            updated_at=now() WHERE singleton=TRUE AND lease_state='idle'",
+            &[&enabled,&interval,&target])?;
+        if updated!=1 {return Err(error("DB backup policy busy; reconciliation required"));}
+        Ok(())
+    }
+
+    /// Exclusive, transactional lease shared by all Kubernetes and bare-metal
+    /// servers. A crashed writer is quarantined rather than re-run blindly.
+    pub fn claim_db_backup(&self,replica:&str,force:bool)->Result<Option<String>,BoxError>{
+        if !ident(replica){return Err(error("Invalid cluster replica ID"));}
+        let mut conn=self.connect()?;
+        let mut tx=conn.transaction()?;
+        let row=tx.query_one("SELECT enabled,target,lease_state,
+          (next_due<=now()),(lease_until IS NOT NULL AND lease_until<now())
+          FROM mb_internal_backup_policy WHERE singleton=TRUE FOR UPDATE",&[])?;
+        let enabled:bool=row.get(0);
+        let target:String=row.get(1);
+        let state:String=row.get(2);
+        let due:bool=row.get(3);
+        let expired:bool=row.get(4);
+        if state=="running" && expired {
+            tx.batch_execute("UPDATE mb_internal_backup_policy SET
+              lease_state='needs_reconciliation',updated_at=now()
+              WHERE singleton=TRUE;
+              UPDATE mb_internal_backup_history SET status='needs_reconciliation',
+              error_code='writer_disappeared_reconciliation_required'
+              WHERE job_id=(SELECT current_job FROM mb_internal_backup_policy)
+                AND status='running';")?;
+            tx.commit()?;
+            return Ok(None);
+        }
+        if state!="idle" || (!force && (!enabled || !due)) {
+            tx.commit()?;
+            return Ok(None);
+        }
+        if target!="s3_worm"{return Err(error("Unsafe non-WORM DB destination"));}
+        let id=uuid::Uuid::new_v4().to_string();
+        let token=uuid::Uuid::new_v4().to_string();
+        tx.execute("UPDATE mb_internal_backup_policy SET current_job=$1,
+          lease_token=$2,lease_state='running',lease_until=now()+interval '30 minutes',
+          updated_at=now() WHERE singleton=TRUE",
+          &[&id,&token])?;
+        tx.execute("INSERT INTO mb_internal_backup_history
+            (job_id,target,status,replica_id) VALUES ($1,$2,'running',$3)",
+            &[&id,&target,&replica])?;
+        tx.commit()?;
+        Ok(Some(format!("{id}:{token}")))
+    }
+    pub fn finish_db_backup(&self,lease:&str,manifest:Option<&Value>,error_code:Option<&str>)
+        ->Result<bool,BoxError>{
+        let (id,token)=lease.split_once(':').ok_or_else(||error("Unsafe DB backup lease"))?;
+        if uuid::Uuid::parse_str(id).is_err()||uuid::Uuid::parse_str(token).is_err(){
+           return Err(error("Invalid DB backup lease"));
+        }
+        let mut conn=self.connect()?;
+        let mut tx=conn.transaction()?;
+        let row=tx.query_opt("SELECT current_job FROM mb_internal_backup_policy
+          WHERE singleton=TRUE AND lease_state='running'
+            AND current_job=$1 AND lease_token=$2
+            AND lease_until>now() FOR UPDATE",&[&id,&token])?;
+        if row.is_none(){return Ok(false);}
+        let result=if manifest.is_some() && error_code.is_none() {"success"}else{"failed"};
+        let backup_id=manifest.and_then(|x|x.get("id")).and_then(Value::as_str);
+        tx.execute("UPDATE mb_internal_backup_history SET
+            status=$2,backup_id=$3,manifest=$4,error_code=$5,finished_at=now()
+            WHERE job_id=$1 AND status='running'",
+            &[&id,&result,&backup_id,&manifest,&error_code])?;
+        tx.execute("UPDATE mb_internal_backup_policy SET current_job=NULL,
+          lease_token=NULL,lease_until=NULL,lease_state='idle',
+          last_completed=CASE WHEN $1='success' THEN now() ELSE last_completed END,
+          next_due=now()+interval '1 minute' * interval_minutes,
+          updated_at=now() WHERE singleton=TRUE",&[&result])?;
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn status(&self)->Result<Value,BoxError>{
