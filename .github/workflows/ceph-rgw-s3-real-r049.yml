@@ -1,0 +1,45 @@
+name: Multi Backup - genuine 3-node Ceph RGW S3 WORM acceptance
+on:
+  pull_request:
+    paths:
+      - 'scripts/ci/ceph-*'
+      - 'rust/**'
+      - '.github/workflows/ceph-rgw-s3-real-r049.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-rgw-real-${ github.ref }
+  cancel-in-progress: true
+jobs:
+  real-ceph-rgw:
+    name: Rook-Ceph 3 MON / 3 OSD nodes + genuine RGW Object Lock
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision upstream kubectl and kind
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 4 --silent --show-error -o /tmp/kind \
+            https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          curl --fail --location --retry 4 --silent --show-error -o /tmp/kubectl \
+            https://dl.k8s.io/release/v1.32.3/bin/linux/amd64/kubectl
+          chmod 0755 /tmp/kind /tmp/kubectl
+          sudo mv /tmp/kind /tmp/kubectl /usr/local/bin/
+          kind version
+          kubectl version --client
+      - name: Install actual Ceph S3 test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq
+          python3 -m pip install 'awscli>=1.42,<2'
+          for path in scripts/ci/ceph-rgw-kind-cluster.sh scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh; do
+            bash -n "$path"
+          done
+          python3 -m py_compile scripts/ci/ceph-assert-cluster.py
+      - name: Compile Rust engine that will operate the genuine Ceph cluster
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Start physical Ceph daemons on 3 disposable kind workers and verify S3 WORM
+        run: bash scripts/ci/ceph-rgw-kind-cluster.sh
