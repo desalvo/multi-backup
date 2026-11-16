@@ -376,6 +376,32 @@ pub fn restore(config:&Config,id:&str,identity:&Path,destination:&Path)->Result<
     Ok(record)
 }
 
+
+/// Native GUI path: the unlocked age identity stays in RAM, never on disk.
+pub fn verify_from_memory(config:&Config,id:&str,secret:&[u8])->Result<Record>{
+    let client=Client::new(config)?;
+    let record=read_record(&client,id)?;
+    let temp=tempfile::tempdir()?;
+    let file=staged(&client,&record,temp.path())?;
+    let actual=archive::verify_from_memory(&file,secret)?;
+    if actual!=record.files {return Err("S3 age identity or archive verification failed".into());}
+    Ok(record)
+}
+/// Restore using the same in-memory identity as the protected local key vault.
+pub fn restore_from_memory(config:&Config,id:&str,secret:&[u8],destination:&Path)->Result<Record>{
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err("S3 restore destination must not exist".into());
+    }
+    let client=Client::new(config)?;
+    let record=read_record(&client,id)?;
+    let temp=tempfile::tempdir()?;
+    let file=staged(&client,&record,temp.path())?;
+    let actual=archive::verify_from_memory(&file,secret)?;
+    if actual!=record.files {return Err("S3 age integrity or membership failed".into());}
+    archive::extract_from_memory(&file,secret,destination)?;
+    Ok(record)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
