@@ -497,3 +497,27 @@ Expanded scope makes the previous 57.5% product-wide readiness estimate outdated
 ## Aggiornamento operatore — CES funzionale anche su 16 GiB (16 novembre 2026)
 
 L'operatore ha installato e verificato su tutti e tre i nodi RHEL 9.8 **kernel-devel esatto, gcc, gcc-c++, cpp, ksh e make**; gli stessi kernel RHEL 9.8 rimangono in esecuzione. Su ogni disco candidato NSD `wipefs --no-act` non rileva firme visibili (nessuna prova di assenza di dati nascosti o di identita hypervisor). **Decisione aggiornata:** testare CES autentico NFSv4 poi SMB3 anche con 16 GiB, un client e carico minimo; registrare PASS esclusivamente per funzionalita reale, non per hardware/performance IBM. L'evento IBM `total_memory_small` e un TIP e non necessariamente blocca il servizio, ma OOM, servizi unhealthy e perdita VIP invalidano il test. Il nuovo piano si trova in `docs/GPFS_ADSNET_CES_16GB_FUNCTIONAL_R044_IT.md` e il monitor read-only e `scripts/gpfs-lab/11-adsnet-observe-ces-lowmem.sh`. L'installazione IBM, NSD e CES non e stata ancora eseguita dall'assistente.
+
+## r047 — Ceph RGW S3 / MinIO S3 vault and parallel RC gates (16 Nov 2026)
+
+- Stacked on experimental r046 Rust candidate branch (NOT merged to main).
+- New direct Rust S3 SigV4 transport: config validation, HTTPS-only remote,
+  versioning+bucket COMPLIANCE default preflight, create-only encrypted archive
+  upload, response version ID, per-version GetObjectRetention check, manifest-last
+  snapshot publish, digest+age verify and new-directory restore.
+- Provider configuration allows ceph-rgw/minio; AWS keys from environment only.
+  HTTP restricted to explicitly enabled local loopback tests.
+- The real MinIO integration workflow is gated after Production Gate and blocks
+  package/container publication; negative test attempts to delete a locked
+  object version with MinIO admin privileges. Test is NOT PASS until CI finishes.
+- Ceph RGW live Object Lock qualification remains NOT RUN; do not assume
+  MinIO's observed behavior proves Ceph RGW compatibility.
+- New doc docs/S3_WORM_VAULT_R047_IT.md includes the explicit threat model,
+  required independent storage administration and remaining feature gaps.
+- Open RC blockers: native CLI compilation and MinIO live test; Ceph field test;
+  S3 multipart/resume; desktop/server/agent/HA S3 integration; signed manifest
+  catalog and delete-marker recovery; GitHub+Dropbox live account acceptance;
+  strict fencing/limits and signed cross-platform artifacts. GPFS remains
+  experimental and NON-BLOCKING.
+- No stable tag, early-release publication or WORM certification on this
+  development-only branch until real CI and security evidence is reviewed.
