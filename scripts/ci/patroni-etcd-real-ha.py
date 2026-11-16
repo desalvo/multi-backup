@@ -25,8 +25,21 @@ DB_PASSWORD = "DISPOSABLE-CI-HA-ONLY-2026"
 REPL_PASSWORD = "DISPOSABLE-CI-REPL-ONLY-2026"
 
 
+def isolated_env():
+    """Never proxy 127/8 peer, REST or etcdctl mTLS traffic via runner proxies."""
+    env = os.environ.copy()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(key, None)
+    excluded = "localhost,127.0.0.1,127.0.0.11,127.0.0.12,127.0.0.13,127.0.0.0/8"
+    env["NO_PROXY"] = excluded
+    env["no_proxy"] = excluded
+    return env
+
+
 def run(*cmd, check=True, timeout=20, env=None):
-    return subprocess.run(cmd, check=check, timeout=timeout, env=env,
+    return subprocess.run(cmd, check=check, timeout=timeout,
+                          env=env if env is not None else isolated_env(),
                           text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
@@ -125,7 +138,8 @@ def start(log, *cmd):
     handle = log.open("a")
     try:
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=handle,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+                                stderr=subprocess.STDOUT, start_new_session=True,
+                                env=isolated_env())
     finally:
         handle.close()
     return proc
@@ -220,6 +234,13 @@ def main():
             raise SystemExit(f"Missing HA lab executable: {executable}")
     if not Path("/usr/lib/postgresql/16/bin/pg_ctl").exists():
         raise SystemExit("PostgreSQL16 server binary missing")
+    # Also disable proxies for the in-process urllib Patroni REST probe.
+    clean = isolated_env()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                "http_proxy", "https_proxy", "all_proxy"):
+        os.environ.pop(key, None)
+    os.environ["NO_PROXY"] = clean["NO_PROXY"]
+    os.environ["no_proxy"] = clean["no_proxy"]
     with tempfile.TemporaryDirectory(prefix="mb-real-ha-") as tmp:
         root = Path(tmp)
         processes = {}
@@ -324,7 +345,12 @@ def main():
                 path = root / name
                 if path.is_file():
                     print(f"CI HA diagnostics {name}:")
-                    print("\n".join(path.read_text(errors="replace").splitlines()[-18:]))
+                    lines = path.read_text(errors="replace").splitlines()
+                    print("\n".join(lines[-18:]))
+                    errors = [line for line in lines if any(term in line.lower()
+                        for term in ("tls", "certificate", "handshake", "connection refused",
+                                     "peer rejected", "remote error"))]
+                    print("TLS peer evidence:\n" + "\n".join(errors[-15:]))
             raise
         finally:
             for proc in list(patroni.values()) + list(etcd.values()):
