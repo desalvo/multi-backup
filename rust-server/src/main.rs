@@ -774,6 +774,42 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
             // Fencing of commits after lease loss is still an RC requirement.
             tokio::spawn(cluster_worker::spawn(db.clone(),replica.clone()));
         }
+        // Bare metal and Kubernetes share the same PostgreSQL inventory.
+        // Each replica publishes only its own cryptographically decoded local
+        // metadata; do not assume that a remote node-local filesystem is mounted.
+        if let Ok(storage_id)=std::env::var("MULTI_BACKUP_CLUSTER_CATALOG_STORAGE_ID"){
+            if !accessible.contains(&storage_id){
+                return Err("Catalog storage ID must match replica's declared storage IDs".into());
+            }
+            let key=identity.clone().ok_or("Cluster backup inventory needs an age identity")?;
+            let catalog_db=db.clone();
+            let catalog_root=root.clone();
+            let catalog_replica=replica.clone();
+            tokio::spawn(async move{
+                let mut timer=tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    timer.tick().await;
+                    let db=catalog_db.clone();
+                    let root=catalog_root.clone();
+                    let key=key.clone();
+                    let id=catalog_replica.clone();
+                    let store_id=storage_id.clone();
+                    let result=tokio::task::spawn_blocking(move||{
+                        let store=multi_backup_core::chunk_store::Store::open(&root,&key)?;
+                        let entries=store.list(&key)?.into_iter().map(|b|json!({
+                            "id":b.id,"label":b.label,
+                            "files":b.entries.into_iter()
+                                .map(|f|json!({"path":f.path,"size":f.bytes}))
+                                .collect::<Vec<_>>()
+                        })).collect::<Vec<_>>();
+                        db.publish_backups(&id,&store_id,&entries)
+                    }).await;
+                    if !matches!(result,Ok(Ok(()))){
+                        eprintln!("Cluster catalog refresh failed (not publishing false metadata)");
+                    }
+                }
+            });
+        }
         let db=db.clone();
         tokio::spawn(async move {
             let mut beat=tokio::time::interval(std::time::Duration::from_secs(20));
@@ -824,6 +860,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/api/export",post(export))
         .route("/api/audit",get(audit_list))
         .route("/api/cluster/status",get(agent_api::cluster_status))
+        .route("/api/cluster/backups",get(agent_api::cluster_backups))
         .route("/api/cluster/storage",post(agent_api::register_storage))
         .route("/api/cluster/jobs",post(agent_api::enqueue_cluster))
         .route("/api/cluster/jobs/recover",post(agent_api::recover_cluster_job))
