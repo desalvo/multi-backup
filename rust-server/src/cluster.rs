@@ -184,10 +184,24 @@ ALTER TABLE mb_internal_backup_policy
 ALTER TABLE mb_internal_backup_history
   ADD COLUMN IF NOT EXISTS encrypted_bytes BIGINT;
 "#;
+const MONITORING_SCHEMA:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_monitor_tokens (
+  token_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 128),
+  secret_sha256 TEXT NOT NULL UNIQUE CHECK(length(secret_sha256)=64),
+  scope TEXT NOT NULL DEFAULT 'monitor.read' CHECK(scope='monitor.read'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS mb_monitor_tokens_live
+  ON mb_monitor_tokens(expires_at) WHERE revoked=FALSE;
+"#;
 const MIGRATIONS:&[(i64,&str)]=&[
     (1,SCHEMA),
     (2,DB_BACKUP_SCHEMA),
     (3,DB_BACKUP_LEASE_SCHEMA),
+    (4,MONITORING_SCHEMA),
 ];
 fn migrate_schema(db:&mut Client)->Result<(),BoxError>{
     let mut tx=db.transaction()?;
@@ -788,6 +802,59 @@ impl Database {
         Ok(true)
     }
 
+
+    /// Issue a 256-bit random bearer token. Only its SHA-256 is retained.
+    /// The plaintext is returned exactly once over authenticated browser TLS.
+    pub fn create_monitor_token(&self,name:&str,days:i32)->Result<Value,BoxError>{
+        if name.is_empty()||name.len()>128||name.chars().any(char::is_control)||
+           !(1..=365).contains(&days){
+            return Err(error("Unsafe monitoring token name/lifetime"));
+        }
+        use rand::RngCore;
+        let mut nonce=[0u8;32];
+        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        let token=format!("mbmon_{}",hex::encode(nonce));
+        let hash=hex::encode(Sha256::digest(token.as_bytes()));
+        let id=uuid::Uuid::new_v4().to_string();
+        let mut db=self.connect()?;
+        db.execute("INSERT INTO mb_monitor_tokens
+          (token_id,name,secret_sha256,expires_at)
+          VALUES($1,$2,$3,now()+($4 * INTERVAL '1 day'))",
+          &[&id,&name,&hash,&days])?;
+        Ok(json!({"id":id,"token":token,"name":name,"expires_in_days":days,
+                  "scope":"monitor.read"}))
+    }
+    pub fn monitor_token_valid(&self,token:&str)->Result<bool,BoxError>{
+        if token.len()!=70 || !token.starts_with("mbmon_")||
+           !token[6..].bytes().all(|x|x.is_ascii_hexdigit()&&!x.is_ascii_uppercase()){
+            return Ok(false);
+        }
+        let hash=hex::encode(Sha256::digest(token.as_bytes()));
+        let mut db=self.connect()?;
+        Ok(db.query_opt("SELECT token_id FROM mb_monitor_tokens
+           WHERE secret_sha256=$1 AND scope='monitor.read'
+             AND NOT revoked AND expires_at>now()", &[&hash])?.is_some())
+    }
+    pub fn monitor_token_list(&self)->Result<Value,BoxError>{
+        let mut db=self.connect()?;
+        let rows=db.query("SELECT token_id,name,scope,created_at::TEXT,
+            expires_at::TEXT,revoked FROM mb_monitor_tokens
+            ORDER BY created_at DESC LIMIT 100",&[])?;
+        Ok(json!({"tokens":rows.iter().map(|r|json!({
+          "id":r.get::<_,String>(0),"name":r.get::<_,String>(1),
+          "scope":r.get::<_,String>(2),
+          "created_at":r.get::<_,String>(3),
+          "expires_at":r.get::<_,String>(4),
+          "revoked":r.get::<_,bool>(5)
+        })).collect::<Vec<_>>()}))
+    }
+    pub fn revoke_monitor_token(&self,id:&str)->Result<bool,BoxError>{
+        if uuid::Uuid::parse_str(id).is_err(){return Err(error("Invalid token identifier"));}
+        let mut db=self.connect()?;
+        Ok(db.execute("UPDATE mb_monitor_tokens SET revoked=TRUE
+            WHERE token_id=$1 AND NOT revoked",&[&id])?==1)
+    }
+
     pub fn status(&self)->Result<Value,BoxError>{
         let mut db=self.connect()?;
         let nodes=db.query("SELECT replica_id,max_jobs,storage_ids,
@@ -843,7 +910,7 @@ mod tests {
         assert!(SCHEMA.contains("storage_ids"));
     }
     #[test]fn migration_ledger_is_versioned_and_hash_pinned(){
-        assert_eq!(MIGRATIONS.len(),2);
+        assert_eq!(MIGRATIONS.len(),4);
         assert!(DB_BACKUP_SCHEMA.contains("mb_internal_backup_policy"));
         assert!(DB_BACKUP_SCHEMA.contains("mb_internal_backup_history"));
         assert!(Sha256::digest(SCHEMA.as_bytes()) != Sha256::digest(DB_BACKUP_SCHEMA.as_bytes()));
