@@ -36,7 +36,7 @@ done
 RELEASE="$(subscription-manager release --show 2>&1 || :)"
 echo "subscription-manager release: $RELEASE"
 if ! printf '%s\n' "$RELEASE" | grep -Eq '9[.]8'; then
-  echo 'WARN subscription release does not show 9.8; do not run dnf update'
+  echo 'WARN subscription release does not show 9.8; do not perform an unpinned OS upgrade'
 fi
 if [ ! -b "$DEV" ]; then echo "FAIL missing block disk $DEV"; exit 1; fi
 TYPE=$(lsblk -dn -o TYPE "$DEV")
