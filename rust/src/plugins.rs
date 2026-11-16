@@ -197,8 +197,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Graph OAuth/tenant consent, upload-session retry and explicit conflict handling for new encrypted objects").with_access_gate(AccessGate::OAuthScopeReview),
     PluginDescriptor::new("posix", "Local POSIX filesystem", DataKind::Files, PREVIEW, PREVIEW,
         "Filesystem walk+metadata+optional consistent snapshot", "Archive CLI supports local files; generic plugin wiring and complete ACL/xattr capture are pending"),
-    PluginDescriptor::new("s3", "S3 / AWS / Ceph RGW", DataKind::ObjectStore, PLAN, PLAN,
-        "Versioned bucket and multipart ETag/checksum", "Use scoped credentials, multipart resume, optional Object Lock and no overwrite by default"),
+    PluginDescriptor::new("s3", "S3 WORM / MinIO / Ceph RGW / RustFS", DataKind::ObjectStore, PLAN, PREVIEW,
+        "Bucket versioning enabled, default Object Lock COMPLIANCE and version-specific retention attestation",
+        "Dedicated native Rust s3-vault writes age ciphertext and restores only fresh paths; verified MinIO and RustFS single-server real CI; Ceph RGW 3-MON/3-OSD still unqualified; generic S3 import/restore-to-S3, multipart resume and authenticated independent catalog not certified"),
     PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PREVIEW, PLAN,
         "Exact read-only authenticated davfs2 mount, with independently attested quiescent collection", "Experimental mounted WebDAV input to encrypted POSIX chunks; no native WebDAV output, ETag certification, or remote write/restore"),
     PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
@@ -553,6 +554,20 @@ mod tests {
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
         assert_eq!(find("rbd").unwrap().safety, SafetyProfile::SnapshotBlockDevice);
+    }
+    #[test]
+    fn native_s3_worm_vault_is_dedicated_preview_not_generic_backup_pipeline() {
+        let s3=find("s3").expect("S3 vault registry is required");
+        assert_eq!(s3.backup_input,Stage::Planned,
+            "S3 remote source import is not yet a generic plugin");
+        assert_eq!(s3.backup_output,Stage::Preview);
+        assert_eq!(s3.restore_input,Stage::Preview);
+        assert_eq!(s3.restore_output,Stage::Planned);
+        let backup=plan(Mode::Backup,"posix","s3").unwrap();
+        let restore=plan(Mode::Restore,"s3","posix").unwrap();
+        assert!(!backup.executable && !backup.preview_executable,
+            "Dedicated s3-vault command MUST NOT bypass generic dispatcher");
+        assert!(!restore.executable && !restore.preview_executable);
     }
     #[test]
     fn anti_ransomware_vault_is_ciphertext_destination_and_restore_source_only() {

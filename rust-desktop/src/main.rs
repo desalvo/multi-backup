@@ -12,7 +12,8 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const VERSION: &str = "0.1.0-r038-native-preview";
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-r057-native-preview");
+const BUILD_SHA: &str = match option_env!("GITHUB_SHA") { Some(v) => v, None => "local" };
 const AUTHOR: &str = "Alessandro De Salvo";
 const REPO: &str = "https://github.com/desalvo/multi-backup";
 const NAVY: Color32 = Color32::from_rgb(10, 26, 60);
@@ -810,7 +811,7 @@ impl NativeApp {
                     .map_err(|e|e.to_string())?;
                 match action.as_str() {
                     "preflight"=>s3_vault::preflight(&config)
-                        .map(|_|"Ceph RGW/MinIO: versioning + COMPLIANCE preflight PASS".into())
+                        .map(|_|"S3 Ceph RGW/MinIO/RustFS: versioning + COMPLIANCE preflight PASS".into())
                         .map_err(|e|e.to_string()),
                     "backup"=>s3_vault::backup(&config,&source)
                         .map(|r|format!("S3 backup {} cifrato e trattenuto fino a {}",r.id,r.retain_until))
@@ -920,7 +921,7 @@ impl NativeApp {
             self.run_immutable_vault("restore");
         }
         ui.separator();
-        ui.heading("Vault Ceph RGW / MinIO S3 (anteprima)");
+        ui.heading("Vault S3 WORM: Ceph RGW / MinIO / RustFS (anteprima)");
         ui.label("Richiede bucket dedicato con versioning e Object Lock COMPLIANCE. Credenziali solo dal keyring/ambiente isolato, mai nel file JSON.");
         ui.label("Configurazione S3 JSON (senza secret)");
         ui.text_edit_singleline(&mut self.fields.s3_vault_config);
@@ -1575,6 +1576,7 @@ impl NativeApp {
                 ui.label("Native Rust desktop");
                 ui.separator();
                 ui.label(format!("Versione: {VERSION}"));
+                ui.label(format!("Build: {BUILD_SHA}"));
                 ui.label(format!("Autore: {AUTHOR}"));
                 ui.label("Licenza: EUPL-1.2");
                 ui.label("Sicurezza: age / scrypt / AES-256-GCM");

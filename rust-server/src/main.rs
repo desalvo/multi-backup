@@ -7,6 +7,8 @@ mod oidc;
 mod dav;
 mod security;
 mod cluster;
+mod database_maintenance;
+mod monitoring;
 #[cfg(test)]
 mod live_pg_acceptance;
 mod agent_registry;
@@ -52,6 +54,7 @@ struct AppConfig {
     failed_logins: Mutex<HashMap<String, (Instant,u32)>>,
     last_smtp_test: Mutex<Option<Instant>>,
     cluster: Option<cluster::Database>,
+    monitor: monitoring::Monitoring,
     agent_proxy_key: Option<Zeroizing<String>>,
 }
 #[derive(Clone)]
@@ -729,6 +732,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     // nest a runtime and panic in every clustered Kubernetes Pod.
     // All synchronous cluster bootstrap I/O must use blocking workers.
     let cluster=tokio::task::spawn_blocking(cluster::Database::configured).await??;
+    let monitor=monitoring::Monitoring::from_env()?;
     let agent_proxy_key=std::env::var_os("MULTI_BACKUP_AGENT_PROXY_SECRET_FILE")
         .map(|location|->Result<Zeroizing<String>,Box<dyn std::error::Error+Send+Sync>>{
             let path=PathBuf::from(location);
@@ -801,7 +805,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
         last_smtp_test:Mutex::new(None),
-        cluster,agent_proxy_key,
+        cluster,monitor,agent_proxy_key,
     }));
     let app=Router::new().route("/healthz",get(health)).route("/readyz",get(readiness))
         .route("/login",get(login_page).post(do_login))
@@ -810,6 +814,9 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
+        .route("/api/monitor/settings",get(monitoring::settings))
+        .route("/api/monitor/tokens",get(monitoring::list_tokens).post(monitoring::issue))
+        .route("/api/monitor/tokens/revoke",post(monitoring::revoke))
         .route("/api/s3-vault/status",get(s3_vault_status))
         .route("/api/s3-vault/backup",post(s3_vault_backup))
         .route("/api/s3-vault/verify",post(s3_vault_verify))
@@ -844,7 +851,8 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/logout",post(logout))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),security::enforce_gateway))
-        .with_state(state);
+        .with_state(state.clone());
+    monitoring::start(state.clone()).await?;
     let bind=std::env::var("MULTI_BACKUP_BIND").unwrap_or_else(|_|"0.0.0.0:8080".into());
     let listener=tokio::net::TcpListener::bind(bind.parse::<SocketAddr>()?).await?;
     axum::serve(listener,app).await?;

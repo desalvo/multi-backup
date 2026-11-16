@@ -27,6 +27,20 @@ un filesystem locale resta assegnato soltanto alla replica che lo possiede.</p>
 <p class="muted">Il restore richiede l’autorizzazione offline già presente nella sezione esportazione. Non scrive mai sullo store originale.</p>
 <div id="vault-snapshots" role="status"></div>
 </section>
+<section id="monitoring-settings">
+<div class="controls"><h2>Monitoraggio Prometheus, SNMP e REST TLS</h2>
+<button id="monitor-refresh" type="button">Stato interfacce</button></div>
+<p class="muted">Interfacce disabilitate di default. Prometheus: porta 9502; REST HTTPS con token: porta 8443; SNMP: community predefinita public limitata al loopback.</p>
+<pre id="monitor-settings-result" role="status"></pre>
+<div class="controls"><label>Durata token REST (giorni, 1-90)
+<input id="monitor-token-days" type="number" min="1" max="90" value="30"></label>
+<button id="monitor-token-issue" type="button">Genera token REST</button>
+<button id="monitor-token-list" type="button">Elenca token</button></div>
+<p class="muted">Il token viene mostrato una sola volta, poi rimane disponibile soltanto l'hash. Conservare il valore in un gestore di segreti.</p>
+<pre id="monitor-token-result" role="status"></pre>
+<div class="controls"><label>ID token da revocare <input id="monitor-token-revoke-id" type="text" autocomplete="off" maxlength="32"></label>
+<button id="monitor-token-revoke" type="button">Revoca token</button></div>
+</section>
 <section><h2>Notifiche SMTP(S)</h2>
 <p class="muted">Il server può inviare un messaggio di prova al destinatario configurato.
 La password viene letta da un Secret separato; TLS e certificato server sono obbligatori.</p>

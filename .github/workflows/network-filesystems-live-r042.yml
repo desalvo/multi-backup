@@ -1,13 +1,20 @@
 name: Multi Backup - genuine NFS Samba and GlusterFS Rust recovery acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
-      - 'rust/**'
+      - 'rust/src/plugin_executor.rs'
+      - 'rust/src/mount_probe.rs'
+      - 'rust/src/chunk_store.rs'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - 'scripts/test-real-network-filesystems-r042.sh'
-      - '.github/workflows/network-filesystems-live-r042.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   real-network-fs:
     name: Genuine ${{ matrix.protocol }} server, read-only client, Rust FULL/INC and recovery

@@ -1,17 +1,15 @@
 name: Multi Backup - live PostgreSQL agent and HA acceptance
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: ["feature/**"]
     paths:
       - "rust-server/**"
-      - ".github/workflows/agent-cluster-live-pg.yml"
-  pull_request:
-    paths:
-      - "rust-server/**"
-      - ".github/workflows/agent-cluster-live-pg.yml"
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   agent-ha-real-postgres:
     name: Real PG16 agent trust and two-replica lease fencing

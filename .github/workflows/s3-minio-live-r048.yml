@@ -1,18 +1,16 @@
 name: Multi Backup - real MinIO S3 Object Lock Rust acceptance
 on:
   pull_request:
-    paths:
-      - 'rust/**'
-      - 'scripts/ci/s3-worm-minio-live.sh'
-      - '.github/workflows/s3-minio-live-r048.yml'
+    types: [labeled]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: multi-backup-s3-worm-${ github.ref }
-  cancel-in-progress: true
+  group: multi-backup-s3-worm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 jobs:
   minio-real:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-minio-ci'
     name: Actual MinIO server, Compliance Object Lock, encrypted Rust restore
     runs-on: ubuntu-24.04
     timeout-minutes: 55

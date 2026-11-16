@@ -2,21 +2,51 @@ name: Rust focused validation
 
 on:
   push:
-    branches:
-      - main
-      - "feature/**"
+    branches: ["feature/**"]
     paths:
       - "rust/**"
       - "rust-desktop/**"
       - "rust-server/**"
-      - "Dockerfile"
-      - ".github/workflows/rust-focused.yml"
 
 permissions:
   contents: read
+  pull-requests: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Determine which Rust components changed
+    runs-on: ubuntu-24.04
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      server: ${{ steps.filter.outputs.server }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: ${{ github.event.before }}
+          ref: ${{ github.sha }}
+          filters: |
+            core:
+              - 'rust/**'
+            server:
+              - 'rust-server/**'
+              - 'rust/src/lib.rs'
+              - 'rust/src/s3_vault.rs'
+              - 'rust/Cargo.toml'
+            desktop:
+              - 'rust-desktop/**'
+              - 'rust/src/lib.rs'
+              - 'rust/src/s3_vault.rs'
+              - 'rust/Cargo.toml'
+
   rust-core:
+    needs: [changes]
+    if: needs.changes.outputs.core == 'true'
     name: Encrypted chunk/core integration and fault injection
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -30,6 +60,8 @@ jobs:
         run: cargo test --manifest-path rust/Cargo.toml --all-targets
 
   rust-server:
+    needs: [changes]
+    if: needs.changes.outputs.server == 'true'
     name: OIDC, LDAP, SMTP, WebDAV compile and unit tests
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -39,6 +71,8 @@ jobs:
         run: cargo test --manifest-path rust-server/Cargo.toml --all-targets
 
   rust-desktop:
+    needs: [changes]
+    if: needs.changes.outputs.desktop == 'true'
     name: Rust desktop compile without external packaging
     runs-on: ubuntu-24.04
     timeout-minutes: 25

@@ -652,3 +652,36 @@ L'operatore ha installato e verificato su tutti e tre i nodi RHEL 9.8 **kernel-d
   finish real WebDAV, MinIO, and Production Gate acceptance successfully.
   Ceph RGW requires its own independent field test; not certified here.
 - All work remains in draft PR #20 on r047; no release or merge promoted.
+
+## r050 — Supporto RustFS S3 WORM e CI reale (16 Nov 2026)
+
+- Nuovo provider di storage vault S3 `rustfs` nel core Rust e nella GUI,
+  con identici requisiti di sicurezza di MinIO e Ceph: HTTPS o HTTP solo
+  su loopback per test, bucket versioning Enabled, Object Lock COMPLIANCE,
+  versionId valido, retention sulle versioni, archivio cifrato age e
+  restore sicuro.
+- Nuovo test CI con server reale, non mock:
+  .github/workflows/s3-rustfs-live-r050.yml e
+  scripts/ci/s3-worm-rustfs-live.sh. Usa l'immagine ufficiale versionata
+  rustfs/rustfs:1.0.3, storage tmpfs effimero, account S3 generato per
+  il job, due bucket, verifica object lock, backup/restore, bad key,
+  rifiuto DELETE su versione WORM e rifiuto accorciamento retention.
+- La matrice multi-backend è in docs/S3_VAULT_STORAGE_MATRIX_R050_IT.md.
+  MinIO: PASS reale precedente. Ceph: NOT PASS finché il nuovo workflow
+  con Rook v1.20.9 non è verde; corretto l'errore d'installazione delle
+  CR CSI non necessarie per object-store-only. RustFS: NOT PASS fino
+  all'esito reale del workflow dedicato.
+- Il PASS RustFS qualifica solo il percorso server singolo e API
+  COMPLIANCE testate, non storage distribuito né resistenza ad
+  amministratore host/root o cancellazione distruttiva del cluster.
+- Ramo feature/r049-ceph-rgw-real-cluster-s3-certification e PR #21:
+  nessun merge/RC prima dei test Ceph e RustFS e delle verifiche
+  rimanenti di production gate.
+
+## r052 — CI minutes optimization (16 Nov 2026)
+
+CI trigger policy corrected to use actual changed files in feature push events, not the cumulative pull request diff. Fast component selection now compares the pushed SHA range. Heavy real protocol/database/Oracle checks run automatically only on relevant push modifications; Ceph RGW and duplicate independent MinIO run only on explicit PR labels / workflow_dispatch. Full Production CI for draft PR is opt-in and required on the final SHA before RC, but still runs for code on main and v* tags. Lightweight static CI policy validation replaces expensive automatic workflow-self-change acceptance runs. Current Ceph RGW genuine 3 MON/3 OSD qualification remains FAIL after timeout, do not mark certified or retry without diagnosis. RustFS/MinIO real S3 WORM last tested successfully. Details: docs/CI_MINUTES_POLICY_R051_IT.md. No release or merge performed.
+
+## r055 — Rust RC evidence inventory (16 Nov 2026)
+
+Rust S3 vault native dedicated plugin catalog PREVIEW on destination/restore-source only; no generic S3 input certification. Rust core/server/agent/desktop builds previously PASS, but provider parity not complete. Explicit verified real test coverage and missing provider gaps: docs/PLUGIN_CERTIFICATION_R055_IT.md. RC candidate scope and blockers: docs/RC_R055_CANDIDATE_SCOPE_IT.md. Ceph RGW diagnostic real CI 43829457157 has been started; no Ceph certification until PASS. Avoid broad real NFS/SMB and Lustre CI on plugin registry metadata-only changes (focused Rust tests suffice). PR #21 remains draft, no RC published.

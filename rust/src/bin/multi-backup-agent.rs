@@ -392,7 +392,7 @@ fn poll(config:&Config,once:bool,interval:u64)->Res<()>{
 fn run()->Res<()>{
     let args:Vec<_>=env::args().skip(1).collect();
     if args.len()==1&&args[0]=="--version"{
-        println!("multi-backup-agent 0.1.0-r039-dev");return Ok(());
+        println!("multi-backup-agent {}-r057-native-preview (build {})",env!("CARGO_PKG_VERSION"),match option_env!("GITHUB_SHA"){Some(v)=>v,None=>"local"});return Ok(());
     }
     if args.is_empty(){return Err("Usage: multi-backup-agent init|status|preview|run|push|poll [--config FILE] [--profile ID]".into());}
     let cmd=&args[0];let opts=arguments(&args[1..])?;

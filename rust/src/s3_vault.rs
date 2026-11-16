@@ -23,7 +23,7 @@ const MAX_MANIFEST: u64 = 32 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    pub provider: String, // "ceph-rgw" or "minio"
+    pub provider: String, // "ceph-rgw", "minio" or "rustfs"
     pub endpoint: String,
     pub region: String,
     pub bucket: String,
@@ -105,8 +105,8 @@ impl Config {
         Ok(cfg)
     }
     pub fn validate(&self) -> Result<()> {
-        if self.provider!="ceph-rgw" && self.provider!="minio" {
-            return Err("Provider must be ceph-rgw or minio".into());
+        if !matches!(self.provider.as_str(),"ceph-rgw"|"minio"|"rustfs") {
+            return Err("Provider must be ceph-rgw, minio or rustfs".into());
         }
         if self.region.is_empty() || self.region.len()>64
             || !self.region.bytes().all(|b|b.is_ascii_alphanumeric() || b"-".contains(&b)) {
@@ -431,6 +431,20 @@ mod tests {
         assert!(cfg.validate().is_err());
         cfg.prefix="tenant/backup".into();
         cfg.retention_days=0;
+        assert!(cfg.validate().is_err());
+    }
+    #[test]
+    fn permits_rustfs_s3_provider_but_never_relaxes_security(){
+        let mut cfg=config();
+        cfg.provider="rustfs".into();
+        assert!(cfg.validate().is_ok());
+        cfg.endpoint="http://rustfs.example.test:9000".into();
+        assert!(cfg.validate().is_err());
+        cfg.endpoint="https://rustfs.example.test".into();
+        cfg.retention_days=0;
+        assert!(cfg.validate().is_err());
+        cfg.retention_days=30;
+        cfg.prefix="../bad".into();
         assert!(cfg.validate().is_err());
     }
     #[test]
