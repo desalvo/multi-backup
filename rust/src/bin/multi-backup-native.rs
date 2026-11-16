@@ -17,7 +17,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins afs-restore-plan --target-json NEW_VOLUME_TARGET.json [--json]\n\
        multi-backup-native plugins afs-restore-new --target-json NEW_VOLUME_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target CELL:SERVER:/vicepXX:NEWNAME [--max-transfer-bps RATE] [--json]\n\
        multi-backup-native plugins probe --plugin gpfs|sshfs|webdav|nfs|smb|cephfs|glusterfs|lustre --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
-       multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|webdav|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|webdav|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--davfs-cache-not-on-remote] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins restore --input posix --output posix|nfs|smb|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
        multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
        multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
@@ -89,7 +89,7 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
-        if ["--dry-run","--source-snapshot-attested","--no-chain","--rebase-dependents","--force"].contains(&args[pos].as_str()) {
+        if ["--dry-run","--source-snapshot-attested","--davfs-cache-not-on-remote","--no-chain","--rebase-dependents","--force"].contains(&args[pos].as_str()) {
             let flag=args[pos].as_str();
             if parsed.insert(flag,"true").is_some() {
                 return Err(format!("Duplicate {flag} flag"));
@@ -376,11 +376,12 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "backup" => {
                 accepted(&flags, &["--input","--output","--source","--root",
                                     "--identity","--label","--namespace","--top-namespace",
-                                    "--source-snapshot-attested","--input-gpfs-access",
+                                    "--source-snapshot-attested","--davfs-cache-not-on-remote","--input-gpfs-access",
                                     "--mode","--parent"])?;
                 let kind=chunk_store::BackupKind::parse(
                     flags.get("--mode").copied().unwrap_or("full"))?;
-                let snapshot = plugin_executor::backup_with_mode(
+                let snapshot = if flags.contains_key("--davfs-cache-not-on-remote") {
+                    plugin_executor::backup_with_mode_davfs_cache_attested(
                     required(&flags,"--input")?,required(&flags,"--output")?,
                     Path::new(required(&flags,"--source")?),
                     Path::new(required(&flags,"--root")?),
@@ -390,7 +391,20 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     flags.get("--top-namespace").copied().unwrap_or(""),
                     flags.contains_key("--source-snapshot-attested"),
                     flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?,
-                    kind,flags.get("--parent").copied())?;
+                    kind,flags.get("--parent").copied())
+                } else {
+                    plugin_executor::backup_with_mode(
+                    required(&flags,"--input")?,required(&flags,"--output")?,
+                    Path::new(required(&flags,"--source")?),
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--label")?,
+                    flags.get("--namespace").copied().unwrap_or("files"),
+                    flags.get("--top-namespace").copied().unwrap_or(""),
+                    flags.contains_key("--source-snapshot-attested"),
+                    flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?,
+                    kind,flags.get("--parent").copied())
+                }?;
                 if json { println!("{}",serde_json::to_string_pretty(&snapshot)?); }
                 else {println!("Verified encrypted plugin backup {} ({} files)",
                               snapshot.id,snapshot.entries.len());}
