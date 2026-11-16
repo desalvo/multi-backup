@@ -1,0 +1,50 @@
+# Copy ONLY into a private lab repository as .github/workflows/ha-field.yml.
+# The authoritative test code stays in the public multi-backup repository.
+# PIN the reviewed code SHA; never checkout a mutable public PR branch.
+name: HA field read-only preflight on three physical hosts
+on:
+  workflow_dispatch:
+    inputs:
+      node1: {description: "Physical lab node 1 DNS", required: true, type: string}
+      node2: {description: "Physical lab node 2 DNS", required: true, type: string}
+      node3: {description: "Physical lab node 3 DNS", required: true, type: string}
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-private-three-host-lab
+  cancel-in-progress: false
+jobs:
+  field:
+    runs-on: [self-hosted, linux, multi-backup-ha-field]
+    environment: multi-backup-ha-lab
+    timeout-minutes: 25
+    steps:
+      - name: Verify dedicated non-root ephemeral runner and pinned SSH trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -u)" -ne 0
+          test "$RUNNER_OS" = Linux
+          command -v ssh
+          command -v python3
+          test -s "$HOME/.ssh/known_hosts"
+      - uses: actions/checkout@v4
+        with:
+          repository: desalvo/multi-backup
+          ref: b1915975e3c6861e9cccc908e6d82a7a0739d627
+          persist-credentials: false
+      - name: Preflight ONCE against real SSH lab hosts
+        shell: bash
+        env:
+          HOST1: ${{ inputs.node1 }}
+          HOST2: ${{ inputs.node2 }}
+          HOST3: ${{ inputs.node3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/ha-three-host-field-r166.py --hosts "$HOST1" "$HOST2" "$HOST3"
+      - name: Explicit limitations
+        if: success()
+        run: |
+          echo 'Physical 3-host Patroni/etcd READ-ONLY preflight PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT a physical crash, partition, split-brain or DB restore certification.' >> "$GITHUB_STEP_SUMMARY"

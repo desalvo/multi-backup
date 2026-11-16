@@ -16,15 +16,30 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: mb-ha-field-physical-lab
+  cancel-in-progress: false
 jobs:
   field-3-host:
     name: SSH to three independent host kernels, verify consistent Patroni quorum
     runs-on: [self-hosted, linux, multi-backup-ha-field]
-    timeout-minutes: 20
+    timeout-minutes: 25
+    environment: multi-backup-ha-lab
     steps:
+      - name: Reject accidental hosted/root runner or missing SSH trust store
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = "self-hosted"
+          test "$RUNNER_OS" = "Linux"
+          test "$(id -u)" -ne 0
+          command -v ssh
+          command -v python3
+          test -s "$HOME/.ssh/known_hosts"
+          echo 'Dedicated self-hosted orchestration runner: PASS'
       - uses: actions/checkout@v4
-      - name: Test negative fixtures without connecting to remote hosts
-        run: python3 scripts/ci/ha-three-host-field-r166.py --self-test
+      # Parser/negative fixtures are run by existing GitHub-hosted r166-validation-fast CI.
+      # On this runner only ONE real three-host preflight runs, no duplicate tests.
       - name: Read-only live three-host preflight
         env:
           HOST1: ${{ inputs.node1 }}
@@ -35,5 +50,5 @@ jobs:
           python3 scripts/ci/ha-three-host-field-r166.py --hosts "$HOST1" "$HOST2" "$HOST3"
       - name: Explicit certification boundary
         run: |
-          echo 'Read-only real 3-host preflight does NOT certify physical isolation, crash/failover, quorum-loss, split-brain fencing or restore.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Read-only self-hosted 3-host preflight does NOT certify physical isolation, crash/failover, quorum-loss, split-brain fencing or restore.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Full disruptive acceptance needs isolated authorized lab credentials and a separate manual maintenance window.' >> "$GITHUB_STEP_SUMMARY"

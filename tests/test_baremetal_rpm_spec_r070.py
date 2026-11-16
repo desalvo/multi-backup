@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """El9/El10 RPM spec must never rely on optional systemd package macros."""
-import pathlib,unittest
+import pathlib
+import unittest
 SPEC=pathlib.Path(__file__).resolve().parents[1]/"packaging/linux/multi-backup-server.spec"
 
 class NativeServerSpecTests(unittest.TestCase):

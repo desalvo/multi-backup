@@ -1,3 +1,5 @@
+> **Aggiornamento r170 (16 Nov 2026):** per lo stato attuale di tutti i 33 plugin e quattro direzioni, consultare `docs/RC_READINESS_R170_IT.md`. La matrice seguente è uno snapshot storico r154 e alcune sue note HA/CI sono superate.
+
 # Multi Backup — readiness RC Rust, server, HA, agenti e tutti i 33 plugin
 
 Data: 16 novembre 2026 — evidenze CI su SHA specifici, non ancora RC stabile.

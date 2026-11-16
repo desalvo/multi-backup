@@ -1,5 +1,6 @@
 name: Multi Backup - real native Rust Prometheus HTTPS acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/r060-baremetal-server-cluster-vault"]
     paths:

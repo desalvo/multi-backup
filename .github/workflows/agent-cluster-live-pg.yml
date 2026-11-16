@@ -1,5 +1,6 @@
 name: Multi Backup - live PostgreSQL agent and HA acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/**"]
     paths:
@@ -13,7 +14,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: mb-agent-pg-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   agent-ha-real-postgres:

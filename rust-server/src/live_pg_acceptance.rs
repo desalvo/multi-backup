@@ -406,6 +406,56 @@ fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
     assert!(decrypted.status.success());
     assert_eq!(decrypted.stdout,payload);
 
+    // Exercise the SAME PostgreSQL-backed REST read-only monitoring API that
+    // the native GUI consumes; reuse this real agent fixture, no duplicate CI.
+    let issued=db.create_monitor_token(
+        &format!("live-monitor-{}",Uuid::new_v4().simple()),7).unwrap();
+    let monitor_token=issued["token"].as_str().unwrap().to_owned();
+    let token_id=issued["id"].as_str().unwrap().to_owned();
+    let monitor_headers=|secret:&str|{
+        let mut headers=HeaderMap::new();
+        headers.insert("authorization",format!("Bearer {secret}").parse().unwrap());
+        headers
+    };
+    let anonymous=runtime.block_on(crate::monitoring::api_status(
+        State(state.clone()),HeaderMap::new()));
+    assert_eq!(anonymous.status(),StatusCode::UNAUTHORIZED);
+    let invalid=runtime.block_on(crate::monitoring::api_agents(
+        State(state.clone()),monitor_headers("invalid")));
+    assert_eq!(invalid.status(),StatusCode::UNAUTHORIZED);
+    let status=runtime.block_on(crate::monitoring::api_status(
+        State(state.clone()),monitor_headers(&monitor_token)));
+    assert_eq!(status.status(),StatusCode::OK);
+    assert_eq!(status.headers()["cache-control"],"no-store");
+    let bytes=runtime.block_on(axum::body::to_bytes(status.into_body(),1_048_576))
+        .expect("Bounded REST JSON status");
+    let live_status:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(live_status["schema"],1);
+    assert_eq!(live_status["read_only"],true);
+    assert!(live_status["cluster"]["jobs"].is_array());
+    assert!(live_status["cluster"]["replicas"].is_array());
+    assert!(live_status["database"]["database"].is_object());
+
+    let visible=runtime.block_on(crate::monitoring::api_agents(
+        State(state.clone()),monitor_headers(&monitor_token)));
+    assert_eq!(visible.status(),StatusCode::OK);
+    assert_eq!(visible.headers()["cache-control"],"no-store");
+    let bytes=runtime.block_on(axum::body::to_bytes(visible.into_body(),1_048_576))
+        .expect("Bounded REST JSON agent counts");
+    let counts:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(counts["schema"],1);
+    assert_eq!(counts["read_only"],true);
+    assert!(counts["agents"]["total"].as_u64().unwrap()>=1);
+    assert!(counts["agents"]["approved"].as_u64().unwrap()>=1);
+    let exposed=counts.to_string();
+    for secret in [&token, &monitor_token, &agent_id, &profile_hash] {
+        assert!(!exposed.contains(secret),"Monitor response must hide identities and tokens");
+    }
+    assert!(db.revoke_monitor_token(&token_id).unwrap());
+    let revoked_monitor=runtime.block_on(crate::monitoring::api_status(
+        State(state.clone()),monitor_headers(&monitor_token)));
+    assert_eq!(revoked_monitor.status(),StatusCode::UNAUTHORIZED);
+
     // Another valid signed device request with the SAME backup ID must get
     // conflict and never replace the committed age file or add a PG receipt.
     let duplicate=runtime.block_on(agent_api::upload(State(state.clone()),build_headers(2),

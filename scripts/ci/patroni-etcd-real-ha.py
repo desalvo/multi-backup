@@ -7,6 +7,7 @@ functional leader-election / synchronous replication / fencing test, NOT a
 three-host physical or Kubernetes network-partition qualification.
 """
 import contextlib
+import http.client
 import os
 import secrets
 from pathlib import Path
@@ -15,8 +16,6 @@ import ssl
 import subprocess
 import tempfile
 import time
-import urllib.error
-import urllib.request
 
 
 ADDRESSES = ["127.0.0.11", "127.0.0.12", "127.0.0.13"]
@@ -98,14 +97,34 @@ def health(root, indices=(0, 1, 2)):
     return result.returncode == 0
 
 
-def role(root, index, endpoint):
+def patroni_https(root, index, endpoint, max_bytes=65536):
+    """Pinned HTTPS-only Patroni REST probe, with no automatic redirects."""
+    if type(index) is not int or index not in range(3):
+        raise ValueError("Invalid Patroni node index")
+    if endpoint not in ("primary", "replica", "sync", "cluster"):
+        raise ValueError("Patroni probe endpoint not allowlisted")
+    if not (1 <= max_bytes <= 65536):
+        raise ValueError("Patroni REST response limit invalid")
     ctx = ssl.create_default_context(cafile=str(root / "ca.crt"))
+    connection = http.client.HTTPSConnection(
+        ADDRESSES[index], RESTPORTS[index], context=ctx, timeout=2
+    )
     try:
-        with urllib.request.urlopen(
-                f"https://{ADDRESSES[index]}:{RESTPORTS[index]}/{endpoint}",
-                context=ctx, timeout=2) as response:
-            return response.status == 200
-    except (urllib.error.URLError, TimeoutError, OSError):
+        connection.request("GET", "/" + endpoint)
+        response = connection.getresponse()
+        payload = response.read(max_bytes + 1)
+        if len(payload) > max_bytes:
+            raise ValueError("Oversized Patroni REST response")
+        return response.status, payload
+    finally:
+        connection.close()
+
+
+def role(root, index, endpoint):
+    try:
+        status, _ = patroni_https(root, index, endpoint)
+        return status == 200
+    except (OSError, TimeoutError, http.client.HTTPException):
         return False
 
 
@@ -495,11 +514,11 @@ def main():
             # WAL replication failure and from TLS/REST connectivity.
             for i in range(3):
                 try:
-                    ctx = ssl.create_default_context(cafile=str(root / "ca.crt"))
-                    url = f"https://{ADDRESSES[i]}:{RESTPORTS[i]}/cluster"
-                    with urllib.request.urlopen(url, context=ctx, timeout=2) as reply:
-                        import json
-                        view = json.load(reply)
+                    status, body = patroni_https(root, i, "cluster")
+                    if status != 200:
+                        raise RuntimeError("Patroni diagnostic endpoint unavailable")
+                    import json
+                    view = json.loads(body)
                     identities = [(m.get("name"), m.get("role"), m.get("state"))
                                   for m in view.get("members", [])]
                     print(f"Patroni /cluster[{i}]: {identities}", flush=True)

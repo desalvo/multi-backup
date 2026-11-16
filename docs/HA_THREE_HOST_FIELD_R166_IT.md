@@ -37,3 +37,8 @@ Non arrestare servizi o applicare partizioni di rete su macchine in produzione. 
 Sul branch r166: GUI egui aggiunge monitor read-only, collegamento HTTPS da token su file privato e vista sintetica delle repliche, del DB e degli agenti; server espone contatori di agenti non identificanti su `/v1/agents` con token `monitor.read`; ricezione agente sostituisce il rename potenzialmente sovrascrivente con pubblicazione no-clobber atomica e test di concorrenza. Serve PASS CI sull'esatto commit e poi collaudi reali con agenti su più macchine: cifratura age, dimensione/hash, replay, revoca, restore e limiti per host.
 
 **Non rilasciare stable, non dichiarare RC completa né fare merge su main prima di tutte le verifiche bloccanti.**
+
+
+## Aggiornamento r168: runner self-hosted unico e senza duplicazioni
+
+La guida operativa è `docs/HA_RUNNER_SELF_HOSTED_R168_IT.md`. Preferire un controller runner effimero dentro **repository privato** e usare `docs/examples/ha-private-runner.workflow.yml` come semplice wrapper del test già esistente. Il workflow fisico del repository pubblico mantiene la propria esistenza ma NON va collegato a infrastrutture sensibili senza un'esplicita analisi di sicurezza. L'automazione fisica esegue soltanto il preflight read-only, non ripete i fixture negativi già eseguiti nella CI hosted. Il failover fisico reale richiede un ulteriore gate autorizzato e resta aperto.

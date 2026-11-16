@@ -518,7 +518,7 @@ jobs:
           source "$HOME/.cargo/env"
           bash scripts/package-rust-agent-unix.sh
           apt-get install -y ./packages/*.deb
-          multi-backup-agent --version | grep -F r039
+          multi-backup-agent --version | grep -Eq '^multi-backup-agent 0[.]1[.]0-r[0-9]+-native-preview [(]build '
       - uses: actions/upload-artifact@v4
         with:
           name: rust-agent-debian-${{ matrix.version }}-${{ matrix.arch }}-preview

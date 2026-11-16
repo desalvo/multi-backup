@@ -905,3 +905,39 @@ One-line English commit summary: Verify native Rust egui GUI startup and renderi
 
 - `rust-server/src/live_pg_acceptance.rs`: ignored CI test invokes actual streaming upload handler under genuine PG16, real locally generated age ciphertext, Ed25519 credentials, durable on-disk spool, PG receipt, real decrypted byte-level restore, collision 409 and revoked 401.
 - `.github/workflows/agent-cluster-live-pg.yml`: installs age binary for the test. Do not mark this as remote TLS/three-host certification. Recheck exact CI result before promoting.
+
+
+### r168 — HA self-hosted private controller and nonduplicate software acceptance
+
+- Branch `ci/r168-software-field-gates` is stacked on `feature/r166-ha-gui-agents-acceptance`; preserve the existing PR history. The new software-readiness workflow reuses the exact Rust focused, PostgreSQL16 agent, real Xvfb GUI, hardened OCI gateway and Kind Kubernetes test scripts and aggregates a single SHA. Its dedicated CI branch avoids simultaneous automatic reruns of the feature workflows.
+- Existing field HA workflow reuses the **same** `scripts/ci/ha-three-host-field-r166.py`; no duplicate parser negative-fixture tests on the self-hosted runner. Documentation and a pinned-public-SHA example wrapper for a **private** GitHub repository running an **ephemeral** self-hosted controller are in `docs/HA_RUNNER_SELF_HOSTED_R168_IT.md` and `docs/examples/ha-private-runner.workflow.yml`. No runner registration or secrets available from current connector; operator must configure the real lab.
+- Gate boundaries: positive software CI does NOT certify three independent physical Patroni hosts, actual network split, signed native installers across macOS/Windows/Linux, all plugins or final RC. Do not overstate readiness or merge/tag early.
+
+
+### r170 — continue from CI r168 base
+
+The existing PG16 ignored acceptance test now includes real database-backed `monitor.read` API status/agent-count checks (token denial, revocation and identity nonleakage) on actual Axum handler. No extra duplicate PG job. egui REST schema summary is unit-tested; literal backslash-n display bug fixed; the existing GUI Xvfb smoke loops through 10 pages and About in one process. Rust-focused desktop job now runs `cargo test --all-targets`. The single-SHA gate was updated to watch relevant source/test files. Confirm green CI exact head before marking extended acceptance PASS. See `docs/RC_READINESS_R170_IT.md` for exact 33-plugin x4 direction readiness; zero newly promoted Ready without real provider qualification. Physical 3-host HA still needs a private ephemeral SSH-runner lab and operator authorization; no vendor systems or credentials available.
+
+
+### r174 RC1 qualification and notarization exception
+
+- User explicitly allows **RC** unnotarized macOS artifacts; stable signing/notarization controls remain mandatory.
+- Production CI https://github.com/desalvo/multi-backup/actions/runs/43932195582 source `1f1a726a3ffed7b46a7498b99891bfb935570865` is **fully green** after rerun of only cancelled native agent macOS arm64 PKG job: 32 mandatory successes, 3 intentional skips, 27 complete Rust artifacts.
+- Dedicated `rc-candidate-r174.yml` reuses live Prometheus HTTPS, Net-SNMPv3 authPriv and Patroni netns workflow suites with `workflow_call`, authenticates pinned production run/artifact JSON using `scripts/ci/validate-rc-evidence.py`, runs negative test fixtures, collects only 27 Rust binary artifact groups from that exact completed run and publishes `rc-0.1.0-rc.1` as a **prerelease with clear limitations** when all RC jobs PASS. Source SHA is pinned and no executable source diff accepted from it.
+- This RC is a **full application software preview**, not proof of all 33 plugin implementations, independent three-physical-host HA, remote TLS agent field, vault resistant to shared root, notarization or stable production readiness. See `docs/RELEASE_CANDIDATE_R174_IT.md`.
+
+
+### r175 immutable RC publication resume
+
+- Existing live RC workflow [#43945759433](https://github.com/desalvo/multi-backup/actions/runs/43945759433) on `f314bc3b5043e9ef70fe43c573d6ba84f360158d` ran four independent PASS jobs: exact source CI provenance, live Prometheus TLS, live Net-SNMPv3 authPriv, Patroni+etcd netns failover/fencing. Publication failed **solely** at existing `collect-rust-release.py` because Windows EXEs are nested under `installers/` inside the zip artifact.
+- `scripts/ci/normalize-rust-native-artifacts-r175.sh` normalizes only those two known filenames after verifying input regular file and absence of symlink, and compares byte/sha256. Negative tests in `tests/test_rc_windows_normalize_r175.py`. Existing r174 workflow made **manual-only** with same normalization, avoiding repeating live monitoring tests.
+- `.github/workflows/rc-publish-r175.yml` auto-triggers on its own addition; pins original binary source `1f1a726a3ffed7b46a7498b99891bfb935570865` run `43932195582` 32/32 required jobs, pins live RC run `43945759433` four successes and expected failed collector only; releases `rc-0.1.0-rc.1` prerelease with manifest and SHA256SUMS only if all fail-closed checks pass. Does NOT rerun native builds or Patroni/Prometheus/SNMP, and does NOT publish stable.
+- When reporting, verify actual new RC run/release outcome. Do not claim three physical hosts, root-proof vault, all 33 providers, Windows publisher signing or Apple notarization as complete.
+
+
+### r177 — verified GitHub RC1 publication
+
+- **DONE:** https://github.com/desalvo/multi-backup/releases/tag/rc-0.1.0-rc.1 is publicly visible as a GitHub prerelease (non-draft), pinned to binary source `1f1a726a3ffed7b46a7498b99891bfb935570865`. Exactly 31 complete uploaded assets incl all 27 Rust-native builds + SHA256SUMS + manifest + RC documentation.
+- **CI final publisher PASS:** https://github.com/desalvo/multi-backup/actions/runs/43947524553 (2/2). Prior r174 completed four service/security/HA functional jobs all PASS; r177 uses their exact evidence rather than rerunning. Production matrix 32 PASS https://github.com/desalvo/multi-backup/actions/runs/43932195582 .
+- Signatures/notarization are waived ONLY for explicit RC preview, not stable. Do not confuse real NetNS Patroni partitions with three independent physical hosts. The app has 33 provider contracts but not all generic plugin executors. Field-only and stable signing blockers remain unclosed.
+- `main` unmodified. PR #30 remains Draft; do not silently merge or promote prerelease to stable without qualification.

@@ -8,7 +8,9 @@ cargo test --manifest-path rust/Cargo.toml --lib afs_volume
 cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-agent
 binary="rust/target/release/multi-backup-agent"
 test -x "$binary"
-"$binary" --version | grep -F r039
+# Match the semantic package version and a real Rust native-preview
+# revision, not a frozen historical r039 marker (the agent now reports r057).
+"$binary" --version | grep -Eq '^multi-backup-agent 0[.]1[.]0-r[0-9]+-native-preview [(]build '
 mkdir -p packages
 case "$AGENT_FORMAT" in
   pkg)

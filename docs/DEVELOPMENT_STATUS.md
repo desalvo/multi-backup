@@ -941,3 +941,64 @@ One-line English commit summary: Add native Rust server-agent monitoring, atomic
 
 - Added an ignored-only live PostgreSQL16 test `real_pg_agent_encrypted_upload_no_clobber_and_restore` to the existing disposable DB workflow: generates a real age recipient and ciphertext with the native age CLI; enrolls and approves an Ed25519 device/profile in PG; calls the actual streaming Rust upload handler with signed hash; attests one PostgreSQL receipt and byte-identical age decrypt; blocks duplicate backup ID overwrite and rejects a revoked device. The job installs `age` explicitly; no real account secrets.
 - This tests an in-process handler with genuine PostgreSQL and cryptography, **NOT independent physical agent/server machines, WAN TLS proxy or recovery to a live AFS/VM source**. A passing CI remains scope-limited. Exact SHA CI evidence is needed.
+
+
+## r168 — single-SHA software gate and private self-hosted three-physical-host lab orchestration (16 Nov 2026)
+
+- New **single-SHA** software gate `.github/workflows/software-readiness-r168.yml` on dedicated branch `ci/r168-software-field-gates`: calls the existing Rust unit, real PG16 signed-age agent receipt/restore and native Linux Rust egui Xvfb workflows as **reusable** jobs; builds **one** OCI image for existing gateway and three-Kind-node Kubernetes PostgreSQL verify-full, two-server-replica recovery scripts. Final aggregation requires all four job families SUCCESS; any skipped/failed/cancelled job rejects closure.
+- Existing workflows gain `workflow_call`; full-suite option on Rust-focused workflow reuses its existing jobs, without modifying the original push-path fast filters. Explicit separate concurrency groups avoid calls cancelling one another; on the CI gate branch, old feature-only push workflows are not redundantly triggered.
+- Existing physical three-host HA workflow stays manual; redundant negative fixtures removed from self-hosted execution (already covered by hosted `r166-validation-fast`), runner must be non-root with trusted SSH host fingerprints, serializes lab runs. Added private-repo wrapper and setup guide rather than registering a sensitive lab runner to a public repo; self-hosted is **not installed/connected** here.
+- Real three-physical-host failover/partition fencing and multi-host agent transport still open. Software gate results must be recorded from CI exact commit before any component can be promoted. No main merge, tag or distribution merely because workflow exists.
+
+One-line English commit summary: Reuse single-SHA Rust, PostgreSQL agent, OCI Kubernetes and GUI gates while isolating physical HA on a private ephemeral runner.
+
+
+## r170 — REST monitoring agent/PG integration and full native GUI page render sweep (16 Nov 2026)
+
+- On top of r168 single-SHA software gate, the existing **real PostgreSQL16 signed-age agent upload test** now also calls the same read-only `/v1/status` and `/v1/agents` Rust Axum handlers used by the native GUI, validates schema and aggregate counts, rejects missing/wrong/revoked `monitor.read` token and verifies no secrets/agent profiles or identities are exposed. This extends the existing test fixture, **not a duplicate test job**. It remains an in-process HTTP handler test on genuine PG16, **not remote HTTPS TLS certification**.
+- Native egui GUI monitor response parsing is now separately unit-tested for schema, fail-closed missing counters and actual multiline display, fixing literal escaped `\\n` text. In the **existing** Xvfb smoke job, a single GUI process visits all **ten** sidebar pages and About (three animation/render frames per page), checking visited page labels and successful exit. This is real Linux GUI render acceptance, still not screenshot-perfect UX or Windows/macOS installer acceptance.
+- The existing focused Rust workflow executes full desktop **unit tests**, not only `cargo check`. Existing r168 single-SHA workflow now triggers on changed core/server/desktop/test scripts and still reuses existing PostgreSQL, egui and Kind jobs. Full gate PASS must be confirmed for the new exact SHA.
+- The authoritative **33-plugin and 4-direction RC readiness matrix** is in `docs/RC_READINESS_R170_IT.md`; no untested plugin was promoted to production `Ready`. Field-only items (three independent physical machines, HA disruption, full remote agent TLS, vendor authentication, signed installers, root-resistant WORM) remain open. No release, tag or main merge.
+
+One-line English commit summary: Exercise PostgreSQL-backed monitoring and every Rust GUI page with existing CI suites while retaining honest 33-plugin RC readiness gates.
+
+
+## r173 — fix agent native packaging revision gates without disabling checks (16 Nov 2026)
+
+- The full Production CI primary **security/compatibility gate** passed on exact commit `daec34bb7a951908b322359fbf156b9d5d64c50c` (workflow [#43930325464](https://github.com/desalvo/multi-backup/actions/runs/43930325464)), after fixing Ruff E401 and Bandit B310 without changing their thresholds.
+- Its release matrix uncovered a deterministic obsolete **agent package version assertion**: `scripts/package-rust-agent-unix.sh` and Debian post-install CI demanded literal `r039`, but the compiled Rust agent's reported revision is `0.1.0-r057-native-preview`. Successful Cargo release compilation was being rejected with exit 1 before packaging. Replace both fixed markers with a checked native-preview semantic version plus a numeric revision. This does not change the agent's source version or claim production packaging certification.
+- The r173 fix requires **exact SHA** rerun of the full packaging matrix and pass of every required packaging job. Until the new CI passes, packaging/RC readiness remains open. Physical 3-host Patroni failover and remote TLS agent field acceptance remain open.
+
+One-line English commit summary: Fix stale hardcoded agent revision assertions so native DEB/RPM/PKG packaging validates current Rust preview versions.
+
+
+## r174 — complete software RC1, keep macOS notarization optional ONLY for prerelease (16 Nov 2026)
+
+- **Production CI is now fully green** after the r173 fix: [#43932195582](https://github.com/desalvo/multi-backup/actions/runs/43932195582), final run attempt #2, 32 successful required jobs, 3 intentionally skipped publication/legacy jobs, no failed/cancelled jobs; all **27 Rust-native GUI/agent artifact families** exist, including Darwin arm64/x86_64 DMG and agent PKG, Windows x64, Debian 12/13 amd64+arm64, Rocky/Alma EL8/9/10.
+- Operator explicitly accepted **non-notarized macOS apps in RC only**, not stable. `docs/RELEASE_CANDIDATE_R174_IT.md` declares Gatekeeper limitations, SHA validation and scope. Stable signing policy is unchanged.
+- New `scripts/ci/validate-rc-evidence.py` and negative fixture unit suite `tests/test_rc_evidence_r174.py` pin source commit r173 and CI run #43932195582, require all 32 mandatory jobs, require permitted 3 skip jobs, and check all 27 authentic Rust artifacts from the existing collector. No repeated source test or package compilation.
+- `.github/workflows/rc-candidate-r174.yml` calls **existing distinct** live native Prometheus HTTPS, real SNMPv3 authPriv and real Patroni/etcd netns partition/fencing suites once on the RC policy commit, aggregates them with exact source evidence, collects previously built native Rust outputs and only then publishes immutable `rc-0.1.0-rc.1` **prerelease**. It cannot promote stable, main or legacy code.
+- All 33 plugin stages remain unchanged: do not invent `Ready` for provider plans. Physical three-host network/DR, remote agent TLS field, root-resistant vault and stable signing still require external infrastructure evidence.
+
+One-line English commit summary: Release gated Rust-native RC1 from proven one-SHA artifacts while qualifying monitoring and Patroni netns without requiring notarization in prerelease.
+
+
+## r175 — recover Windows artifact directory layout without retesting qualified binaries (16 Nov 2026)
+
+- RC1 qualification [#43945759433](https://github.com/desalvo/multi-backup/actions/runs/43945759433) passed **four independent jobs** on commit `f314bc3b5043e9ef70fe43c573d6ba84f360158d`: exact native r173 32-job/27-artifact provenance, real Rust Prometheus HTTPS, Net-SNMPv3 authPriv with native Rust producer, and real Patroni/etcd PostgreSQL16 netns network-partition failover/fencing. Its fifth job **correctly denied publishing** because native Windows EXEs from real GitHub artifacts live inside `installers/`, whereas the strict collector accepts only root-level native archives. No RC release was created by the failed job.
+- Added `scripts/ci/normalize-rust-native-artifacts-r175.sh`: checks the *known, exact* two Windows native EXE names and expected artifact directories, rejects symlink/destination overwrite, copies bytes without modification and checks both content and SHA-256; `tests/test_rc_windows_normalize_r175.py` verifies positive, overwrite rejection and symlink rejection.
+- r174 workflow is now manual-only and shares this normalization step. **New** `.github/workflows/rc-publish-r175.yml` reuses the exact four successful r174 jobs through GitHub-provided status at pinned SHA, revalidates **all 32 successful r173 production jobs and 27 native artifacts** without repeating them, and assembles/publicizes only a prerelease in distinct `rc-0.1.0-rc.1` tag namespace (not `v*`, avoiding a duplicate stable full CI). Stable release policy and production notarization requirement remain unchanged.
+- RC is a **software prerelease scope**. Three independent physical hosts, remote multi-machine TLS for agents, root-resistant vault trust-domain separation and vendor plugin integrations remain outside the certified CI scope and must stay described explicitly as open.
+
+One-line English commit summary: Normalize nested Windows installer artifacts byte-for-byte and publish only the already qualified native Rust RC without re-running monitored HA tests.
+
+
+## r177 — RC1 PUBLISHED, exact evidence and remaining external qualification (16 Nov 2026)
+
+- GitHub prerelease **published and API-verified** at https://github.com/desalvo/multi-backup/releases/tag/rc-0.1.0-rc.1 . It is an actual non-draft GitHub release with `prerelease=true` and `target_commitish=1f1a726a3ffed7b46a7498b99891bfb935570865`.
+- Production source CI https://github.com/desalvo/multi-backup/actions/runs/43932195582 **PASS** (32 required successful build/security/platform jobs); additional functional RC run https://github.com/desalvo/multi-backup/actions/runs/43945759433 individually **PASS** for Prometheus HTTPS, SNMPv3 authPriv and real PostgreSQL16/Patroni/etcd NetNS partition/fencing. Its old publisher failed on Windows artifact path; after byte-identical nested/flat layout normalization and regression tests, the final RC publisher https://github.com/desalvo/multi-backup/actions/runs/43947524553 completed **SUCCESS** (2/2 jobs). No duplicated service/HA/production tests in publisher continuation.
+- GitHub release API verified **31 uploaded, nonempty assets**: 12 RPM, 8 DEB, 2 macOS DMG, 2 macOS PKG, 2 Windows EXE, 1 Linux tar.gz, 1 Windows zip, `SHA256SUMS`, `release-manifest.json`, `README-RC-IT.md`. All 27 Rust-native artifact groups are included and all executable binaries are sourced from the one previously certified SHA.
+- **RC-only** exception: macOS notarization and publisher signing omitted per operator request, tagged prerelease (not `v*` stable), stable Production Gate unchanged. `main` unchanged, PR #30 remains Draft for further field work.
+- **Field qualification OPEN:** independent 3-physical-host HA failover, external machine-to-machine agent HTTPS field, WORM Linux root-resistant trust-domain security, full vendor authenticated plugin E2E, Windows/macOS stable-code-signing/notarization and updater rollback. Do not promote such components to physical-production `Ready` based on the software RC.
+
+One-line English commit summary: Record published native Rust RC1 with 31 verified release assets and preserve clear physical/third-party qualification exclusions.

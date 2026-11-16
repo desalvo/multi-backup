@@ -1,5 +1,6 @@
 name: Multi Backup - r166 native Rust GUI/Xvfb runtime acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/r166-ha-gui-agents-acceptance"]
     paths:
