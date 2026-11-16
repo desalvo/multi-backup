@@ -1,0 +1,1 @@
+One-shot genuine TLS etcd three-node and Patroni PG16 regression after correcting peer certificate IP SAN for shared-loopback source 127.0.0.1. Require fencing and sync failover. No TLS bypass.
