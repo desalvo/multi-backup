@@ -10,6 +10,7 @@ on:
       - '.github/ci-requests/patroni-ha-r104.request'
       - '.github/ci-requests/patroni-ha-r110.request'
       - '.github/ci-requests/patroni-ha-r112.request'
+      - '.github/ci-requests/patroni-ha-r116.request'
   workflow_dispatch:
 permissions:
   contents: read

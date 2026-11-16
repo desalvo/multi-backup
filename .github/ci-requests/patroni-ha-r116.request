@@ -1,0 +1,1 @@
+One-shot real Patroni 3-PG16 / 3-mTLS etcd HA: require DCS sync candidate, commit witness, crash primary, promote and verify committed row; strict blocked writes until rejoined replica, then protected write, DCS quorum-loss fencing. Fail closed.
