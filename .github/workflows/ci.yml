@@ -106,13 +106,18 @@ jobs:
     name: S3 vault - real MinIO Object Lock roundtrip
     runs-on: ubuntu-24.04
     needs: [production-gate]
-    timeout-minutes: 25
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
-      - name: Install age for Rust archive encryption
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install pinned open-source MinIO CI prerequisites
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y age
+          python3 -m pip install 'awscli>=1.42,<2'
+          bash -n scripts/ci/s3-worm-minio-live.sh
       - name: Build native Rust vault executable
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
       - name: Test REAL MinIO WORM + backup + restore + negative deletion
