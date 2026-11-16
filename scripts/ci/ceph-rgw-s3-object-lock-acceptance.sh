@@ -91,8 +91,10 @@ if "$CLI" s3-vault verify --config "$WORK/ceph.json" --id "$ID" \
 fi
 "$CLI" s3-vault restore --config "$WORK/ceph.json" --id "$ID" \
   --identity "$WORK/key.age" --destination "$WORK/restored"
-cmp "$WORK/source/data.bin" "$WORK/restored/data.bin"
-cmp "$WORK/source/nested/example.txt" "$WORK/restored/nested/example.txt"
+RESTORE_FILES="$WORK/restored/multi-backup/s3-vault/$ID"
+test -d "$RESTORE_FILES"
+cmp "$WORK/source/data.bin" "$RESTORE_FILES/data.bin"
+cmp "$WORK/source/nested/example.txt" "$RESTORE_FILES/nested/example.txt"
 if "$CLI" s3-vault restore --config "$WORK/ceph.json" --id "$ID" \
    --identity "$WORK/key.age" --destination "$WORK/restored" >/dev/null 2>&1;then
   echo "FAIL: restore overwrote an existing path" >&2;exit 1
