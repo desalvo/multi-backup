@@ -74,9 +74,28 @@ UPSTREAM="https://raw.githubusercontent.com/rook/rook/$ROOK_VERSION/deploy/examp
 for name in crds common operator; do
   curl --fail --location --retry 4 --silent --show-error "$UPSTREAM/$name.yaml" -o "$TEMP/$name.yaml"
 done
-# Only the operator of the disposable test cluster may use loop devices.
-sed -i 's/ROOK_CEPH_ALLOW_LOOP_DEVICES: "false"/ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"/' "$TEMP/operator.yaml"
-grep -q 'ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"' "$TEMP/operator.yaml"
+# Object-store-only Rook v1.20.x does NOT need Ceph CSI resources.
+# operator.yaml contains optional OperatorConfig/Driver documents that require
+# separately installed csi.ceph.io CRDs. Strip only these optional documents;
+# preserve ConfigMap and actual rook-ceph-operator Deployment.
+python3 - "$TEMP/operator.yaml" <<'PY'
+from pathlib import Path
+import sys
+path=Path(sys.argv[1])
+raw=path.read_text()
+start=raw.index("# CSI operator resources managed by the admin.")
+end=raw.index("# OLM: BEGIN OPERATOR DEPLOYMENT",start)
+clean=raw[:start]+raw[end:]
+clean=clean.replace('ROOK_CEPH_ALLOW_LOOP_DEVICES: "false"',
+                    'ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"')
+clean=clean.replace('ROOK_CREATE_CSI_OPERATOR_RESOURCES: "true"',
+                    'ROOK_CREATE_CSI_OPERATOR_RESOURCES: "false"')
+if "kind: Deployment" not in clean or "kind: OperatorConfig" in clean or "kind: Driver" in clean:
+    raise SystemExit("FAIL: Rook object-store-only manifest transformation")
+if 'ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"' not in clean or 'ROOK_CREATE_CSI_OPERATOR_RESOURCES: "false"' not in clean:
+    raise SystemExit("FAIL: Rook options not configured safely")
+path.write_text(clean)
+PY
 kubectl apply -f "$TEMP/crds.yaml" -f "$TEMP/common.yaml"
 kubectl apply -f "$TEMP/operator.yaml"
 kubectl -n rook-ceph rollout status deploy/rook-ceph-operator --timeout=360s
