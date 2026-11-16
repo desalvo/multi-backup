@@ -505,7 +505,15 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 23);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            assert_eq!(entry.backup_input, entry.restore_output);
+            if entry.id=="s3" {
+                // Native pinned-object backup source does NOT confer a
+                // generic restore-to-S3 capability; keep this direction
+                // planned until a write adapter is qualified.
+                assert_eq!(entry.backup_input,Stage::Preview);
+                assert_eq!(entry.restore_output,Stage::Planned);
+            } else {
+                assert_eq!(entry.backup_input, entry.restore_output);
+            }
             assert_eq!(entry.backup_output, entry.restore_input);
         }
     }
