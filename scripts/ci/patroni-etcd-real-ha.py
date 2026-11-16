@@ -8,6 +8,7 @@ three-host physical or Kubernetes network-partition qualification.
 """
 import contextlib
 import os
+import secrets
 from pathlib import Path
 import shutil
 import ssl
@@ -21,8 +22,9 @@ import urllib.request
 ADDRESSES = ["127.0.0.11", "127.0.0.12", "127.0.0.13"]
 PGPORTS = [15431, 15432, 15433]
 RESTPORTS = [18081, 18082, 18083]
-DB_PASSWORD = "DISPOSABLE-CI-HA-ONLY-2026"
-REPL_PASSWORD = "DISPOSABLE-CI-REPL-ONLY-2026"
+# Ephemeral credentials for each isolated HA CI execution, never reusable.
+DB_PASSWORD = secrets.token_urlsafe(32)
+REPL_PASSWORD = secrets.token_urlsafe(32)
 
 
 def isolated_env():

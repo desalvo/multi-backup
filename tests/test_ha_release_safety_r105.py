@@ -51,6 +51,25 @@ class HASafetyPolicy(unittest.TestCase):
         self.assertIn("Witness committed on DCS-confirmed synchronous primary", source)
         self.assertIn("UNSAFE: database accepted write without DCS quorum", source)
 
+    def test_ephemeral_postgres_and_replication_passwords(self):
+        import ast
+        tree = ast.parse(self.read("scripts/ci/patroni-etcd-real-ha.py"))
+        assigns = {
+            target.id: stmt.value
+            for stmt in tree.body if isinstance(stmt, ast.Assign)
+            for target in stmt.targets if isinstance(target, ast.Name)
+        }
+        for name in ("DB_PASSWORD", "REPL_PASSWORD"):
+            value = assigns[name]
+            self.assertIsInstance(value, ast.Call)
+            self.assertIsInstance(value.func, ast.Attribute)
+            self.assertIsInstance(value.func.value, ast.Name)
+            self.assertEqual(value.func.value.id, "secrets")
+            self.assertEqual(value.func.attr, "token_urlsafe")
+            self.assertEqual(len(value.args), 1)
+            self.assertIsInstance(value.args[0], ast.Constant)
+            self.assertGreaterEqual(value.args[0].value, 32)
+
     def test_real_ha_ci_requires_explicit_one_shot_request(self):
         workflow = self.read(".github/workflows/patroni-etcd-real-ha-r093.yml")
         self.assertIn("workflow_dispatch:", workflow)
