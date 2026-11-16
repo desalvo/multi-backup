@@ -3,7 +3,7 @@
 //! Physical backup/restore artifact qualification requires field acceptance.
 use serde::{Deserialize,Serialize};
 use serde_json::Value;
-use std::{error::Error,fs,io::Read,path::Path,time::Duration};
+use std::{error::Error,io::Read,path::Path,time::Duration};
 use url::Url;
 use zeroize::Zeroize;
 type Result<T>=std::result::Result<T,Box<dyn Error+Send+Sync>>;
@@ -21,17 +21,8 @@ impl Drop for Config{
 }
 impl Config{
     pub fn load(path:&Path)->Result<Self>{
-        let md=fs::symlink_metadata(path)?;
-        if !md.file_type().is_file() || md.len()>16_384 {
-            return Err("Hypervisor token configuration must be a small regular file".into());
-        }
-        #[cfg(unix)]{
-            use std::os::unix::fs::PermissionsExt;
-            if md.permissions().mode()&0o077!=0{
-                return Err("Hypervisor API token file must be owner-only (0600)".into());
-            }
-        }
-        let value:Self=serde_json::from_slice(&fs::read(path)?)?;
+        let bytes=zeroize::Zeroizing::new(crate::protected_config::read_owner_only(path,16_384)?);
+        let value:Self=serde_json::from_slice(&bytes)?;
         value.validate()?;
         Ok(value)
     }
