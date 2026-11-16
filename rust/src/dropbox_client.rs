@@ -374,9 +374,189 @@ pub fn backup(output: &Path, remote: &str, recipient: &str, resume: bool)
     backup_with_progress(output, remote, recipient, resume, |_,_,_| {})
 }
 
+
+/// Create-only Dropbox B-Out for an already encrypted authenticated archive.
+/// The API token must have files.content.write + files.metadata.read.
+/// A failed/ambiguous commit is NEVER retried blindly or auto-renamed.
+const OUTPUT_CHUNK: usize = 4 * 1024 * 1024;
+const MAX_UPLOAD_BYTES: u64 = 2_199_019_061_248;
+const CONTENT_API: &str = "https://content.dropboxapi.com/2/files/";
+const METADATA_API: &str = "https://api.dropboxapi.com/2/files/get_metadata";
+fn valid_output_path(path:&str)->bool{
+    path.starts_with('/') && path.len()<=1024 && path.ends_with(".tar.gz.age") &&
+    path.len()>"/x.tar.gz.age".len() &&
+    path.bytes().all(|b|b.is_ascii_graphic() && b!=b'\\') &&
+    path.split('/').skip(1).all(|segment|!segment.is_empty()&&segment!="."&&segment!="..")
+}
+fn create_only_commit(path:&str)->Value {
+    json!({"path":path,"mode":"add","autorename":false,
+           "strict_conflict":true,"mute":true})
+}
+fn validate_remote_receipt(remote:&str,local_size:u64,local_hash:&str,
+                           committed:&Value,readback:&Value)->DropboxResult<()>{
+    for item in [committed,readback]{
+        if (!item[".tag"].is_null() && item[".tag"]!="file") ||
+           item["size"].as_u64()!=Some(local_size) ||
+           item["content_hash"].as_str()!=Some(local_hash) ||
+           !item["id"].as_str().is_some_and(|s|s.starts_with("id:")&&s.len()>3) ||
+           !item["rev"].as_str().is_some_and(|s|!s.is_empty()) ||
+           !item["path_lower"].as_str()
+               .is_some_and(|s|s.eq_ignore_ascii_case(remote)){
+            return Err(err("Dropbox B-Out receipt does not attest exact encrypted object"));
+        }
+    }
+    if readback[".tag"]!="file" {
+        return Err(err("Dropbox metadata readback is not a file"));
+    }
+    if committed["id"]!=readback["id"] || committed["rev"]!=readback["rev"] {
+        return Err(err("Dropbox encrypted object changed after commit"));
+    }
+    Ok(())
+}
+fn authenticated_upload(client:&DropboxClient,endpoint:&str,
+                        parameters:&Value,payload:&[u8])->DropboxResult<Response>{
+    // No caller-controlled HTTP origin or redirect. Credentials are never
+    // printed; a failed request is not retried because its offset is unknown.
+    if !["upload_session/start","upload_session/append_v2",
+          "upload_session/finish"].contains(&endpoint) {
+        return Err(err("Unapproved Dropbox B-Out method"));
+    }
+    let api=parameters.to_string();
+    if !api.is_ascii() || api.len()>4096 {
+        return Err(err("Unsafe Dropbox upload arguments"));
+    }
+    let result=client.agent.post(&format!("{CONTENT_API}{endpoint}"))
+        .set("Authorization",&format!("Bearer {}",client.token))
+        .set("Dropbox-API-Arg",&api)
+        .set("Content-Type","application/octet-stream")
+        .send_bytes(payload);
+    match result {
+        Ok(response)=>Ok(response),
+        Err(ureq::Error::Status(_, _))=>Err(err("Dropbox upload rejected: conflict, permission or quota; never overwrite or auto-retry")),
+        Err(_)=>Err(err("Dropbox upload transport uncertain: inspect remote before retrying")),
+    }
+}
+pub fn upload_encrypted_archive(archive_file:&Path,remote_path:&str)->DropboxResult<Value>{
+    if !valid_output_path(remote_path) {
+        return Err(err("Dropbox B-Out requires a safe absolute .tar.gz.age NEW object path"));
+    }
+    if !archive_file.to_string_lossy().ends_with(".tar.gz.age") ||
+       !verified_archive(archive_file)? {
+        return Err(err("Dropbox B-Out only accepts existing age ciphertext with verified SHA-256 sidecar"));
+    }
+    let size=fs::symlink_metadata(archive_file)?.len();
+    if size==0 || size>=MAX_UPLOAD_BYTES {
+        return Err(err("Dropbox encrypted upload outside permitted size"));
+    }
+    let sha=sha256(archive_file)?;
+    let block_hash=dropbox_hash::hash_file(archive_file)?;
+    let client=DropboxClient::from_env()?;
+    let start:Value=authenticated_upload(&client,"upload_session/start",
+        &json!({"close":false}),&[])?.into_json()?;
+    let session=start["session_id"].as_str()
+        .filter(|v|!v.is_empty()&&v.len()<512&&!v.bytes().any(|c|c.is_ascii_control()))
+        .ok_or_else(||err("Dropbox returned invalid upload session"))?.to_owned();
+    let mut source=File::open(archive_file)?;
+    let mut offset=0u64;
+    let mut buffer=vec![0u8;OUTPUT_CHUNK];
+    while size-offset>OUTPUT_CHUNK as u64 {
+        source.read_exact(&mut buffer)?;
+        authenticated_upload(&client,"upload_session/append_v2",
+            &json!({"cursor":{"session_id":session,"offset":offset},"close":false}),
+            &buffer)?;
+        offset+=OUTPUT_CHUNK as u64;
+    }
+    let tail=(size-offset) as usize;
+    source.read_exact(&mut buffer[..tail])?;
+    let finish=json!({
+        "cursor":{"session_id":session,"offset":offset},
+        "commit":create_only_commit(remote_path)
+    });
+    let receipt:Value=authenticated_upload(&client,"upload_session/finish",
+        &finish,&buffer[..tail])?.into_json()?;
+    // Metadata readback prevents claiming a successful commit based on a 200
+    // alone. The stable file ID + revision and server-calculated Dropbox hash
+    // must independently match the locally verified ciphertext.
+    let id=field(&receipt,"id")?.to_owned();
+    let readback:Value=client.agent.post(METADATA_API)
+        .set("Authorization",&format!("Bearer {}",client.token))
+        .set("Content-Type","application/json")
+        .send_json(json!({"path":id}))
+        .map_err(|_|err("Dropbox metadata readback failed; commit status requires inspection"))?
+        .into_json()?;
+    validate_remote_receipt(remote_path,size,&block_hash,&receipt,&readback)?;
+    Ok(json!({"provider":"dropbox","path":remote_path,"id":id,
+        "rev":receipt["rev"],"bytes":size,"sha256":sha,
+        "content_hash":block_hash,"create_only":true,
+        "overwrite":false,"metadata_readback_verified":true}))
+}
+/// Encrypt a user-selected local directory first; only the encrypted tar.gz.age
+/// is transmitted to Dropbox. The encrypted temporary file is owned by the
+/// process and discarded automatically; no plaintext archive is staged.
+pub fn backup_directory_to_dropbox(
+    source:&Path,remote_path:&str,recipient:&str
+)->DropboxResult<Value>{
+    if !valid_output_path(remote_path) {
+        return Err(err("Dropbox output path must be a new absolute .tar.gz.age file"));
+    }
+    if !recipient.starts_with("age1") || recipient.len()<24 || recipient.len()>128 ||
+       !recipient.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()) {
+        return Err(err("Dropbox B-Out requires a valid age public recipient"));
+    }
+    let metadata=fs::symlink_metadata(source)?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err(err("Dropbox B-Out input must be a genuine directory"));
+    }
+    let private=TempDir::new()?;
+    let encrypted=private.path().join("encrypted.tar.gz.age");
+    archive::create(source,&encrypted,recipient,"multi-backup/dropbox-output")?;
+    upload_encrypted_archive(&encrypted,remote_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn dropbox_output_denies_overwrite_autorename_and_unsafe_paths() {
+        for invalid in ["","relative/a.tar.gz.age","/../../a.tar.gz.age",
+            "/a//b.tar.gz.age","/a\\b.tar.gz.age","/a/file.txt",
+            "/a/\nb.tar.gz.age"] {
+            assert!(!valid_output_path(invalid),"{invalid:?}");
+        }
+        assert!(valid_output_path("/backups/20261116-full.tar.gz.age"));
+        let commit=create_only_commit("/backups/20261116-full.tar.gz.age");
+        assert_eq!(commit["mode"],"add");
+        assert_eq!(commit["autorename"],false);
+        assert_eq!(commit["strict_conflict"],true);
+        assert!(commit.get("delete").is_none());
+    }
+    #[test] fn dropbox_output_receipt_requires_exact_hash_size_revision_and_path(){
+        let good=json!({".tag":"file","size":40,
+            "content_hash":"a".repeat(64),"id":"id:unit-test","rev":"a1",
+            "path_lower":"/backups/unit.tar.gz.age"});
+        assert!(validate_remote_receipt("/backups/unit.tar.gz.age",40,
+            &"a".repeat(64),&good,&good).is_ok());
+        let mut without_tag=good.clone();
+        without_tag.as_object_mut().unwrap().remove(".tag");
+        assert!(validate_remote_receipt("/backups/unit.tar.gz.age",40,
+            &"a".repeat(64),&without_tag,&good).is_ok());
+        let mut bad=good.clone();
+        bad["rev"]=json!("a2");
+        assert!(validate_remote_receipt("/backups/unit.tar.gz.age",40,
+            &"a".repeat(64),&good,&bad).is_err());
+        bad=good.clone();
+        bad["content_hash"]=json!("b".repeat(64));
+        assert!(validate_remote_receipt("/backups/unit.tar.gz.age",40,
+            &"a".repeat(64),&good,&bad).is_err());
+    }
+    #[test] fn upload_requires_verified_existing_age_archive_before_network(){
+        let temp=TempDir::new().unwrap();
+        let fake=temp.path().join("plain.txt");
+        fs::write(&fake,b"plaintext").unwrap();
+        assert!(upload_encrypted_archive(&fake,"/backups/x.tar.gz.age").is_err());
+        let encrypted=temp.path().join("snapshot.tar.gz.age");
+        fs::write(&encrypted,b"unverified ciphertext").unwrap();
+        assert!(upload_encrypted_archive(&encrypted,"/backups/x.tar.gz.age").is_err());
+    }
     #[test] fn original_object_key_is_stable() {
         let mut hasher = Sha256::new();
         hasher.update(b"id:abc\0rev0001");

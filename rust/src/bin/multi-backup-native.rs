@@ -14,6 +14,9 @@ fn usage() -> &'static str {
        multi-backup-native updates activate-portable --active DIR --candidate DIR --rollback NEW_DIR --binary REL --expected-sha256 SHA (APP STOPPED; portable only)\n\
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins s3-object-backup --config S3.json --object-key KEY --version-id VERSION --sha256 RAW_SHA256 --root EXISTING_CHUNK_STORE --identity AGE_ID --label LABEL [--top-namespace NS] [--json] (B-In versioned S3 / Ceph RGW / RustFS -> age chunk store)\n\
+       multi-backup-native plugins dropbox-upload --archive VERIFIED.tar.gz.age --remote-path /New/Archive.tar.gz.age [--json] (B-Out Dropbox: create-only encrypted upload)\n\
+       multi-backup-native plugins dropbox-backup --source LOCAL_DIR --remote-path /New/Archive.tar.gz.age --recipient AGE_PUBLIC [--json] (B-Out encrypted, no plaintext archive)\n\
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
        multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
@@ -147,6 +150,42 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    // Dedicated S3 B-In and Dropbox B-Out adapters. The generic filesystem
+    // dispatcher remains intentionally locked to its tested mount protocols.
+    if family=="plugins" && command=="s3-object-backup" {
+        if password_stdin {return Err("S3 input accepts only AWS environment credentials".into());}
+        accepted(&flags,&["--config","--object-key","--version-id","--sha256",
+            "--root","--identity","--label","--top-namespace"])?;
+        let _=plugins::plan(plugins::Mode::Backup,"s3","posix")?;
+        let cfg=s3_vault::Config::load(Path::new(required(&flags,"--config")?))?;
+        let result=s3_vault::backup_object_to_store(&cfg,
+            required(&flags,"--object-key")?,required(&flags,"--version-id")?,
+            required(&flags,"--sha256")?,Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--label")?,
+            flags.get("--top-namespace").copied().unwrap_or(""))?;
+        if json {println!("{}",serde_json::to_string_pretty(&result)?);}
+        else {println!("S3 versioned object imported into verified age chunks: {}",result.id);}
+        return Ok(());
+    }
+    if family=="plugins" && matches!(command,"dropbox-upload"|"dropbox-backup"){
+        if password_stdin {return Err("Dropbox access token comes only from environment".into());}
+        let _=plugins::plan(plugins::Mode::Backup,"posix","dropbox")?;
+        let remote=required(&flags,"--remote-path")?;
+        let receipt=if command=="dropbox-upload" {
+            accepted(&flags,&["--archive","--remote-path"])?;
+            dropbox_client::upload_encrypted_archive(
+                Path::new(required(&flags,"--archive")?),remote)?
+        }else{
+            accepted(&flags,&["--source","--remote-path","--recipient"])?;
+            dropbox_client::backup_directory_to_dropbox(
+                Path::new(required(&flags,"--source")?),remote,
+                required(&flags,"--recipient")?)?
+        };
+        if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
+        else {println!("Dropbox encrypted create-only output verified: {}",receipt["id"]);}
+        return Ok(());
+    }
     if family == "s3-vault" {
         if password_stdin {return Err("S3 vault never receives account passwords".into());}
         let config=s3_vault::Config::load(Path::new(required(&flags,"--config")?))?;

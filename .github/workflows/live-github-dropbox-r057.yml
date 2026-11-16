@@ -6,7 +6,7 @@ on:
         description: "Which disposable live test account"
         required: true
         type: choice
-        options: [github, dropbox]
+        options: [github, dropbox, dropbox-output]
       expected_sha:
         description: "Exact reviewed default-branch commit SHA (40 lowercase hex)"
         required: true
@@ -57,11 +57,22 @@ jobs:
           bash -n scripts/ci/live-github-dropbox-r057.sh
       - name: Compile exact Rust-native source adapter
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
-      - name: Execute live isolated read-only provider acceptance
+      - name: Execute isolated provider acceptance (Dropbox write requires explicit provider selection)
         shell: bash
-        run: bash scripts/ci/live-github-dropbox-r057.sh "$PROVIDER"
+        run: |
+          set -euo pipefail
+          if [[ "$PROVIDER" == dropbox-output ]]; then
+            bash scripts/ci/live-dropbox-output-r178.sh
+          else
+            bash scripts/ci/live-github-dropbox-r057.sh "$PROVIDER"
+          fi
       - name: Record restricted qualification scope
         if: success()
         run: |
-          echo "PASS real disposable source-account read-only Rust backup and age archive integrity." >> "$GITHUB_STEP_SUMMARY"
-          echo "NOT CERTIFIED provider remote write/restore or general personal-account parity." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$PROVIDER" == dropbox-output ]]; then
+            echo "PASS isolated Dropbox create-only encrypted upload, independent metadata and verified age restore." >> "$GITHUB_STEP_SUMMARY"
+            echo "NOT CERTIFIED production account OAuth, quotas, batch uploads or universal recovery." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PASS real disposable source-account read-only Rust backup and age archive integrity." >> "$GITHUB_STEP_SUMMARY"
+            echo "NOT CERTIFIED provider remote write/restore or general personal-account parity." >> "$GITHUB_STEP_SUMMARY"
+          fi

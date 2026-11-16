@@ -951,3 +951,8 @@ Branch `feature/r176-native-rc2-updates-fencing` based on r175 PR #30. See `docs
 ### r177 — Windows native renderer compatibility and release prerequisite
 
 Real RC1 native Mac windows arm64 + x86_64 PASS, but Windows real GUI window exited 1 on Windows-2025 runner despite prior self-test passing (full workflow #43951219161 FAIL). r177 uses Windows-only WGPU renderer and adds a **current-source** Windows runner build + all-pages graphical smoke with stdout/stderr diagnostic. Never mark the published RC1 Windows executable repaired; it is immutable and still Glow-only. Qualify new source SHA, rebuild Windows installer, publish RC2 only after production gate and Windows runtime success. Native Win GUI test may require interactive runner with GPU support if hosted runner forbids graphical window; do not waive it or fabricate a PASS.
+
+
+### r178 plugin handoff
+
+Stacked branch `feature/r178-s3-input-dropbox-output`, separate from existing draft PR #31. New dedicated Rust `plugins s3-object-backup` / `dropbox-upload` / `dropbox-backup` commands; no generic mount/destination downgrade. S3 B-In requires version ID + caller-supplied SHA256 and commits encrypted chunks only on verified transfer. Dropbox B-Out uses create-only upload sessions and independent file metadata readback; requires `MULTI_BACKUP_DROPBOX_TOKEN`. New RustFS live test; isolated Dropbox B-Out live test manual-only, strongly gated. Run exact-SHA CI, do not claim Ready until real vendor field and E2E all operations. `docs/PLUGIN_S3_DROPBOX_R178_IT.md` has steps and limitations.
