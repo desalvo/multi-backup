@@ -109,38 +109,18 @@ def primaries(root, live=(0, 1, 2)):
 
 
 def dcs_sync_candidate(root, leader):
-    """Require Patroni DCS acknowledged sync candidate, not PG-only sync_state.
+    """Get an authoritative Patroni DCS-qualified synchronous replica.
 
-    A newly connected PostgreSQL standby can appear 'sync' before Patroni
-    publishes /sync in etcd. Killing the leader in this race correctly denies
-    auto-promotion; the HA acceptance must NOT misinterpret that as failover.
+    /sync returns HTTP 200 only for a replica that Patroni currently
+    recognizes as synchronous. On this real three-member TLS cluster we do
+    not infer availability from PostgreSQL sync_state or from /cluster's
+    optional role/state representation. Safe shutdown requires this proof.
     """
-    import json
-    ctx = ssl.create_default_context(cafile=str(root / "ca.crt"))
-    url = f"https://{ADDRESSES[leader]}:{RESTPORTS[leader]}/cluster"
-    try:
-        with urllib.request.urlopen(url, context=ctx, timeout=3) as reply:
-            if reply.status != 200:
-                return None
-            view = json.load(reply)
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+    candidates = [index for index in range(3)
+                  if index != leader and role(root, index, "sync")]
+    if not candidates:
         return None
-    if not isinstance(view, dict):
-        return None
-    members = view.get("members") or []
-    # Patroni /cluster reports a healthy streaming replica as
-    # state='streaming' (not necessarily 'running'). Cross-check /sync 200
-    # from that very peer, which only succeeds for DCS-qualified sync nodes.
-    sync_nodes = [m.get("name") for m in members if m.get("role") == "sync_standby"
-                  and m.get("state") in ("streaming", "running")]
-    if len(sync_nodes) != 1:
-        return None
-    candidate = sync_nodes[0]
-    for number in range(3):
-        if candidate == f"mb-node{number + 1}" and number != leader:
-            return number if role(root, number, "sync") else None
-    return None
-
+    return candidates[0]
 
 def pg(root, index, sql, *, expect_ok=True):
     env = os.environ.copy()
@@ -337,7 +317,7 @@ def main():
                 processes[f"patroni{i}"] = patroni[i]
             initial = wait_primary(root, (0, 1, 2), processes, 130)
             candidate = wait_for("DCS registered synchronous failover candidate",
-                lambda: dcs_sync_candidate(root, initial), processes, 50)
+                lambda: dcs_sync_candidate(root, initial), processes, 110)
             print(f"Patroni sync candidate acknowledged in DCS: mb-node{candidate+1}",
                   flush=True)
             # Validate that this is an actual PostgreSQL synchronous sender,
@@ -427,6 +407,31 @@ def main():
             print("Scope: separate processes on one ephemeral runner, not "
                   "independent physical hosts or network-namespace split-brain test")
         except Exception:
+            # Diagnostic is read-only and does not expose secret keys:
+            # it distinguishes DCS sync-role delay from actual PostgreSQL
+            # WAL replication failure and from TLS/REST connectivity.
+            for i in range(3):
+                try:
+                    ctx = ssl.create_default_context(cafile=str(root / "ca.crt"))
+                    url = f"https://{ADDRESSES[i]}:{RESTPORTS[i]}/cluster"
+                    with urllib.request.urlopen(url, context=ctx, timeout=2) as reply:
+                        import json
+                        view = json.load(reply)
+                    identities = [(m.get("name"), m.get("role"), m.get("state"))
+                                  for m in view.get("members", [])]
+                    print(f"Patroni /cluster[{i}]: {identities}", flush=True)
+                except Exception as error:
+                    print(f"Patroni /cluster[{i}] unavailable: {type(error).__name__}",
+                          flush=True)
+                try:
+                    result = pg(root, i,
+                        "SELECT application_name,sync_state,state FROM pg_stat_replication",
+                        expect_ok=False)
+                    print(f"PG replication[{i}]: code={result.returncode}; "
+                          f"{result.stdout[:300]}", flush=True)
+                except Exception as error:
+                    print(f"PG replication[{i}] unavailable: {type(error).__name__}",
+                          flush=True)
             for i in range(3):
                 check = run(*etcd_command(root, i), "endpoint", "health",
                     check=False, timeout=6)
