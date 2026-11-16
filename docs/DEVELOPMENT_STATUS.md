@@ -612,3 +612,15 @@ L'operatore ha installato e verificato su tutti e tre i nodi RHEL 9.8 **kernel-d
   experimental and NON-BLOCKING.
 - No stable tag, early-release publication or WORM certification on this
   development-only branch until real CI and security evidence is reviewed.
+
+- Ulteriore integrazione r047: la GUI Rust espone i comandi S3 preflight,
+  backup, verify e restore con identità age sbloccata in memoria; il server
+  Rust espone status/backup/verify/restore protetti da sessione, CSRF,
+  origin e approvazione recovery. Ancora da certificare con CI e ambiente
+  reale: nessuna dichiarazione di WORM/RC sulla sola presenza delle API.
+- Primo Production Gate r047 fallito per asserzioni statiche della vecchia
+  dependency list; aggiornati scripts/check-production-gate.py e
+  tests/test_multibackup.py. Real WebDAV CI ha fallito senza dettaglio:
+  aggiunti messaggi diagnostici fail-closed sull'attestazione FSTYPE/RO.
+  Il CI più recente deve essere riesaminato, senza considerare i lavori
+  skipped come PASS.
