@@ -300,9 +300,9 @@ fn real_pg_monitor_token_issue_revoke_and_single_db_backup_lease(){
 /// Real PostgreSQL16, Ed25519-authenticated agent upload handler and native
 /// age ciphertext acceptance. It is deliberately a direct in-process HTTP
 /// handler exercise, not a remote TLS/three-physical-machine certification.
-#[tokio::test]
+#[test]
 #[ignore = "requires disposable PostgreSQL16 plus age and age-keygen"]
-async fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
+fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
     use crate::{agent_api,security::SecurityPolicy,AppConfig,AppState};
     use axum::{body::Body,extract::State,http::StatusCode};
     use std::{collections::HashMap,fs,io::Write,path::PathBuf,
@@ -360,6 +360,8 @@ async fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
         "encrypted_bytes":ciphertext.len(),
         "recipient":recipient
     })).unwrap();
+    let runtime=tokio::runtime::Builder::new_multi_thread()
+        .enable_all().worker_threads(2).build().unwrap();
     let state=AppState(Arc::new(AppConfig{
         name:"ciadmin".into(),
         password_hash:String::new(),
@@ -390,8 +392,8 @@ async fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
         headers.insert("x-mb-agent-metadata",B64.encode(&metadata).parse().unwrap());
         headers
     };
-    let response=agent_api::upload(State(state.clone()),build_headers(1),
-        Body::from(ciphertext.clone())).await;
+    let response=runtime.block_on(agent_api::upload(State(state.clone()),build_headers(1),
+        Body::from(ciphertext.clone())));
     assert_eq!(response.status(),StatusCode::CREATED);
     let committed=private_spool.join(format!("{backup_id}.age"));
     assert_eq!(fs::read(&committed).unwrap(),ciphertext);
@@ -406,8 +408,8 @@ async fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
 
     // Another valid signed device request with the SAME backup ID must get
     // conflict and never replace the committed age file or add a PG receipt.
-    let duplicate=agent_api::upload(State(state.clone()),build_headers(2),
-        Body::from(ciphertext.clone())).await;
+    let duplicate=runtime.block_on(agent_api::upload(State(state.clone()),build_headers(2),
+        Body::from(ciphertext.clone())));
     assert_eq!(duplicate.status(),StatusCode::CONFLICT);
     assert_eq!(fs::read(&committed).unwrap(),ciphertext);
     let rows:i64=db.connect().unwrap().query_one(
@@ -415,8 +417,8 @@ async fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
         .unwrap().get(0);
     assert_eq!(rows,1);
     assert!(agent::set_approval(&db,&agent_id,false,true).unwrap());
-    let revoked=agent_api::upload(State(state),build_headers(3),
-        Body::from(ciphertext)).await;
+    let revoked=runtime.block_on(agent_api::upload(State(state),build_headers(3),
+        Body::from(ciphertext)));
     assert_eq!(revoked.status(),StatusCode::UNAUTHORIZED);
     std::env::remove_var("MULTI_BACKUP_AGENT_UPLOAD_ROOT");
 }
