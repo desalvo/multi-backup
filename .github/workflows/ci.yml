@@ -609,6 +609,7 @@ jobs:
             docs/brochures/*.pdf
           retention-days: 7
   macos-smoke:
+    if: github.event_name == 'workflow_dispatch' && vars.ENABLE_LEGACY_MACOS_SMOKE == 'true'
     name: macOS unsigned app startup (${{ matrix.arch }}, never distributed)
     needs: [production-gate]
     runs-on: ${{ matrix.runner }}
@@ -645,7 +646,7 @@ jobs:
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)
-    needs: [production-gate, s3-vault-minio-real, macos-smoke, publications-smoke, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
+    needs: [production-gate, s3-vault-minio-real, publications-smoke, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, rust-agent-macos, rust-agent-windows, rust-agent-debian, rust-agent-rpm]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&
@@ -657,5 +658,5 @@ jobs:
     permissions:
       contents: write
       actions: read
-    uses: ./.github/workflows/build-native.yml
+    uses: ./.github/workflows/build-rust-release.yml
     secrets: inherit

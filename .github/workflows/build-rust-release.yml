@@ -1,0 +1,82 @@
+name: Multi Backup - publish ONLY previously qualified Rust packages
+on:
+  workflow_call:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: rust-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  rust-release:
+    name: Assemble Rust native artifacts from same qualified production CI
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail closed on stable or unapproved ref and reject legacy launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != 'refs/heads/main' ];then
+            echo 'STABLE BLOCKED: real Developer ID/notarization, Authenticode and GPG signatures are required' >&2
+            exit 1
+          fi
+          test "$GITHUB_REF_TYPE" = branch
+          echo "Rust EARLY RELEASE from exactly $GITHUB_SHA (NOT a stable RC)"
+      - name: Retrieve only same-run Rust native application and agent artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rust-only-*
+          path: collected/gui
+      - name: Retrieve only same-run Rust agent artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rust-agent-*
+          path: collected/agent
+      - name: Verify complete cross-platform matrix, integrity and legacy exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rust_release_collection.py -v
+          python3 scripts/ci/collect-rust-release.py \
+            --gui collected/gui --agents collected/agent --out release
+          test "$(find release -maxdepth 1 -name '*.dmg' | wc -l)" -eq 2
+          test "$(find release -maxdepth 1 -name '*.rpm' | wc -l)" -ge 12
+          test "$(find release -maxdepth 1 -name '*.deb' | wc -l)" -ge 8
+          test "$(find release -maxdepth 1 -name '*.pkg' | wc -l)" -eq 2
+          test "$(find release -maxdepth 1 -name '*.exe' | wc -l)" -ge 2
+          (cd release && sha256sum -- * > SHA256SUMS)
+          python3 scripts/make-release-manifest.py release early-release "$GITHUB_SHA"
+      - name: Publish rolling preview, replacing legacy release assets only AFTER verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag --force early-release "$GITHUB_SHA"
+          git push --force origin refs/tags/early-release
+          gh release view early-release >/dev/null 2>&1 || \
+            gh release create early-release --target "$GITHUB_SHA" --prerelease \
+            --title 'Multi Backup - Rust Native Early Release' \
+            --notes 'PREVIEW ONLY: native Rust Mac DMGs are ad-hoc signed, not notarized; Windows unsigned; RPM/DEB repository GPG signing pending. Do not deploy in production.'
+          gh release upload early-release release/* --clobber
+          mapfile -t existing < <(gh release view early-release --json assets -q '.assets[].name')
+          for old in "${existing[@]}";do
+            if [ ! -f "release/$old" ];then
+              gh release delete-asset early-release "$old" --yes
+            fi
+          done
+          gh release edit early-release --prerelease \
+            --title 'Multi Backup - Rust Native Early Release' \
+            --notes 'UNSIGNED TEST PREVIEW, NOT STABLE/RC CERTIFIED: only Rust-native GUI/CLI/agent packages from the same production-gated CI. macOS DMGs ad-hoc signed, not notarized. Windows/RPM signing pending; verify SHA256SUMS before any testing.'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-release-catalog-preview
+          path: release/*
+          retention-days: 14

@@ -10,6 +10,13 @@ class CostPolicyTests(unittest.TestCase):
         self.assertIn("github.event.label.name == 'full-ci'",s)
         self.assertIn('s3-vault-minio-real:',s)
         self.assertIn('native-release:',s)
+        self.assertIn('build-rust-release.yml',s)
+        release=self.read('build-rust-release.yml')
+        self.assertNotIn('  push:',release)
+        self.assertNotIn('  pull_request:',release)
+        self.assertIn('rust-only-*',release)
+        self.assertIn('rust-agent-*',release)
+        self.assertNotIn('cargo build',release)
     def test_heavy_s3_is_manual_or_labeled(self):
         for wf,label in [('ceph-rgw-s3-real-r049.yml','run-ceph-ci'),('s3-minio-live-r048.yml','run-minio-ci')]:
             with self.subTest(wf=wf):

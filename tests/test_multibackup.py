@@ -497,10 +497,11 @@ class PluginTests(unittest.TestCase):
         self.assertIn('    needs: [production-gate]',ci)
         self.assertIn('  publications-smoke:',ci)
         self.assertIn(
-            '    needs: [production-gate, s3-vault-minio-real, macos-smoke, publications-smoke, '
+            '    needs: [production-gate, s3-vault-minio-real, publications-smoke, '
             'rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, '
             'rust-windows-native-preview, rust-linux-rpm-native-preview, '
-            'rust-linux-debian-native-preview]', ci)
+            'rust-linux-debian-native-preview, rust-agent-macos, rust-agent-windows, '
+            'rust-agent-debian, rust-agent-rpm]', ci)
         self.assertIn(
             '    needs: [production-gate, s3-vault-minio-real, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, '
             'rust-macos-native-preview, rust-windows-native-preview, '
@@ -518,7 +519,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn('macos-${{ matrix.arch }}-preview',ci)
         self.assertNotIn('TEST-ONLY-macos-',ci)
         self.assertIn('package-macos-test-dmg.sh',ci)
-        self.assertIn('    uses: ./.github/workflows/build-native.yml',ci)
+        self.assertIn('    uses: ./.github/workflows/build-rust-release.yml',ci)
         self.assertIn('on:\n  workflow_call:',native)
         self.assertNotIn('on:\n  push:',native)
         for step in ('pip_audit -r requirements.txt','pip_audit -r requirements-docs.txt',

@@ -164,11 +164,12 @@ def validate():
     assert jobs['s3-vault-minio-real']['needs']==['production-gate'], 'S3 test bypasses Production Gate'
     assert 's3-worm-minio-live.sh' in str(jobs['s3-vault-minio-real']['steps']), 'Missing real MinIO test'
     assert jobs['native-release']['needs']==[
-        'production-gate','s3-vault-minio-real','macos-smoke','publications-smoke',
+        'production-gate','s3-vault-minio-real','publications-smoke',
         'rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
-        'rust-linux-rpm-native-preview','rust-linux-debian-native-preview'
-    ], 'Native release cannot bypass Rust-only cross-platform acceptance'
+        'rust-linux-rpm-native-preview','rust-linux-debian-native-preview',
+        'rust-agent-macos','rust-agent-windows','rust-agent-debian','rust-agent-rpm'
+    ], 'Native Rust release cannot bypass same-run GUI/agent gate'
     assert jobs['publish-container']['needs']==[
         'production-gate','s3-vault-minio-real','rust-server-validation','kubernetes-real-cluster','rust-desktop-smoke',
         'rust-macos-native-preview','rust-windows-native-preview',
@@ -190,7 +191,16 @@ def validate():
             assert token in kind_manifest, f'Kubernetes fixture contract missing {token}'
     assert 'ENABLE_STABLE_RUST' in jobs['native-release']['if']
     assert 'ENABLE_STABLE_RUST' in jobs['publish-container']['if']
-    assert jobs['native-release']['uses']=='./.github/workflows/build-native.yml'
+    assert jobs['native-release']['uses']=='./.github/workflows/build-rust-release.yml'
+    rust_release=load('.github/workflows/build-rust-release.yml')
+    assert 'workflow_call' in rust_release['on'] and len(rust_release['on'])==1
+    publish=str(rust_release['jobs']['rust-release']['steps'])
+    for marker in ('download-artifact@v4','rust-only-*','rust-agent-*',
+                   'collect-rust-release.py','gh release upload','early-release',
+                   'Developer ID','notarization','SHA256SUMS'):
+        assert marker in publish,'Native Rust-only release gate missing '+marker
+    assert not any(p in publish.lower() for p in ('pyinstaller','multi_backup.py','gui_launcher.py'))
+    assert (ROOT/'scripts/ci/collect-rust-release.py').is_file()
     assert 'workflow_call' in native['on'] and len(native['on'])==1, 'Native workflow must not publish independently'
     release=native['jobs']
     for name in ('macos','windows','linux-rpm','linux-deb'):
