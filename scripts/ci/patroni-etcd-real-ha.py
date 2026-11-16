@@ -360,15 +360,46 @@ def main():
                   flush=True)
             if pg(root, initial, "SELECT 1", expect_ok=False).returncode == 0:
                 raise RuntimeError("Terminated primary still accepts clients")
-            if dcs_sync_candidate(root, successor) is None:
-                # If the new primary has not yet selected a synchronous
-                # standby, strict mode MUST block a newly committed write.
-                result = pg(root, successor,
-                    "SET statement_timeout='2000ms'; "
-                    "INSERT INTO ha_witness VALUES (9,'unsafe-without-sync');",
+            # The previous check raced with a returning synchronous standby:
+            # /sync can be absent at T0, but PostgreSQL may have a new sync
+            # sender by T1, legitimately completing the write. That is NOT
+            # a strict-mode violation. Stop the OTHER surviving standby and
+            # its PG postmaster as well so the new primary has ZERO peers.
+            other = next(i for i in survivors if i != successor)
+            patroni[other].terminate()
+            patroni[other].wait(timeout=7)
+            processes.pop(f"patroni{other}", None)
+            run("/usr/lib/postgresql/16/bin/pg_ctl", "-D",
+                str(data_dirs[other]), "stop", "-m", "immediate",
+                check=False, timeout=20)
+            def no_sync_peer():
+                if dcs_sync_candidate(root, successor) is not None:
+                    return None
+                observed = pg(root, successor,
+                    "SELECT count(*) FROM pg_stat_replication "
+                    "WHERE state='streaming' AND sync_state='sync'",
                     expect_ok=False)
-                if result.returncode == 0:
-                    raise RuntimeError("UNSAFE: strict primary committed without synchronous standby")
+                return observed.returncode == 0 and observed.stdout.strip() == "0"
+            wait_for("proven absence of ALL synchronous PostgreSQL peers",
+                     no_sync_peer, processes, 75)
+            print("Both original PG standbys stopped; no live synchronous sender",
+                  flush=True)
+            sync_settings = pg(root, successor,
+                "SELECT current_setting('synchronous_standby_names'), "
+                "current_setting('synchronous_commit')", expect_ok=False)
+            print(f"Strict PostgreSQL after peer loss: "
+                  f"{sync_settings.stdout.strip()[:150]}", flush=True)
+            # Both other PostgreSQL servers stay stopped during the ENTIRE
+            # two-second commit attempt, so a successful INSERT is a true
+            # safety violation rather than a promotion/replication race.
+            result = pg(root, successor,
+                "SET statement_timeout='2000ms'; "
+                "INSERT INTO ha_witness VALUES (9,'unsafe-without-sync');",
+                expect_ok=False)
+            if result.returncode == 0:
+                raise RuntimeError("UNSAFE: strict primary committed with BOTH standby servers stopped")
+            print("PASS: strict primary refused a commit without either standby",
+                  flush=True)
             # Rejoin the former leader: Patroni must rewind or rebuild it as a standby.
             path, _ = conf(root, initial)
             patroni[initial] = start(root / f"patroni-{initial}-restart.log",
@@ -391,6 +422,15 @@ def main():
             if confirmed.stdout.strip().splitlines() != [
                 "acknowledged-before-failover", "committed-after-rejoin"]:
                 raise RuntimeError("HA failover or post-rejoin write verification mismatch")
+            # Return the second standby: both must be healthy before a
+            # separate DCS-quorum-loss drill can count as complete.
+            other_path, _ = conf(root, other)
+            patroni[other] = start(root / f"patroni-{other}-second-rejoin.log",
+                                   "patroni", str(other_path))
+            processes[f"patroni{other}"] = patroni[other]
+            wait_for("second standby rejoined", lambda: role(root, other, "replica"),
+                     processes, 110)
+            print("PASS: both original standby nodes reintegrated", flush=True)
             # Remove etcd majority. All surviving Patroni nodes must lose
             # writable primary status rather than continue with a stale lease.
             for i in (1, 2):

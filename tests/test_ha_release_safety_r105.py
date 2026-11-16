@@ -50,6 +50,10 @@ class HASafetyPolicy(unittest.TestCase):
         self.assertIn("dcs_sync_candidate(root, initial)", source)
         self.assertIn("Witness committed on DCS-confirmed synchronous primary", source)
         self.assertIn("UNSAFE: database accepted write without DCS quorum", source)
+        self.assertIn("Both original PG standbys stopped; no live synchronous sender", source)
+        self.assertIn("proven absence of ALL synchronous PostgreSQL peers", source)
+        self.assertIn("UNSAFE: strict primary committed with BOTH standby servers stopped", source)
+        self.assertIn("PASS: both original standby nodes reintegrated", source)
 
     def test_ephemeral_postgres_and_replication_passwords(self):
         import ast

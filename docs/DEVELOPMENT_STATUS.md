@@ -776,3 +776,13 @@ One-line English commit summary: Qualify real Ceph RGW WORM and SNMPv3 authPriv,
 - Full Production Gate remains **NOT CERTIFIED** until a successful exact-candidate-SHA run; this repair only removes the evidenced environment blocker. The previously verified PostgreSQL/MinIO/RustFS/Ceph test results and HA failures retain their own scope. GPFS remains suspended/outside the RC.
 
 One-line English commit summary: Install CI-only PyYAML before all Python test suites and prevent production-gate dependency regression.
+
+
+## r128 — eliminate HA strict-mode race by genuine two-standby kill (16 November 2026)
+
+- The latest real [Patroni/etcd job #43876968124](https://github.com/desalvo/multi-backup/actions/runs/43876968124) reached automatic promotion and recovered the pre-crash acknowledged row, but incorrectly inferred an unsafe new-primary write solely from a missing DCS `/sync` response immediately before a SQL commit. Its own diagnostics show PostgreSQL's new synchronous sender was already connected by the error report (`mb-node1|sync|streaming`), a **time-of-check/time-of-use ambiguity**.
+- The r128 acceptance drill now explicitly terminates the **remaining second standby** and its PostgreSQL process in addition to the old primary, independently confirms the new primary has **zero streaming synchronous senders** and no DCS `/sync` endpoint, then submits a timed write while BOTH peers remain down. Any successful commit under this controlled absence remains a blocking real HA FAIL, never silently reclassified as success.
+- The old primary must rejoin and become a DCS-qualified synchronous standby, an acknowledged write must survive, then the other standby must rejoin before an independent DCS-quorum-loss write-fencing drill. No mock. Existing real mTLS etcd and private PG guards remain mandatory; one-shot CI request r128 is bounded to the disposable GitHub-hosted runner.
+- Scope: three real PG/Patroni processes and three actual TLS etcd members on one runner, not physical three-host failure domains. No RC or HA certification unless this entire exact-SHA real job passes.
+
+One-line English commit summary: Prove strict Patroni fencing with both genuine standbys stopped and require both nodes to rejoin before quorum fault injection.

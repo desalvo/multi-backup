@@ -1,0 +1,1 @@
+Run exactly once: real 3-PostgreSQL/Patroni and TLS etcd strict HA two-standby loss, restore, DCS quorum-loss fencing. A failing test blocks HA RC.
