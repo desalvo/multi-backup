@@ -265,10 +265,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PLAN,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",
         "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport and no overwrite"),
-    PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware immutable vault",
-        DataKind::ProtectedVault, NONE, PLAN,
+    PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware append-only vault PREVIEW",
+        DataKind::ProtectedVault, NONE, PREVIEW,
         "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
-        "Output ciphertext only via isolated append-only ingest; restore input is read-only. WORM and independent approval are NOT yet implemented or certified"),
+        "Compiled dedicated Rust vault-store backup and verified create-only restore, GUI and authenticated server API; no delete or overwrite API. External WORM is NOT enforced or certified by this application"),
 ];
 
 pub fn find(id: &str) -> Option<&'static PluginDescriptor> {
@@ -559,8 +559,8 @@ mod tests {
         let vault=find("anti-ransomware-vault").unwrap();
         assert_eq!(vault.safety, SafetyProfile::ImmutableRecoveryVault);
         assert_eq!(vault.backup_input, Stage::Unsupported);
-        assert_eq!(vault.backup_output, Stage::Planned);
-        assert_eq!(vault.restore_input, Stage::Planned);
+        assert_eq!(vault.backup_output, Stage::Preview);
+        assert_eq!(vault.restore_input, Stage::Preview);
         assert_eq!(vault.restore_output, Stage::Unsupported);
         assert!(plan(Mode::Backup, "posix", vault.id).is_ok());
         assert!(plan(Mode::Restore, vault.id, "posix").is_ok());
