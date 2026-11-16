@@ -42,9 +42,15 @@ if [ "$tables" != 0 ];then
   echo "REFUSED: PostgreSQL restore target already contains user objects" >&2;exit 3
 fi
 # Check both independent immutable archives BEFORE modifying any DB rows.
+# Explicit manifest version is strongly recommended, because delete markers
+# can conceal the latest manifest while retained versions are still intact.
+pinned=()
+if [ -n "${MULTI_BACKUP_DR_DB_MANIFEST_VERSION:-}" ];then
+  pinned=(--manifest-version "$MULTI_BACKUP_DR_DB_MANIFEST_VERSION")
+fi
 multi-backup-native s3-vault preflight --config "$MULTI_BACKUP_DR_DB_WORM_CONFIG"
 multi-backup-native s3-vault verify --config "$MULTI_BACKUP_DR_DB_WORM_CONFIG" \
-  --id "$MULTI_BACKUP_DR_DB_SNAPSHOT_ID" --identity "$MULTI_BACKUP_DR_AGE_IDENTITY"
+  --id "$MULTI_BACKUP_DR_DB_SNAPSHOT_ID" --identity "$MULTI_BACKUP_DR_AGE_IDENTITY" "${pinned[@]}"
 if [ -n "${MULTI_BACKUP_DR_DATA_ID:-}" ];then
   multi-backup-native s3-vault preflight --config "$MULTI_BACKUP_DR_DATA_WORM_CONFIG"
   multi-backup-native s3-vault verify --config "$MULTI_BACKUP_DR_DATA_WORM_CONFIG" \
