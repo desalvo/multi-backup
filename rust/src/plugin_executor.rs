@@ -33,7 +33,7 @@ fn supported_pair(mode: Mode, input: &str, output: &str) -> Result<()> {
             "posix" | "nfs" | "smb" | "sshfs" | "gpfs" | "webdav" |
             "cephfs" | "glusterfs" | "lustre"),
         Mode::Restore => input == "posix" && matches!(output,
-            "posix"|"nfs"|"smb"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
+            "posix"|"nfs"|"smb"|"gpfs"|"sshfs"|"cephfs"|"glusterfs"|"lustre"),
     };
     if !supported {
         return Err(format!("No native generic executor for {input} -> {output}; operation denied").into());
@@ -135,7 +135,18 @@ fn backup_with_mode_guard_filtered(input: &str, output: &str, source: &Path,
 /// store. The restore parent must exist and cannot be part of the store.
 pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
                id: &str, destination: &Path, selection: Option<&str>) -> Result<usize> {
+    restore_with_gpfs_access(input,output,root,identity,id,destination,selection,None)
+}
+/// Strict create-only restore to an independently mounted NFS/SMB client.
+/// GPFS-CES protocol access has NO native IBM GPFS filesystem requirement,
+/// and must explicitly match the real Linux mount type at the destination.
+pub fn restore_with_gpfs_access(input: &str, output: &str, root: &Path, identity: &Path,
+               id: &str, destination: &Path, selection: Option<&str>,
+               gpfs_access: Option<GpfsAccess>) -> Result<usize> {
     supported_pair(Mode::Restore, input, output)?;
+    if (output=="gpfs") != gpfs_access.is_some(){
+        return Err("GPFS protocol restore requires --output-gpfs-access ces-nfs|ces-smb and other destinations reject it".into());
+    }
     let root = regular_directory(root)?;
     let identity = regular_identity(identity)?;
     if fs::symlink_metadata(destination).is_ok() {
@@ -147,7 +158,7 @@ pub fn restore(input: &str, output: &str, root: &Path, identity: &Path,
     // Remote targets must be NEW immediate children of an exact RW mount.
     // An ancestor mount or a matching prefix is not sufficient.
     if output != "posix" {
-        let evidence=mount_probe::probe(output,&parent,None)?;
+        let evidence=mount_probe::probe(output,&parent,gpfs_access)?;
         if !evidence.rw_mount_option {
             return Err("Remote restore target must be an exact read-write mount".into());
         }
@@ -202,11 +213,20 @@ mod tests {
         }
         assert!(supported_pair(Mode::Backup, "posix", "anti-ransomware-vault").is_err());
         assert!(supported_pair(Mode::Restore, "posix", "github").is_err());
-        for plugin in ["nfs","smb","sshfs","cephfs","glusterfs","lustre"] {
+        for plugin in ["nfs","smb","gpfs","sshfs","cephfs","glusterfs","lustre"] {
             assert!(supported_pair(Mode::Restore,"posix",plugin).is_ok());
         }
         assert!(supported_pair(Mode::Restore,"posix","smb").is_ok());
-        assert!(supported_pair(Mode::Restore,"posix","gpfs").is_err());
+        assert!(supported_pair(Mode::Restore,"posix","gpfs").is_ok());
+        // The legacy generic restore must still fail closed for GPFS until
+        // a verified NFS or SMB protocol mode is selected explicitly.
+        let result=restore("posix","gpfs",Path::new("/store"),
+            Path::new("/key"),"id",Path::new("/mnt/out"),None);
+        assert!(result.unwrap_err().to_string().contains("--output-gpfs-access"));
+        let bad=restore_with_gpfs_access("posix","smb",Path::new("/store"),
+            Path::new("/key"),"id",Path::new("/mnt/out"),None,
+            Some(GpfsAccess::CesSmb));
+        assert!(bad.unwrap_err().to_string().contains("other destinations reject it"));
         assert!(supported_pair(Mode::Backup, "posix", "posix").is_ok());
     }
 }

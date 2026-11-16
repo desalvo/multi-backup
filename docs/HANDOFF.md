@@ -822,3 +822,12 @@ Consolidated code-level acceptance:
 **No complete RC:** entire full Production/security gate still NOT PASS on final SHA (earlier failed environment bootstrap fixed in r127 but no final full run); signed/notarized cross-platform native installers and update/rollback, 3-independent-host PostgreSQL/etcd partition/fencing, real REST monitor.read HTTPS+PG lifecycle, and real native hypervisor backup archive+create-only restore remain open. GPFS suspended and excluded from required RC gates. No main merge, release tag or stable publication occurred.
 
 One-line English commit summary: Record green native Rust/SNMP integration evidence and explicit remaining RC release gates.
+
+
+## r143 — opt-in GPFS NFS/SMB client protocol RC preview (2026-11-16)
+
+- Rust GPFS plugin now supports both READ input (exact RO mounted NFS/SMB source with explicitly attested stable fixture) and CREATE-ONLY restore output (exact RW NFS/SMB mount). Output requires `--output-gpfs-access ces-nfs|ces-smb`; the selected access MUST match the underlying kernel mount type. Missing or wrongly applied flags fail closed. Existing remote restore verification, refusal to overwrite existing paths and non-recursive exact mounted destination checks are reused.
+- Client-facing catalog changes to **PROTOCOL PREVIEW**, allowing it to be included as an OPTIONAL RC adapter after real NFS+Samba protocol tests. Generic NFS/Samba are usable to certify NFS/SMB wire protocol clients without IBM entitlement; they cannot certify IBM Storage Scale CE S server internals, GPFS-native fileset snapshots, ILM, NFSv4 ACL/SMB SID mapping, CTDB VIP failover, distributed locking or GPFS on-disk behavior. Do not label this IBM GPFS-native or IBM CES field certification.
+- This commit includes Rust unit boundaries; real hosted CI on an actual NFS server and Samba server is necessary before the protocol adapter can be marked verified. No IBM libraries or tokens. No native GPFS restore implementation.
+
+One-line English commit summary: Enable explicit GPFS-over-NFS-or-SMB mounted create-only recovery as a protocol-only RC preview.

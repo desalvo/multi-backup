@@ -214,9 +214,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PREVIEW, PLAN,
         "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
         "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
-    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES (EXPERIMENTAL)", DataKind::DistributedFilesystem, EXPERIMENTAL, PLAN,
-        "NFSv3/v4 or SMB3 CES export on an authorized server; consistency proved separately",
-        "EXPERIMENTAL, nonblocking RC: IBM Developer Edition trial portal unavailable, no genuine CES field result. Use NFS/CIFS client only; IBM license, snapshot and metadata certification remain unverified")
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via NFS-SMB (PROTOCOL PREVIEW)", DataKind::DistributedFilesystem, PREVIEW, PLAN,
+        "Client protocol compatibility with NFSv3/v4 or SMB3 mount; source consistency proved separately",
+        "Optional RC NFS/SMB protocol client preview only. Generic NFS and Samba tests do NOT certify IBM GPFS native ACLs, snapshot, CES failover or IBM filesystem metadata. Real IBM CES field qualification remains separately deferred.")
         .with_gpfs_ces(),
     PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
         "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
@@ -375,15 +375,15 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             }
         }
         if plugin.id == "gpfs" {
-            required_preflight.push("EXPERIMENTAL: real IBM GPFS CES qualification deferred; nonblocking RC exclusion; never advertise as certified");
-            required_preflight.push("verify authorized IBM CES server/export; NFS/SMB clients require no GPFS Client license");
+            required_preflight.push("PROTOCOL PREVIEW: test GPFS via NFS/SMB clients; IBM CES/GPFS native behavior still unqualified");
+            required_preflight.push("verify operator-authorized NFS/SMB network export (IBM CES when actually using GPFS); NFS/SMB clients require no GPFS Client license");
             required_preflight.push("verify an existing authenticated NFSv3/v4 or CIFS/SMB3 mount provided by OS open-source tools");
-            required_preflight.push("prove out-of-band GPFS fileset snapshot consistency, ACLs/xattrs and vendor metadata fidelity");
+            required_preflight.push("prove source snapshot or quiescent dataset consistency out of band; preserve only tested NFS/SMB metadata; IBM ACL/ILM/fileset semantics require IBM CES tests");
             if gpfs_mode.is_none() {
                 required_preflight.push("explicitly select GPFS access ces-nfs or ces-smb; no proprietary native client fallback");
             }
             if writing {
-                required_preflight.push("verify new isolated target, write ACL, encrypted-only upload and manifest-last commit without overwrite");
+                required_preflight.push("verify exact writable NFS/SMB mount, create-only new target, verified backup decryption, and no overwrite; IBM CES write semantics not separately certified");
             }
         }
         if plugin.id == "webdav" {
@@ -443,7 +443,7 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             "posix" | "nfs" | "smb" | "gpfs" | "sshfs" | "webdav" |
             "cephfs" | "glusterfs" | "lustre"),
         Mode::Restore => source.id == "posix" && matches!(destination.id,
-            "posix" | "nfs" | "smb" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
+            "posix" | "nfs" | "smb" | "gpfs" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
     };
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
@@ -668,12 +668,12 @@ mod tests {
         for id in ["lustre","gpfs","hdfs","afs","alfresco",
                    "google-drive","onedrive","owncloud","nextcloud"] {
             let d = find(id).unwrap();
-            // GPFS CES has a strictly read-only mounted-source preview;
-            // output and all other providers remain declarative only.
-            assert_eq!(d.backup_input, if id=="gpfs" {Stage::Experimental} else if matches!(id,"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            // GPFS via standard NFS/SMB now has protocol-only input and
+            // create-only mounted output preview, not native GPFS support.
+            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert_eq!(d.backup_output, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
             assert_eq!(d.restore_input, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.restore_output, if id=="gpfs" {Stage::Experimental} else if matches!(id,"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
@@ -722,8 +722,10 @@ mod tests {
         let d=find("gpfs").unwrap();
         assert_eq!(d.access_gate,AccessGate::ExternalProtocolOrMountedClient);
         assert_eq!(d.gpfs_access,GPFS_CES_ACCESS);
-        assert_eq!(d.backup_input,Stage::Experimental);
+        assert_eq!(d.backup_input,Stage::Preview);
         assert!(!plan(Mode::Backup,"gpfs","posix").unwrap().executable);
+        assert!(plan_profiles(Mode::Restore,"posix","gpfs",None,None,
+            None,Some(GpfsAccess::CesNfs)).unwrap().preview_executable);
         for protocol in GPFS_CES_ACCESS {
             let b=plan_profiles(Mode::Backup,"gpfs","sshfs",None,None,Some(*protocol),None).unwrap();
             assert!(!b.executable);
