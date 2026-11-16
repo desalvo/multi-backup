@@ -1,0 +1,22 @@
+# HAProxy on EACH bare-metal server. Only 127.0.0.1:6432 is exposed
+# to the local Rust application. Backend PostgreSQL TLS remains end-to-end;
+# certificates must include DNS SAN db-ha.internal.
+global
+    log /dev/log local0
+    maxconn 2048
+defaults
+    log global
+    mode tcp
+    timeout connect 5s
+    timeout client 60s
+    timeout server 60s
+    retries 2
+listen multi-backup-postgres-primary
+    bind 127.0.0.1:6432
+    mode tcp
+    option httpchk GET /primary
+    http-check expect status 200
+    default-server inter 2s fall 3 rise 2 on-marked-down shutdown-sessions
+    server mb-node1 10.70.0.11:5432 check port 8008
+    server mb-node2 10.70.0.12:5432 check port 8008
+    server mb-node3 10.70.0.13:5432 check port 8008
