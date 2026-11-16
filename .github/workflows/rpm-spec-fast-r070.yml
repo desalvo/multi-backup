@@ -1,0 +1,33 @@
+name: Multi Backup - RPM spec lightweight Rocky9 regression
+on:
+  push:
+    branches: ["feature/**"]
+    paths:
+      - 'packaging/linux/multi-backup-server.spec'
+      - 'tests/test_baremetal_rpm_spec_r070.py'
+      - '.github/workflows/rpm-spec-fast-r070.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rpm-spec-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  rpm-spec:
+    name: Validate RPM spec on Rocky Linux 9 without Rust compilation
+    runs-on: ubuntu-24.04
+    container: rockylinux/rockylinux:9
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RPM spec parser and evaluate paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y rpm-build python3 >/dev/null
+          python3 -m unittest discover -s tests -p test_baremetal_rpm_spec_r070.py -v
+          rpmspec -P packaging/linux/multi-backup-server.spec > /tmp/expanded-spec
+          ! grep -F '%{_unitdir}' /tmp/expanded-spec
+          grep -F '/usr/lib/systemd/system/multi-backup-server.service' /tmp/expanded-spec
+          grep -F '/usr/lib/systemd/system/multi-backup-snmp.service' /tmp/expanded-spec
+          echo "PASS Rocky9 spec macro expansion and packaging paths. Full RPM build reserved for final RC."

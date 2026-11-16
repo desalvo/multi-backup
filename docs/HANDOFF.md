@@ -619,3 +619,7 @@ Corrected HAProxy health probes to use TLS `check-ssl` and verify the private Pa
 ## r069 — PVE vs PBS native Rust plugin catalog
 
 Separated the old combined Proxmox VE/PBS catalog into two distinct IDs: retain `proxmox` for PVE backward compatibility and add `pbs` for Proxmox Backup Server datastore/snapshot scope. Capability policy remains **Planned/non-executable** with Rust tests preventing accidental generic backup/restore. No PVE QEMU/LXC or PBS real environment E2E certification has yet been achieved; VMware/oVirt remain VM-only, native CT capability gated. Do not claim shipped/working hypervisor plugins until live backup/restore tests pass.
+
+## r070 — bare-metal RPM build failure fix (16 Nov 2026)
+
+The full 12-target Rust server packaging smoke run [43838871158](https://github.com/desalvo/multi-backup/actions/runs/43838871158) finished: **11 SUCCESS, Rocky Linux 9 x86_64 FAILURE**. Rust server compiled on failed target too; rpmbuild failed because `%{_unitdir}` is undefined in the Rocky 9 container. Replaced that macro with explicit `/usr/lib/systemd/system` for install and filelist, added a Python regression test and a cheap Rocky9 `rpmspec -P` syntax job that does NOT rebuild the entire 12 target package matrix. This is a fix pending confirmation, not yet a green final installation certification.

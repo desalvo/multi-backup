@@ -24,8 +24,8 @@ Preview only; no stable/production certification.
 %build
 %install
 install -Dpm0755 %{SOURCE0} %{buildroot}%{_bindir}/multi-backup-server
-install -Dpm0644 %{SOURCE1} %{buildroot}%{_unitdir}/multi-backup-server.service
-install -Dpm0644 %{SOURCE3} %{buildroot}%{_unitdir}/multi-backup-snmp.service
+install -Dpm0644 %{SOURCE1} %{buildroot}/usr/lib/systemd/system/multi-backup-server.service
+install -Dpm0644 %{SOURCE3} %{buildroot}/usr/lib/systemd/system/multi-backup-snmp.service
 install -Dpm0755 %{SOURCE4} %{buildroot}%{_bindir}/multi-backup-configure-snmp
 install -Dm0600 %{SOURCE2} %{buildroot}%{_sysconfdir}/multi-backup/server.env
 install -Dpm0644 %{SOURCE5} %{buildroot}%{_licensedir}/multi-backup-server/LICENSE
@@ -49,8 +49,8 @@ systemctl daemon-reload >/dev/null 2>&1 || :
 %files
 %{_bindir}/multi-backup-server
 %{_bindir}/multi-backup-configure-snmp
-%{_unitdir}/multi-backup-server.service
-%{_unitdir}/multi-backup-snmp.service
+/usr/lib/systemd/system/multi-backup-server.service
+/usr/lib/systemd/system/multi-backup-snmp.service
 %dir %{_sysconfdir}/multi-backup
 %config(noreplace) %attr(0600,root,root) %{_sysconfdir}/multi-backup/server.env
 %attr(0700,multi-backup,multi-backup) %dir %{_sharedstatedir}/multi-backup
