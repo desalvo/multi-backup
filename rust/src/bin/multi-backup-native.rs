@@ -13,6 +13,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
        multi-backup-native plugins pve-task-status --config-json OWNER_ONLY_PVE.json --node NODE --upid PVE_UPID [--json] (read-only status)\n\
+       multi-backup-native plugins pbs-snapshots --config-json OWNER_ONLY_PBS.json --datastore DATASTORE [--namespace NS] [--json] (read-only native VM/CT/host snapshots; PBS verification is not Multi Backup verification)\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins database-backup --profile-json DB.json --root STORE --identity AGE_KEY --label NAME [--json]\n\
        multi-backup-native plugins database-restore-new --profile-json NEW_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target ENGINE:HOST:PORT:NAME [--json]\n\
@@ -224,6 +225,17 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if family == "plugins" {
         if password_stdin { return Err("Plugin catalog does not accept passwords".into()); }
         match command {
+            "pbs-snapshots" => {
+                accepted(&flags,&["--config-json","--datastore","--namespace"])?;
+                let cfg=virtualization_inventory::Config::load(
+                    Path::new(required(&flags,"--config-json")?))?;
+                let inventory=virtualization_inventory::pbs_snapshots(&cfg,
+                    required(&flags,"--datastore")?,
+                    flags.get("--namespace").copied().unwrap_or(""))?;
+                if json {println!("{}",serde_json::to_string_pretty(&inventory)?);}
+                else {println!("PBS {}: {} native snapshots (READ-ONLY; Multibackup recovery NOT verified)",
+                    inventory.datastore,inventory.snapshots.len());}
+            },
             "pve-start-backup" => {
                 accepted(&flags,&["--config-json","--node","--guest-kind",
                     "--guest-id","--mode","--storage","--confirm-remote-backup"])?;

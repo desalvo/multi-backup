@@ -746,3 +746,12 @@ One-line English commit summary: Qualify real Ceph RGW WORM and SNMPv3 authPriv,
 - Rust unit tests cover strict mode/host/storage/VMID boundaries, wrong provider, task UPID spoofing, error-status refusal and absence of delete/prune options. GPFS is suspended/experimental/outside all RC gates.
 
 One-line English commit summary: Add explicitly confirmed PVE VM/LXC vzdump task dispatch with safe UPID polling and no false backup certification.
+
+
+## r129 — PBS native datastore snapshot inventory and verification separation
+
+- The Rust CLI gains `plugins pbs-snapshots --config-json OWNER_ONLY_PBS.json --datastore STORE [--namespace NAME] --json`, a **read-only** HTTPS/TLS, no-redirect, authenticated listing of native PBS `vm`, `ct`, `host` snapshots from `GET /api2/json/admin/datastore/STORE/snapshots`. Nested namespaces are strictly validated; datastore/identity path traversal and malformed/duplicate remote snapshot records fail closed. Bounded response size and record count prevent excessive allocations.
+- Each result exposes `pbs_verification_state`, `pbs_verification_ok`, and **independently** `multibackup_archive_verified=false`; a PBS `verification.state=ok` does not imply that Multi Backup has downloaded/decrypted/recovered the archive. No deletes, garbage collection, remote prunes, restores or write credentials are exposed.
+- Native PVE QEMU/LXC vzdump task submission lives in the stacked prior r125 draft. PBS and PVE have separate provider config, tokens and operations. Actual PBS chunk restore and field integration, plus all VMware/oVirt VM/CT qualifications remain OPEN; GPFS suspended/outside RC.
+
+One-line English commit summary: Add safely bounded native PBS VM/CT/host snapshot listing with explicit verification provenance.

@@ -291,6 +291,110 @@ pub fn pve_backup_task_status(cfg:&Config,node:&str,upid:&str)->Result<PveTaskSt
     pve_task_state(node,upid,&response)
 }
 
+
+#[derive(Debug,Serialize)]
+pub struct PbsSnapshot{
+    pub backup_type:String,
+    pub backup_id:String,
+    pub backup_time:i64,
+    pub bytes:Option<u64>,
+    pub pbs_verification_state:String,
+    pub pbs_verification_ok:bool,
+    pub multibackup_archive_verified:bool,
+}
+#[derive(Debug,Serialize)]
+pub struct PbsSnapshotInventory{
+    pub provider:String,
+    pub datastore:String,
+    pub namespace:String,
+    pub read_only:bool,
+    pub snapshots:Vec<PbsSnapshot>,
+    pub multibackup_restore_certified:bool,
+}
+fn pbs_name(value:&str)->Result<()>{
+    if value.is_empty()||value.len()>128 ||
+       value=="."||value==".."||value.starts_with('-') ||
+       !value.bytes().all(|b|b.is_ascii_alphanumeric()||b"_.-".contains(&b)){
+        return Err("Unsafe PBS datastore or namespace component".into());
+    }
+    Ok(())
+}
+fn pbs_namespace(value:&str)->Result<()>{
+    if value.len()>256 || value.split('/').any(|part|pbs_name(part).is_err()){
+        return Err("Invalid or traversal-prone PBS namespace".into());
+    }
+    Ok(())
+}
+fn parse_pbs_snapshots(store:&str,namespace:&str,bytes:&[u8])->Result<PbsSnapshotInventory>{
+    pbs_name(store)?;
+    if !namespace.is_empty(){pbs_namespace(namespace)?;}
+    let doc:Value=serde_json::from_slice(bytes)?;
+    let rows=doc.get("data").and_then(Value::as_array)
+        .ok_or("PBS snapshot response missing data array")?;
+    if rows.len()>10_000{return Err("PBS snapshot inventory limit exceeded".into());}
+    let mut seen=std::collections::HashSet::new();
+    let mut snapshots=Vec::with_capacity(rows.len());
+    for item in rows{
+        let kind=item.get("backup-type").and_then(Value::as_str)
+            .ok_or("Missing native PBS backup type")?;
+        if !matches!(kind,"vm"|"ct"|"host"){
+            return Err("Unsupported PBS backup type; cannot silently ignore guest snapshots".into());
+        }
+        let id=item.get("backup-id").and_then(Value::as_str)
+            .ok_or("Missing PBS native backup ID")?;
+        pbs_name(id)?;
+        let time=item.get("backup-time").and_then(Value::as_i64)
+            .ok_or("Missing PBS backup timestamp")?;
+        if !(1..=253402300799).contains(&time) ||
+           !seen.insert((kind.to_owned(),id.to_owned(),time)){
+            return Err("Invalid or repeated PBS snapshot identity".into());
+        }
+        let size=match item.get("size"){
+            Some(Value::Number(value))=>Some(value.as_u64().ok_or("Invalid PBS snapshot size")?),
+            Some(Value::Null)|None=>None,
+            _=>return Err("Invalid PBS snapshot size".into()),
+        };
+        let verify=item.get("verification").and_then(Value::as_object)
+            .and_then(|v|v.get("state")).and_then(Value::as_str)
+            .unwrap_or("unverified");
+        if verify.len()>32||!verify.bytes().all(|b|b.is_ascii_alphanumeric()||b"_-".contains(&b)){
+            return Err("Unsafe PBS verification result".into());
+        }
+        snapshots.push(PbsSnapshot{backup_type:kind.to_owned(),
+            backup_id:id.to_owned(),backup_time:time,bytes:size,
+            pbs_verification_state:verify.to_owned(),
+            pbs_verification_ok:verify=="ok",
+            multibackup_archive_verified:false});
+    }
+    snapshots.sort_by(|a,b|a.backup_type.cmp(&b.backup_type)
+        .then(a.backup_id.cmp(&b.backup_id)).then(a.backup_time.cmp(&b.backup_time)));
+    Ok(PbsSnapshotInventory{provider:"pbs".into(),datastore:store.to_owned(),
+        namespace:namespace.to_owned(),read_only:true,snapshots,
+        multibackup_restore_certified:false})
+}
+pub fn pbs_snapshots(cfg:&Config,store:&str,namespace:&str)->Result<PbsSnapshotInventory>{
+    cfg.validate()?;
+    if cfg.provider!="pbs"{return Err("PVE cannot list PBS native backup snapshots".into());}
+    pbs_name(store)?;
+    if !namespace.is_empty(){pbs_namespace(namespace)?;}
+    let mut url=Url::parse(&cfg.endpoint)?;
+    url.path_segments_mut().map_err(|_|"Invalid PBS origin")?
+        .extend(["api2","json","admin","datastore",store,"snapshots"]);
+    if !namespace.is_empty(){url.query_pairs_mut().append_pair("ns",namespace);}
+    let client=ureq::AgentBuilder::new().redirects(0)
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(20)).build();
+    let mut auth=format!("PBSAPIToken={}:{}",cfg.token_id,cfg.token_secret);
+    let response=client.get(url.as_str()).set("Authorization",&auth).call();
+    auth.zeroize();
+    let response=response.map_err(|_|"PBS HTTPS snapshot list rejected or untrusted TLS")?;
+    if response.status()!=200{return Err("Unexpected PBS snapshot list status".into());}
+    let mut bytes=Vec::new();
+    response.into_reader().take(2_097_153).read_to_end(&mut bytes)?;
+    if bytes.len()>2_097_152{return Err("Oversized PBS snapshot list".into());}
+    parse_pbs_snapshots(store,namespace,&bytes)
+}
+
 #[cfg(test)]
 mod tests{
     use super::*;
@@ -340,6 +444,41 @@ mod tests{
         let fail=pve_task_state("pve-node1",upid,br#"{"data":{"status":"stopped","exitstatus":"failed"}}"#).unwrap();
         assert!(!fail.remote_task_ok);
         assert!(pve_task_state("pve-node1",upid,br#"{"data":{"status":"stopped"}}"#).is_err());
+    }
+    #[test]fn pbs_snapshot_verification_is_not_multibackup_archive_attestation(){
+        let list=br#"{"data":[
+            {"backup-type":"vm","backup-id":"100","backup-time":1734310600,"size":4096,
+             "verification":{"state":"ok"}},
+            {"backup-type":"ct","backup-id":"201","backup-time":1734310601,"size":null},
+            {"backup-type":"host","backup-id":"backup-node","backup-time":1734310602,
+             "verification":{"state":"failed"}}
+        ]}"#;
+        let inventory=parse_pbs_snapshots("backup-data","team1/team2",list).unwrap();
+        assert_eq!(inventory.snapshots.len(),3);
+        assert!(inventory.read_only);
+        assert!(!inventory.multibackup_restore_certified);
+        let vm=inventory.snapshots.iter().find(|s|s.backup_type=="vm").unwrap();
+        assert!(vm.pbs_verification_ok);
+        assert!(!vm.multibackup_archive_verified);
+        let ct=inventory.snapshots.iter().find(|s|s.backup_type=="ct").unwrap();
+        assert_eq!(ct.pbs_verification_state,"unverified");
+        assert!(ct.bytes.is_none());
+        assert!(parse_pbs_snapshots("backup-data","../prod",list).is_err());
+    }
+    #[test]fn pbs_rejects_duplicate_ids_malformed_entries_or_cross_provider(){
+        assert!(parse_pbs_snapshots("s","",br#"{"data":[
+            {"backup-type":"vm","backup-id":"100","backup-time":1700000000},
+            {"backup-type":"vm","backup-id":"100","backup-time":1700000000}
+        ]}"#).is_err());
+        assert!(parse_pbs_snapshots("s","",br#"{"data":[
+            {"backup-type":"docker","backup-id":"1","backup-time":1700000000}
+        ]}"#).is_err());
+        assert!(parse_pbs_snapshots("s","",br#"{"data":[
+            {"backup-type":"vm","backup-id":"../99","backup-time":1700000000}
+        ]}"#).is_err());
+        assert!(parse_pbs_snapshots("s","",br#"{"data":"not-an-array"}"#).is_err());
+        let cfg=config("proxmox","https://pve.internal:8006");
+        assert!(pbs_snapshots(&cfg,"s","").is_err());
     }
     #[test]fn pve_only_control_must_not_operate_against_pbs(){
         let cfg=config("pbs","https://pbs.internal:8007");
