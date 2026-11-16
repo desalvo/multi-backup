@@ -731,7 +731,7 @@ mod tests {
             assert!(!b.executable);
             let r=plan_profiles(Mode::Restore,"sshfs","gpfs",None,None,None,Some(*protocol)).unwrap();
             assert!(r.required_preflight.iter().any(|x|x.contains("Client license")));
-            assert!(r.required_preflight.iter().any(|x|x.contains("manifest-last")));
+            assert!(r.required_preflight.iter().any(|x|x.contains("create-only")));
         }
         assert!(GpfsAccess::parse("native").is_err());
         assert!(plan_profiles(Mode::Backup,"sshfs","posix",None,None,

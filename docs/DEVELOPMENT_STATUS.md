@@ -871,3 +871,11 @@ One-line English commit summary: Enable explicit GPFS-over-NFS-or-SMB mounted cr
 - STANDARD NFS/Samba server is **NOT IBM Storage Scale**: only protocol client interoperability can be accepted, not IBM snapshot, ILM, CES failover, ACL/SID conversion or native GPFS metadata. GPFS via CES stays optional in limited RC; native GPFS remains unqualified. CI result required before claiming protocol PASS.
 
 One-line English commit summary: Exercise GPFS NFS and SMB compatibility with real protocol servers, encrypted FULL/INC and create-only restore.
+
+
+## r145 — Repair GPFS protocol recovery regression to match actual safe executor
+
+- First focused Rust CI [43890856565](https://github.com/desalvo/multi-backup/actions/runs/43890856565) failed one outdated catalog assertion demanding a future remote manifest-last protocol. The actual mounted GPFS-over-NFS/SMB output preview uses independently authenticated encrypted backup verification and a new create-only directory, not a remote object-store manifest. Updated only this GPFS-specific assertion to demand its real create-only recovery safety preflight.
+- The separate generic remote protocol test remains unchanged; no RC or IBM-native GPFS certification until targeted NFS/Samba genuine server acceptance.
+
+One-line English commit summary: Fix stale GPFS registry test to assert real create-only mounted recovery.
