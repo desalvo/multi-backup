@@ -635,3 +635,7 @@ Real CI 43832467180 showed three OSDs UP+IN, 3-MON quorum and RGW on distinct *v
 ## r073 — read-only native Rust PVE/PBS inventory (16 Nov 2026)
 
 New `rust/src/virtualization_inventory.rs` supports explicit read-only PVE QEMU/LXC guest discovery and PBS datastore listing over verified HTTPS and scoped API token from owner-only (0600) JSON config. Redirects refused; response bounded to 1 MiB; token redacted from all output. CLI: `multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY.json --json`. The descriptor for both providers remains **PLANNED, NON-EXECUTABLE**: this API inventory is NOT a VM/CT backup, snapshot, restore, or live-account certification. Offline unit tests verify native guest types, fail-closed protocols and duplicate identities. No hypervisor field run without disposable infrastructure and explicit credentials.
+
+## r074 — Rust virtualization CLI help and CI cost fix
+
+Fixed the Rust CLI help-line escaping introduced by r073. Removed unrelated `rust/src/lib.rs` edits from the independently expensive RustFS WORM automatic trigger; dedicated S3 vault/archive/Cargo changes still trigger that live acceptance, and final full Production CI remains mandatory. Cheap policy regression test prevents the unrelated trigger from returning. No hypervisor plugin has been declared READY.

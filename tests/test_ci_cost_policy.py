@@ -28,6 +28,8 @@ class CostPolicyTests(unittest.TestCase):
                 self.assertNotIn('rust/src/bin/multi-backup-native.rs',s)
                 self.assertIn('  push:',s)
                 self.assertNotIn("      - '.github/workflows/"+wf+"'",s)
+                if wf == 's3-rustfs-live-r050.yml':
+                    self.assertNotIn("      - 'rust/src/lib.rs'",s)
     def test_fast_component_selection(self):
         s=self.read('rust-focused.yml')
         self.assertIn('dorny/paths-filter@v3',s)
