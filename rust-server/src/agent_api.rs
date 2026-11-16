@@ -215,6 +215,13 @@ pub async fn recover_cluster_job(State(state):State<AppState>,headers:HeaderMap,
         _=>error(StatusCode::BAD_REQUEST,"unsafe_cluster_job_recovery_rejected")
     }
 }
+pub async fn cluster_backups(State(state):State<AppState>,headers:HeaderMap)->Response{
+    let db=match admin(&state,&headers,false).await{Ok(v)=>v,Err(r)=>return r};
+    match tokio::task::spawn_blocking(move||db.backup_inventory()).await{
+        Ok(Ok(value))=>response(StatusCode::OK,value),
+        _=>error(StatusCode::SERVICE_UNAVAILABLE,"cluster_backup_inventory_unavailable")
+    }
+}
 pub async fn cluster_status(State(state):State<AppState>,headers:HeaderMap)->Response{
     let db=match admin(&state,&headers,false).await{Ok(v)=>v,Err(r)=>return r};
     match tokio::task::spawn_blocking(move||db.status()).await{
