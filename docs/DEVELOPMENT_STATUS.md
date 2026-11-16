@@ -961,3 +961,12 @@ One-line English commit summary: Reuse single-SHA Rust, PostgreSQL agent, OCI Ku
 - The authoritative **33-plugin and 4-direction RC readiness matrix** is in `docs/RC_READINESS_R170_IT.md`; no untested plugin was promoted to production `Ready`. Field-only items (three independent physical machines, HA disruption, full remote agent TLS, vendor authentication, signed installers, root-resistant WORM) remain open. No release, tag or main merge.
 
 One-line English commit summary: Exercise PostgreSQL-backed monitoring and every Rust GUI page with existing CI suites while retaining honest 33-plugin RC readiness gates.
+
+
+## r173 — fix agent native packaging revision gates without disabling checks (16 Nov 2026)
+
+- The full Production CI primary **security/compatibility gate** passed on exact commit `daec34bb7a951908b322359fbf156b9d5d64c50c` (workflow [#43930325464](https://github.com/desalvo/multi-backup/actions/runs/43930325464)), after fixing Ruff E401 and Bandit B310 without changing their thresholds.
+- Its release matrix uncovered a deterministic obsolete **agent package version assertion**: `scripts/package-rust-agent-unix.sh` and Debian post-install CI demanded literal `r039`, but the compiled Rust agent's reported revision is `0.1.0-r057-native-preview`. Successful Cargo release compilation was being rejected with exit 1 before packaging. Replace both fixed markers with a checked native-preview semantic version plus a numeric revision. This does not change the agent's source version or claim production packaging certification.
+- The r173 fix requires **exact SHA** rerun of the full packaging matrix and pass of every required packaging job. Until the new CI passes, packaging/RC readiness remains open. Physical 3-host Patroni failover and remote TLS agent field acceptance remain open.
+
+One-line English commit summary: Fix stale hardcoded agent revision assertions so native DEB/RPM/PKG packaging validates current Rust preview versions.
