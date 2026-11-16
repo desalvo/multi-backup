@@ -69,7 +69,7 @@ if findmnt -rn -S "$DEV" >/dev/null 2>&1; then
   FAIL=1
 fi
 echo 'Stable device mapping candidates (for human cross-check):'
-find /dev/disk/by-id -type l -samefile "$DEV" -print 2>/dev/null || :
+find -L /dev/disk/by-id -maxdepth 1 -type b -samefile "$DEV" -print 2>/dev/null || :
 if [ "$ROLE" = 01 ] || [ "$ROLE" = 02 ]; then
   echo 'CES CAPACITY WARNING: 16GB RAM is BELOW IBM 64GB NFS-only and 128GB SMB/multi-protocol recommended memory.'
   echo 'This is only an experimental lab until hardware/protocol sizing is reviewed, regardless of other checks.'
