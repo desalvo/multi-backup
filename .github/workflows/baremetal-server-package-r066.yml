@@ -1,5 +1,8 @@
 name: Multi Backup - bare-metal Rust server RPM DEB arm64 amd64
 on:
+  push:
+    branches: ["feature/r060-baremetal-server-cluster-vault"]
+    paths: ['.github/workflows/baremetal-server-package-r066.yml']
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -17,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   packaging:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-baremetal-ci'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-baremetal-ci'
     name: "${{ matrix.distribution }} ${{ matrix.version }} / ${{ matrix.arch }} native server"
     runs-on: ${{ matrix.runner }}
     container:
@@ -41,8 +44,19 @@ jobs:
           - {distribution: alma, version: 10, arch: x86_64, runner: ubuntu-24.04, image: 'almalinux:10', format: rpm, level: full}
           - {distribution: alma, version: 10, arch: aarch64, runner: ubuntu-24.04-arm, image: 'almalinux:10', format: rpm, level: full}
     steps:
+      - name: Skip extended matrix until full certification requested
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ matrix.level }}" = full ] && [ "${{ github.event.inputs.level || 'smoke' }}" != full ];then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
       - name: Install distro-native compiler and packaging tools
+        if: steps.gate.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +73,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
             sh -s -- -y --profile minimal
       - name: Compile server and package for actual distro and CPU
+        if: steps.gate.outputs.skip != 'true'
         shell: bash
         env:
           SERVER_PACKAGE_FORMAT: ${{ matrix.format }}
@@ -78,6 +93,7 @@ jobs:
           fi
           sha256sum packages/* > packages/SHA256SUMS
       - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.skip != 'true'
         with:
           name: baremetal-server-${{ matrix.distribution }}-${{ matrix.version }}-${{ matrix.arch }}
           path: packages/*
