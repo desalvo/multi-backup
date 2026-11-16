@@ -45,13 +45,20 @@ sudo chmod 0600 /etc/davfs2/secrets
 unset PASSWORD
 sudo mount -t davfs -o ro "https://localhost:18919/" "$RO"
 FSTYPE="$(findmnt -rn -T "$RO" -o FSTYPE)"
-if [ "$FSTYPE" != "fuse.davfs" ]; then
-  printf 'FAIL WebDAV mount type: expected fuse.davfs; observed %s\n' "$FSTYPE" >&2
-  exit 1
-fi
+MOUNT_SOURCE="$(findmnt -rn -T "$RO" -o SOURCE)"
+case "$FSTYPE" in
+    fuse.davfs) ;;
+    fuse)
+      # Ubuntu's genuine davfs2 helper exposes a generic FUSE type.
+      # The exact HTTPS source plus the Rust mountinfo attestation must agree.
+      test "$MOUNT_SOURCE" = "https://localhost:18919/" || {
+        echo "FAIL generic FUSE mount lacks exact HTTPS WebDAV origin" >&2; exit 1;
+      } ;;
+    *) printf 'FAIL unexpected WebDAV FSTYPE %s\n' "$FSTYPE" >&2; exit 1 ;;
+esac
 "$CLI" plugins probe --plugin webdav --mount "$RO" --json > "$WORK/probe.json"
-if ! jq -e '.rw_mount_option == false and .fs_type == "fuse.davfs"' "$WORK/probe.json" >/dev/null; then
-  echo "FAIL WebDAV mount probe did not attest exact RO fuse.davfs" >&2
+if ! jq -e '.rw_mount_option == false and (.fs_type == "fuse.davfs" or .fs_type == "fuse")' "$WORK/probe.json" >/dev/null; then
+  echo "FAIL WebDAV probe did not attest read-only HTTPS davfs2 mount" >&2
   cat "$WORK/probe.json" >&2
   exit 1
 fi
