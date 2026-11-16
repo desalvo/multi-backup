@@ -1,0 +1,105 @@
+name: Multi Backup - PostgreSQL agents server Rust GUI single-SHA gate
+on:
+  push:
+    branches: ["ci/r168-software-field-gates"]
+    paths:
+      - ".github/workflows/software-readiness-r168.yml"
+      - ".github/workflows/rust-focused.yml"
+      - ".github/workflows/agent-cluster-live-pg.yml"
+      - ".github/workflows/r166-desktop-xvfb.yml"
+      - ".github/workflows/ha-three-host-field-r166.yml"
+      - "scripts/test-server-gateway-container.sh"
+      - "tests/kubernetes/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-software-single-sha-${{ github.ref }}
+  cancel-in-progress: false
+
+# Reuse existing CI jobs and test scripts. This is the single entry point
+# for software readiness; no duplicate copies of Rust/PG/GUI test logic.
+jobs:
+  rust-unit:
+    name: Reuse existing Rust core/server/GUI unit suites
+    uses: ./.github/workflows/rust-focused.yml
+    with:
+      full_suite: true
+
+  postgres-and-agents:
+    name: Reuse real PG16 Ed25519 age agent upload and restore acceptance
+    uses: ./.github/workflows/agent-cluster-live-pg.yml
+
+  native-gui-linux:
+    name: Reuse actual Rust egui Xvfb window runtime test
+    uses: ./.github/workflows/r166-desktop-xvfb.yml
+
+  server-oci-kubernetes:
+    name: One OCI image, hardened HTTP smoke, real multi-worker Kubernetes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build one exact-commit server image
+        run: |
+          set -euo pipefail
+          docker build --progress plain --tag multi-backup:ci-kind .
+      - name: Reuse existing hardened OCI gateway acceptance
+        run: bash scripts/test-server-gateway-container.sh multi-backup:ci-kind
+      - name: Install pinned Kubernetes test tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/kubectl https://dl.k8s.io/release/v1.32.3/bin/linux/amd64/kubectl
+          chmod 0755 /tmp/kind /tmp/kubectl
+          sudo mv /tmp/kind /tmp/kubectl /usr/local/bin/
+          kind version
+          kubectl version --client
+      - name: Start existing three-node kind environment
+        run: |
+          set -euo pipefail
+          kind create cluster --name multi-backup-ci \
+            --config tests/kubernetes/kind-config.yaml --wait 240s
+          kubectl wait --for=condition=Ready nodes --all --timeout=180s
+          test "$(kubectl get nodes --no-headers | wc -l)" -eq 3
+          kind load docker-image multi-backup:ci-kind --name multi-backup-ci
+      - name: Reuse existing two-live-server-pod PostgreSQL TLS and failover tests
+        run: bash tests/kubernetes/test-kind-cluster.sh
+      - name: Preserve failure diagnostics without disclosing secrets
+        if: failure()
+        run: |
+          kubectl -n multi-backup-ci get pods,deployments,services -o wide || true
+          kubectl -n multi-backup-ci get events --sort-by=.lastTimestamp || true
+          kubectl -n multi-backup-ci logs -l app=mb-ci-server --all-containers=true --tail=80 || true
+      - name: Remove disposable Kubernetes cluster
+        if: always()
+        run: kind delete cluster --name multi-backup-ci || true
+
+  software-readiness:
+    name: All four software acceptance families must succeed on the same SHA
+    if: always()
+    needs: [rust-unit, postgres-and-agents, native-gui-linux, server-oci-kubernetes]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Assert exact-SHA fan-in without accepting skipped tests
+        env:
+          CORE: ${{ needs.rust-unit.result }}
+          POSTGRES: ${{ needs.postgres-and-agents.result }}
+          GUI: ${{ needs.native-gui-linux.result }}
+          SERVER: ${{ needs.server-oci-kubernetes.result }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          printf '## Software acceptance on exact SHA %s\n' "$COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          for name in CORE POSTGRES GUI SERVER; do
+            value="${!name}"
+            printf -- '- %s: %s\n' "$name" "$value" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$value" != success ]]; then status=1; fi
+          done
+          echo 'Scope: PostgreSQL16, signed age agents, server OCI/multi-worker Kind, native Rust/Linux Xvfb.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT: physical three-host Patroni HA, signing/installation on macOS/Windows, all backup plugins or RC release.' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

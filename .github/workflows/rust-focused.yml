@@ -1,6 +1,13 @@
 name: Rust focused validation
 
 on:
+  workflow_call:
+    inputs:
+      full_suite:
+        description: "Run the existing Rust tests for all three targets exactly once"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: ["feature/**"]
     paths:
@@ -12,7 +19,7 @@ permissions:
   contents: read
   pull-requests: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: mb-rust-focused-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,12 +27,20 @@ jobs:
     name: Determine which Rust components changed
     runs-on: ubuntu-24.04
     outputs:
-      core: ${{ steps.filter.outputs.core }}
-      server: ${{ steps.filter.outputs.server }}
-      desktop: ${{ steps.filter.outputs.desktop }}
+      core: ${{ steps.force.outputs.core || steps.filter.outputs.core }}
+      server: ${{ steps.force.outputs.server || steps.filter.outputs.server }}
+      desktop: ${{ steps.force.outputs.desktop || steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
+      - name: Reuse every existing component test in a single-SHA readiness gate
+        id: force
+        if: inputs.full_suite == true
+        run: |
+          echo 'core=true' >> "$GITHUB_OUTPUT"
+          echo 'server=true' >> "$GITHUB_OUTPUT"
+          echo 'desktop=true' >> "$GITHUB_OUTPUT"
       - uses: dorny/paths-filter@v3
+        if: inputs.full_suite != true
         id: filter
         with:
           base: ${{ github.event.before }}

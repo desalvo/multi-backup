@@ -905,3 +905,10 @@ One-line English commit summary: Verify native Rust egui GUI startup and renderi
 
 - `rust-server/src/live_pg_acceptance.rs`: ignored CI test invokes actual streaming upload handler under genuine PG16, real locally generated age ciphertext, Ed25519 credentials, durable on-disk spool, PG receipt, real decrypted byte-level restore, collision 409 and revoked 401.
 - `.github/workflows/agent-cluster-live-pg.yml`: installs age binary for the test. Do not mark this as remote TLS/three-host certification. Recheck exact CI result before promoting.
+
+
+### r168 — HA self-hosted private controller and nonduplicate software acceptance
+
+- Branch `ci/r168-software-field-gates` is stacked on `feature/r166-ha-gui-agents-acceptance`; preserve the existing PR history. The new software-readiness workflow reuses the exact Rust focused, PostgreSQL16 agent, real Xvfb GUI, hardened OCI gateway and Kind Kubernetes test scripts and aggregates a single SHA. Its dedicated CI branch avoids simultaneous automatic reruns of the feature workflows.
+- Existing field HA workflow reuses the **same** `scripts/ci/ha-three-host-field-r166.py`; no duplicate parser negative-fixture tests on the self-hosted runner. Documentation and a pinned-public-SHA example wrapper for a **private** GitHub repository running an **ephemeral** self-hosted controller are in `docs/HA_RUNNER_SELF_HOSTED_R168_IT.md` and `docs/examples/ha-private-runner.workflow.yml`. No runner registration or secrets available from current connector; operator must configure the real lab.
+- Gate boundaries: positive software CI does NOT certify three independent physical Patroni hosts, actual network split, signed native installers across macOS/Windows/Linux, all plugins or final RC. Do not overstate readiness or merge/tag early.

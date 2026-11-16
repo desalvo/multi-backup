@@ -941,3 +941,13 @@ One-line English commit summary: Add native Rust server-agent monitoring, atomic
 
 - Added an ignored-only live PostgreSQL16 test `real_pg_agent_encrypted_upload_no_clobber_and_restore` to the existing disposable DB workflow: generates a real age recipient and ciphertext with the native age CLI; enrolls and approves an Ed25519 device/profile in PG; calls the actual streaming Rust upload handler with signed hash; attests one PostgreSQL receipt and byte-identical age decrypt; blocks duplicate backup ID overwrite and rejects a revoked device. The job installs `age` explicitly; no real account secrets.
 - This tests an in-process handler with genuine PostgreSQL and cryptography, **NOT independent physical agent/server machines, WAN TLS proxy or recovery to a live AFS/VM source**. A passing CI remains scope-limited. Exact SHA CI evidence is needed.
+
+
+## r168 — single-SHA software gate and private self-hosted three-physical-host lab orchestration (16 Nov 2026)
+
+- New **single-SHA** software gate `.github/workflows/software-readiness-r168.yml` on dedicated branch `ci/r168-software-field-gates`: calls the existing Rust unit, real PG16 signed-age agent receipt/restore and native Linux Rust egui Xvfb workflows as **reusable** jobs; builds **one** OCI image for existing gateway and three-Kind-node Kubernetes PostgreSQL verify-full, two-server-replica recovery scripts. Final aggregation requires all four job families SUCCESS; any skipped/failed/cancelled job rejects closure.
+- Existing workflows gain `workflow_call`; full-suite option on Rust-focused workflow reuses its existing jobs, without modifying the original push-path fast filters. Explicit separate concurrency groups avoid calls cancelling one another; on the CI gate branch, old feature-only push workflows are not redundantly triggered.
+- Existing physical three-host HA workflow stays manual; redundant negative fixtures removed from self-hosted execution (already covered by hosted `r166-validation-fast`), runner must be non-root with trusted SSH host fingerprints, serializes lab runs. Added private-repo wrapper and setup guide rather than registering a sensitive lab runner to a public repo; self-hosted is **not installed/connected** here.
+- Real three-physical-host failover/partition fencing and multi-host agent transport still open. Software gate results must be recorded from CI exact commit before any component can be promoted. No main merge, tag or distribution merely because workflow exists.
+
+One-line English commit summary: Reuse single-SHA Rust, PostgreSQL agent, OCI Kubernetes and GUI gates while isolating physical HA on a private ephemeral runner.
