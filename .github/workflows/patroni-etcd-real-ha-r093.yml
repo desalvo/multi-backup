@@ -12,6 +12,7 @@ on:
       - '.github/ci-requests/patroni-ha-r112.request'
       - '.github/ci-requests/patroni-ha-r116.request'
       - '.github/ci-requests/patroni-ha-r120.request'
+      - '.github/ci-requests/patroni-ha-r124.request'
   workflow_dispatch:
 permissions:
   contents: read

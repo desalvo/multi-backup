@@ -1,0 +1,1 @@
+One-shot real 3 PostgreSQL16 Patroni/3 etcd mTLS HA validation after correcting node-0 falsy index bug; require crash, verified promotion, committed data, rejoin, DCS majority-loss fail-closed.

@@ -15,6 +15,26 @@ class HASafetyPolicy(unittest.TestCase):
     def read(self, path):
         return (ROOT / path).read_text(encoding="utf-8")
 
+    def test_genuine_primary_node_zero_is_not_false(self):
+        from importlib.util import module_from_spec, spec_from_file_location
+        script = ROOT / "scripts/ci/patroni-etcd-real-ha.py"
+        spec = spec_from_file_location("real_patroni_lab", script)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class Live:
+            def poll(self):
+                return None
+
+        # A healthy first node is encoded as integer 0, not boolean False.
+        self.assertEqual(module.wait_for("node-zero", lambda: 0,
+                                        {"real-node": Live()}, seconds=0.5), 0)
+        self.assertTrue(module.wait_for("true-bool", lambda: True,
+                                        {"real-node": Live()}, seconds=0.5))
+        with self.assertRaises(RuntimeError):
+            module.wait_for("false-bool", lambda: False,
+                            {"real-node": Live()}, seconds=0)
+
     def test_ha_lab_only_on_disposable_github_runner(self):
         source = self.read("scripts/ci/patroni-etcd-real-ha.py")
         self.assertIn('os.environ.get("GITHUB_ACTIONS") != "true"', source)
