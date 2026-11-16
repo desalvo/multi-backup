@@ -131,7 +131,7 @@ ALTER TABLE mb_agent_uploads
   ADD COLUMN IF NOT EXISTS profile_sha256 TEXT;
 "#;
 
-const LATEST_SCHEMA_VERSION:i32=2;
+const LATEST_SCHEMA_VERSION:i32=3;
 const RECOVERY_SCHEMA_V2:&str=r#"
 CREATE TABLE IF NOT EXISTS mb_server_database_policy (
   policy_id TEXT PRIMARY KEY CHECK (policy_id='server'),
@@ -161,6 +161,17 @@ CREATE TABLE IF NOT EXISTS mb_server_database_backups (
 CREATE INDEX IF NOT EXISTS mb_server_database_backups_recent
   ON mb_server_database_backups(created_at DESC);
 "#;
+const MONITOR_SCHEMA_V3:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_monitor_tokens (
+    token_id TEXT PRIMARY KEY,
+    token_sha256 TEXT UNIQUE NOT NULL CHECK(char_length(token_sha256)=64),
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS mb_monitor_tokens_valid
+    ON mb_monitor_tokens(token_sha256,expires_at) WHERE NOT revoked;
+"#;
 /// Single transaction and PostgreSQL advisory transaction lock serialize
 /// concurrent startup across bare-metal services and Kubernetes pods.
 /// An unsuccessful migration rolls back and blocks the server from starting.
@@ -188,6 +199,11 @@ fn migrate_schema(client:&mut Client)->Result<(),BoxError>{
         tx.batch_execute(RECOVERY_SCHEMA_V2)?;
         tx.execute("INSERT INTO mb_schema_migrations(version,description)
              VALUES (2,'r060 server DB schedules, backups and recovery catalog')",&[])?;
+    }
+    if current<3 {
+        tx.batch_execute(MONITOR_SCHEMA_V3)?;
+        tx.execute("INSERT INTO mb_schema_migrations(version,description)
+             VALUES (3,'r062 read-only monitoring bearer tokens')",&[])?;
     }
     tx.commit()?;
     Ok(())
@@ -276,6 +292,37 @@ impl Database {
         Ok(Client::connect(&self.dsn,connector)?)
     }
 
+    pub fn monitor_token_create(&self,id:&str,digest:&str,expires_unix:i64)
+        ->Result<(),BoxError>{
+        let mut c=self.connect()?;
+        c.execute("INSERT INTO mb_monitor_tokens(token_id,token_sha256,expires_at)
+            VALUES ($1,$2,to_timestamp($3))",&[&id,&digest,&expires_unix])?;
+        Ok(())
+    }
+    pub fn monitor_token_valid(&self,digest:&str)->Result<bool,BoxError>{
+        let mut c=self.connect()?;
+        Ok(c.query_one("SELECT EXISTS(SELECT 1 FROM mb_monitor_tokens
+             WHERE token_sha256=$1 AND NOT revoked AND expires_at>now())",
+             &[&digest])?.get(0))
+    }
+    pub fn monitor_token_revoke(&self,id:&str)->Result<bool,BoxError>{
+        let mut c=self.connect()?;
+        Ok(c.execute("UPDATE mb_monitor_tokens SET revoked=true
+             WHERE token_id=$1 AND NOT revoked",&[&id])?>0)
+    }
+    pub fn monitor_token_list(&self)->Result<Value,BoxError>{
+        let mut c=self.connect()?;
+        let rows=c.query("SELECT token_id,
+             EXTRACT(EPOCH FROM issued_at)::bigint,
+             EXTRACT(EPOCH FROM expires_at)::bigint
+             FROM mb_monitor_tokens WHERE NOT revoked AND expires_at>now()
+             ORDER BY issued_at DESC LIMIT 200",&[])?;
+        Ok(json!({"tokens":rows.iter().map(|r|json!({
+            "id":r.get::<_,String>(0),
+            "issued_unix":r.get::<_,i64>(1),
+            "expires_unix":r.get::<_,i64>(2)
+        })).collect::<Vec<_>>()}))
+    }
     /// The database HA operator (Patroni/CloudNativePG), never Multi Backup,
     /// elects or promotes writers. This endpoint is strictly read-only.
     pub fn ha_status(&self)->Result<Value,BoxError>{
@@ -641,7 +688,8 @@ mod tests {
         assert!(RECOVERY_SCHEMA_V2.contains("mb_server_database_backups"));
         assert!(RECOVERY_SCHEMA_V2.contains("s3_worm"));
         assert!(RECOVERY_SCHEMA_V2.contains("last_success_at"));
-        assert_eq!(LATEST_SCHEMA_VERSION,2);
+        assert_eq!(LATEST_SCHEMA_VERSION,3);
+        assert!(MONITOR_SCHEMA_V3.contains("mb_monitor_tokens"));
     }
     #[test]fn cluster_schema_has_fencing_and_storage_affinity(){
         assert!(SCHEMA.contains("lease_token"));

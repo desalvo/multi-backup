@@ -293,3 +293,36 @@ document.getElementById("vault-refresh").addEventListener("click",()=>loadImmuta
 document.getElementById("vault-backup").addEventListener("click",()=>vaultMutation("backup"));
 document.getElementById("vault-restore").addEventListener("click",()=>vaultMutation("restore"));
 loadImmutableVault().catch(()=>{vaultStatus.textContent="Vault non disponibile";});
+
+const mbMonitorOut=document.getElementById("monitor-settings-result");
+const mbTokenOut=document.getElementById("monitor-token-result");
+async function mbMonitorFetch(path,method,body){
+  const opts={credentials:"same-origin",cache:"no-store"};
+  if(method!=="GET"){opts.method=method;opts.headers={"Content-Type":"application/json","X-CSRF-Token":csrf};opts.body=JSON.stringify(body);}
+  const result=await fetch(path,opts);
+  if(!result.ok)throw new Error("HTTP "+result.status);
+  return result.json();
+}
+document.getElementById("monitor-refresh").addEventListener("click",async()=>{
+  try{const obj=await mbMonitorFetch("/api/monitor/settings","GET");mbMonitorOut.textContent=JSON.stringify(obj,null,2);}
+  catch(e){mbMonitorOut.textContent="Monitoraggio non disponibile: "+e.message;}
+});
+document.getElementById("monitor-token-issue").addEventListener("click",async()=>{
+  try{
+    const days=Number(document.getElementById("monitor-token-days").value);
+    const obj=await mbMonitorFetch("/api/monitor/tokens","POST",{ttl_days:days});
+    mbTokenOut.textContent="Token REST (visibile una sola volta): "+obj.token_once+
+      "\nID: "+obj.id+"\nScadenza: "+new Date(obj.expires_unix*1000).toISOString();
+  }catch(e){mbTokenOut.textContent="Creazione non riuscita: "+e.message;}
+});
+document.getElementById("monitor-token-list").addEventListener("click",async()=>{
+  try{const obj=await mbMonitorFetch("/api/monitor/tokens","GET");mbTokenOut.textContent=JSON.stringify(obj,null,2);}
+  catch(e){mbTokenOut.textContent=e.message;}
+});
+document.getElementById("monitor-token-revoke").addEventListener("click",async()=>{
+  try{
+    const id=document.getElementById("monitor-token-revoke-id").value.trim();
+    const obj=await mbMonitorFetch("/api/monitor/tokens/revoke","POST",{id});
+    mbTokenOut.textContent=obj.revoked?"Token revocato":"Token non trovato";
+  }catch(e){mbTokenOut.textContent=e.message;}
+});
