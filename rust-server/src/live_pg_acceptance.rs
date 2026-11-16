@@ -152,6 +152,38 @@ fn real_pg_two_replica_affinity_capacity_lease_and_fencing(){
 
 #[test]
 #[ignore = "requires disposable genuine PostgreSQL 16"]
+fn real_pg_remote_queue_is_never_misclaimed_by_local_worker(){
+    let db=live_pg_ci_fixture();
+    let tag=Uuid::new_v4().simple().to_string();
+    let node=format!("worker{tag}");
+    let storage=format!("shared{tag}");
+    let remote=format!("remote{tag}");
+    let local=format!("local{tag}");
+    db.register_storage(&StorageLocation{
+        storage_id:storage.clone(),backend:"posix".into(),
+        visibility:StorageVisibility::Shared,owner_replica:None,
+    }).unwrap();
+    db.heartbeat_replica(&node,1,&[storage.clone()]).unwrap();
+    let limits=ExecutionLimits::default();
+    // These jobs are reserved for a separately authorized SSH/agent
+    // dispatcher; a filesystem worker must not claim-and-fail them.
+    db.enqueue(&remote,"posix",&storage,SourceTransport::ManagedAgentPull,
+        &limits,&json!({"profile_id":"authorized-later"}),100).unwrap();
+    assert!(db.claim(&node,60).unwrap().is_none());
+    let status=db.status().unwrap();
+    assert!(status["jobs"].as_array().unwrap().iter().any(|j|
+        j["id"]==remote && j["status"]=="queued" && j["attempts"]==0));
+    db.enqueue(&local,"posix",&storage,SourceTransport::ServerLocal,
+        &limits,&json!({}),0).unwrap();
+    let lease=db.claim(&node,60).unwrap().unwrap();
+    assert_eq!(lease.job_id,local);
+    assert!(db.finish(&node,&local,&lease.token,true,&json!({})).unwrap());
+    // No automatic downgrade of the high-priority remote job to local.
+    assert!(db.claim(&node,60).unwrap().is_none());
+}
+
+#[test]
+#[ignore = "requires disposable genuine PostgreSQL 16"]
 fn real_pg_parallel_claims_and_signed_nonce_single_winner(){
     use std::sync::{Arc,Barrier};
     use std::thread;

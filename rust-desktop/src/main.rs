@@ -256,7 +256,7 @@ fn native_settings_path()->PathBuf{
 fn build_native_prefs(fields:&Fields,provider:&str,channel:&str)
     ->Result<serde_json::Value,String>{
     if !matches!(provider,"github"|"dropbox") ||
-       !matches!(channel,"stable"|"early-release") ||
+       !matches!(channel,"stable"|"early-release"|"rc") ||
        fields.output.len()>4096 || fields.dropbox_path.len()>4096 ||
        fields.recipient.len()>256{
         return Err("Invalid native setting".into());
@@ -420,7 +420,7 @@ impl NativeApp {
         let max_runs = prefs["backup_ci_runs"].as_u64()
             .filter(|v| (1..=1000).contains(v)).unwrap_or(5);
         let update_channel = match prefs["update_channel"].as_str() {
-            Some("stable") => "stable", Some("early-release") => "early-release",
+            Some("stable") => "stable", Some("early-release") => "early-release", Some("rc") => "rc",
             _ => "stable",
         };
         let provider = imported_provider(prefs);
@@ -1475,6 +1475,10 @@ impl NativeApp {
                 self.update_info = None;
             }
             if ui.selectable_value(&mut self.update_channel,
+                "rc".to_string(), "RC").changed() {
+                self.update_info = None;
+            }
+            if ui.selectable_value(&mut self.update_channel,
                 "stable".to_string(), "Stable").changed() {
                 self.update_info = None;
             }
@@ -1494,7 +1498,7 @@ impl NativeApp {
         }
         ui.hyperlink_to("Release ufficiali", format!("{REPO}/releases"));
         ui.label(RichText::new(
-            "Nessuna installazione automatica: verificare sempre la firma del sistema operativo."
+            "L'aggiornamento scaricato viene verificato ma non eseguito automaticamente. Il rollback atomico è disponibile per installazioni portabili gestite, ad applicazione chiusa."
         ).color(MUTED));
         ui.label(RichText::new(&self.status).color(INK));
         self.draw_progress(ui);
@@ -2181,14 +2185,22 @@ fn main() -> eframe::Result {
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
     let options = eframe::NativeOptions {
+        #[cfg(windows)]
+        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("Multi Backup · {VERSION}"))
             .with_inner_size([1320.0, 890.0])
             .with_min_inner_size([860.0, 620.0]),
         ..Default::default()
     };
-    eframe::run_native("Multi Backup", options,
-        Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))))
+    // Do not turn graphical-runner failure into a fake green smoke.
+    // Real backend errors are reported and returned to the caller.
+    let result=eframe::run_native("Multi Backup", options,
+        Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))));
+    if let Err(ref failure)=result {
+        eprintln!("Native GUI startup failed: {failure}");
+    }
+    result
 }
 
 #[cfg(test)]
@@ -2272,6 +2284,7 @@ mod provider_gui_tests{
         fields.max_runs="5".into();
         assert!(build_native_prefs(&fields,"unregistered","stable").is_err());
         assert!(build_native_prefs(&fields,"github","beta").is_err());
+        assert!(build_native_prefs(&fields,"github","rc").is_ok());
     }
     #[test]
     fn server_monitor_only_allows_bare_https_without_embedded_secrets(){

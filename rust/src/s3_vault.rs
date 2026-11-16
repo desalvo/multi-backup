@@ -329,6 +329,15 @@ pub fn backup(config:&Config,source:&Path)->Result<Record> {
     // never a visible completed backup.
     let manifest_key=config.object_key(&format!("manifests/{id}.json"));
     let v=client.put_bytes(&manifest_key,&serde_json::to_vec(&record)?,&until)?;
+    // Never report success solely from a 200 PUT: prove the exact immutable
+    // manifest version can be read back and BOTH versions still have the
+    // claimed COMPLIANCE retention. No mutable LIST or current-version read.
+    let verified=read_record(&client,&id,Some(&v))?;
+    if verified.archive_version!=record.archive_version ||
+       verified.sha256!=record.sha256 || verified.bytes!=record.bytes ||
+       verified.files!=record.files || verified.retain_until!=record.retain_until {
+        return Err("Remote locked manifest content differs from uploaded receipt".into());
+    }
     record.manifest_version=Some(v);
     Ok(record)
 }

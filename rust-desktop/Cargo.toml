@@ -7,10 +7,18 @@ publish = false
 
 [dependencies]
 multi-backup-core = { path = "../rust" }
-eframe = { version = "0.30", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 serde_json = "1"
 walkdir = "2"
 zeroize = "1"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 url = "2.5"
+
+# macOS/Linux retain the proven compact OpenGL backend. Windows Server 2025
+# hosted VMs generally lack a recent OpenGL ICD; use DX12-backed wgpu instead.
+# This is a genuine native renderer, not a skipped or synthetic GUI check.
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.30", default-features = false, features = ["wgpu", "default_fonts"] }
+
+[target.'cfg(not(windows))'.dependencies]
+eframe = { version = "0.30", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
