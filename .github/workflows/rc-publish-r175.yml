@@ -4,6 +4,8 @@ on:
     branches: ["ci/r168-software-field-gates"]
     paths:
       - ".github/workflows/rc-publish-r175.yml"
+      - "scripts/ci/normalize-rust-native-artifacts-r175.sh"
+      - "tests/test_rc_windows_normalize_r175.py"
 permissions:
   contents: read
   actions: read

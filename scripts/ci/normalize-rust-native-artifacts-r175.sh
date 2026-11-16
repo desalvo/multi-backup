@@ -6,7 +6,8 @@ set -euo pipefail
 gui="$1/rust-only-windows-x64-preview"
 agent="$2/rust-agent-windows-x64-preview"
 normalize() {
-  local folder="$1" filename="$2" source="$folder/installers/$filename"
+  local folder="$1" filename="$2"
+  local source="$folder/installers/$filename"
   local target="$folder/$filename"
   [[ -d "$folder" && ! -L "$folder" ]] || { echo 'Missing trusted artifact folder' >&2; exit 2; }
   [[ -f "$source" && ! -L "$source" ]] || { echo "Missing real Windows installer $filename" >&2; exit 2; }
