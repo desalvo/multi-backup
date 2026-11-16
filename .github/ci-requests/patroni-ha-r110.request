@@ -1,0 +1,1 @@
+One-shot 3-real-PostgreSQL16/3-etcd mTLS Patroni HA: distinguish primary readiness from separately DCS-confirmed sync standby. Strict fencing, real primary crash, data retention, rejoin, DCS loss. Fail closed.

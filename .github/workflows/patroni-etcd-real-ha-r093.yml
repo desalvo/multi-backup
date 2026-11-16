@@ -8,6 +8,7 @@ on:
       - '.github/ci-requests/patroni-ha-r100.request'
       - '.github/ci-requests/patroni-ha-r102.request'
       - '.github/ci-requests/patroni-ha-r104.request'
+      - '.github/ci-requests/patroni-ha-r110.request'
   workflow_dispatch:
 permissions:
   contents: read
