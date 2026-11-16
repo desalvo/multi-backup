@@ -75,6 +75,11 @@ pub struct Inventory{
     pub restore_certified:bool,
 }
 fn parse_api(provider:&str,bytes:&[u8])->Result<Inventory>{
+    // Even an empty but otherwise valid API data array must not turn an
+    // unsupported hypervisor into an apparently successful inventory.
+    if !matches!(provider,"proxmox"|"pbs"){
+        return Err("Unsupported hypervisor inventory provider".into());
+    }
     let json:Value=serde_json::from_slice(bytes)?;
     let rows=json.get("data").and_then(Value::as_array)
         .ok_or("Missing API data array")?;
