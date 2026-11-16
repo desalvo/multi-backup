@@ -5,6 +5,7 @@ on:
     paths:
       - 'packaging/ha/**'
       - 'tests/test_ha_patrontls_config.py'
+      - 'scripts/ci/ha-primary-routing-real.py'
       - '.github/workflows/ha-config-quick-r068.yml'
   workflow_dispatch:
 permissions:
@@ -33,3 +34,5 @@ jobs:
           sed "s|/etc/multi-backup/secrets/patroni-ca.pem|$dir/ca.crt|g" \
             packaging/ha/haproxy-postgres.cfg.example > "$dir/haproxy.cfg"
           haproxy -c -f "$dir/haproxy.cfg"
+          python3 -m py_compile scripts/ci/ha-primary-routing-real.py
+          python3 scripts/ci/ha-primary-routing-real.py
