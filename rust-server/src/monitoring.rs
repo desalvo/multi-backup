@@ -57,6 +57,11 @@ fn remove_sensitive_manifests(database:&mut Value){
         }
     }
 }
+fn standalone_snapshot()->Value{
+    json!({"cluster":{"replicas":[{"healthy":true}],"jobs":[],"storage":[]},
+        "database":{"enabled":false,"history":[],
+            "database":{"role":"standalone","standbys":[]}}})
+}
 async fn state_snapshot(state:&AppState)->Result<Value,ErrBox>{
     if let Some(db)=state.0.cluster.clone(){
         tokio::task::spawn_blocking(move||->Result<Value,ErrBox>{
@@ -65,8 +70,7 @@ async fn state_snapshot(state:&AppState)->Result<Value,ErrBox>{
             Ok(json!({"cluster":db.status()?,"database":database}))
         }).await?
     }else{
-        Ok(json!({"cluster":{"replicas":[{"healthy":true}],"jobs":[],"storage":[]},
-           "database":{"enabled":false,"history":[],"database":{"role":"standalone","standbys":[]}}}))
+        Ok(standalone_snapshot())
     }
 }
 fn list<'a>(value:&'a Value)->&'a [Value]{
@@ -241,15 +245,29 @@ pub async fn start(state:AppState)->Result<(),ErrBox>{
 }
 /// Native read-only output, consumed by an optional Net-SNMP extend entry.
 pub fn snmp_status()->Result<(),ErrBox>{
-    let db=crate::cluster::Database::configured()?
-        .ok_or("SNMP exporter requires configured PostgreSQL cluster")?;
-    let data=json!({"cluster":db.status()?,"database":db.db_backup_dashboard()?});
+    // A monitoring poll must never apply schema migrations. Standalone
+    // bare-metal servers still expose their own metrics without PostgreSQL.
+    let data=if let Some(db)=crate::cluster::Database::readonly_configured()?{
+        let mut database=db.db_backup_dashboard()?;
+        remove_sensitive_manifests(&mut database);
+        json!({"cluster":db.status()?,"database":database})
+    }else{
+        standalone_snapshot()
+    };
     for (name,value) in gauges(&data){println!("{name}={value}");}
     Ok(())
 }
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn standalone_snmp_exposes_only_safe_metrics_without_database(){
+        let snapshot=standalone_snapshot();
+        assert_eq!(snapshot["database"]["database"]["role"],"standalone");
+        let output=exposition(&snapshot);
+        assert!(output.contains("multi_backup_cluster_nodes_total 1"));
+        assert!(output.contains("multi_backup_database_primary 0"));
+        assert!(!output.contains("manifest"));
+    }
     #[test]fn readonly_monitor_cannot_list_database_recovery_manifests(){
         let mut db=json!({"history":[{"job_id":"opaque","status":"success",
             "manifest":{"private_path":"/secret/restore/archive","id":"safe-id"}}]});

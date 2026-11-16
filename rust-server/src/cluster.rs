@@ -285,15 +285,18 @@ fn strict_tls_dsn(input:&str)->Result<String,BoxError>{
 #[derive(Clone)]
 pub struct Database {dsn:String}
 impl Database {
-    pub fn configured()->Result<Option<Self>,BoxError>{
+    /// Read-only monitoring must NEVER create or upgrade the database schema
+    /// on a timer/poll. The regular service startup is the sole migration path.
+    pub fn readonly_configured()->Result<Option<Self>,BoxError>{
         let Some(dsn)=env::var("MULTI_BACKUP_CLUSTER_DATABASE_URL").ok() else {
-            return Ok(None)
+            return Ok(None);
         };
-        // Parse before connecting: a URL containing sslmode=disable plus
-        // another query value that merely mentions verify-full is rejected.
-        // Native TLS verifies certificate chain and hostname, and the
-        // underlying postgres 0.19 transport gets sslmode=require.
-        let db=Self{dsn:strict_tls_dsn(&dsn)?};
+        Ok(Some(Self{dsn:strict_tls_dsn(&dsn)?}))
+    }
+    pub fn configured()->Result<Option<Self>,BoxError>{
+        let Some(db)=Self::readonly_configured()? else {
+            return Ok(None);
+        };
         let mut client=db.connect()?;
         migrate_schema(&mut client)?;
         Ok(Some(db))
