@@ -769,6 +769,9 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
             .map_err(|_|"Cluster requires a stable, unique replica ID")?;
         let budget=std::env::var("MULTI_BACKUP_REPLICA_MAX_JOBS")
             .unwrap_or_else(|_|"4".into()).parse::<u16>()?;
+        if !(1..=64).contains(&budget){
+            return Err("Replica capacity must be in the range 1..64".into());
+        }
         let accessible=std::env::var("MULTI_BACKUP_CLUSTER_STORAGE_IDS")
             .unwrap_or_default().split(',').filter(|s|!s.is_empty())
             .map(str::to_owned).collect::<Vec<_>>();
@@ -780,6 +783,10 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         tokio::task::spawn_blocking(move||
             initial_db.heartbeat_replica(&initial_id,budget,&initial_stores)).await??;
         if std::env::var("MULTI_BACKUP_CLUSTER_EXECUTOR").ok().as_deref()==Some("enabled"){
+            // Fail startup instead of silently registering a replica that
+            // admits more work than its configured native executor permits.
+            let raw=std::env::var("MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS").ok();
+            cluster_worker::validate_capacity_against_advertised(budget,raw.as_deref())?;
             // Explicit opt-in only: shared filesystem jobs can be processed by
             // any replica. Local filesystems stay pinned to their owner.
             // Fencing of commits after lease loss is still an RC requirement.

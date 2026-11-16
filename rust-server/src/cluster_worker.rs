@@ -117,7 +117,7 @@ fn execute(db:Database,replica:String,lease:Lease){
 /// With a local volume, the PG claim guarantees that only its registered
 /// owner replica can take the work; shared storage jobs may run on any
 /// registered capable healthy replica.
-fn maximum_active_jobs(raw:Option<&str>)->Result<usize,String>{
+pub(crate) fn maximum_active_jobs(raw:Option<&str>)->Result<usize,String>{
     let max=match raw{
         Some(value)=>value.parse::<usize>()
             .map_err(|_|"MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS must be 1..64")?,
@@ -127,6 +127,14 @@ fn maximum_active_jobs(raw:Option<&str>)->Result<usize,String>{
         return Err("MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS must be 1..64".into());
     }
     Ok(max)
+}
+pub(crate) fn validate_capacity_against_advertised(budget:u16,raw:Option<&str>)
+    ->Result<usize,String>{
+    let local=maximum_active_jobs(raw)?;
+    if !(1..=64).contains(&budget)||local>usize::from(budget){
+        return Err("Local active job limit must fit the advertised replica capacity (1..64)".into());
+    }
+    Ok(local)
 }
 /// Every active job holds a local permit from BEFORE the PostgreSQL claim
 /// until all lease and result reconciliation has finished. This prevents
@@ -185,6 +193,10 @@ mod tests{
         for invalid in ["","0","65","-1","99","not-a-number","1.2"]{
             assert!(maximum_active_jobs(Some(invalid)).is_err());
         }
+        assert!(validate_capacity_against_advertised(4,Some("4")).is_ok());
+        assert!(validate_capacity_against_advertised(4,Some("5")).is_err());
+        assert!(validate_capacity_against_advertised(0,Some("1")).is_err());
+        assert!(validate_capacity_against_advertised(65,Some("1")).is_err());
     }
     #[tokio::test]
     async fn local_semaphore_exhaustion_does_not_grant_extra_job_claims(){

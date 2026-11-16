@@ -876,3 +876,12 @@ One-line English commit summary: Integrate verified Rust desktop, guarded server
 - This r157 work does not complete native installer notarization/signatures, hypervisor backup media+restore or final Production Gate. No main merge or release tag.
 
 One-line English commit summary: Integrate real isolated Patroni PG16 and TLS etcd partition, strict fencing and confirmed failover acceptance.
+
+
+## r158 — server/agent replica capacity and admission startup fail-closed (16 Nov 2026)
+
+- Rust server validates `MULTI_BACKUP_REPLICA_MAX_JOBS` is 1..64 and, when execution is explicitly enabled, that `MULTI_BACKUP_CLUSTER_MAX_ACTIVE_JOBS` is a valid 1..64 number **not exceeding the replica's published PostgreSQL worker capacity**. Invalid configurations abort the server startup instead of accepting jobs the process cannot safely execute.
+- Actual native worker already obtains and holds a local semaphore permit before any durable PG job claim and through lease heartbeat and final status commit (r148). A saturated replica leaves pending jobs in PostgreSQL for other eligible workers. Rust unit tests cover boundary/rejection cases. [Focused server CI 43902435010](https://github.com/desalvo/multi-backup/actions/runs/43902435010) **PASS**.
+- This is admission control, not a certified global exactly-once transaction/storage write fence; real multi-replica network failure testing and manifest atomic fencing remain open. No signed RC/stable release has been issued.
+
+One-line English commit summary: Reject mismatched replica admission limits at server startup before distributing jobs.
