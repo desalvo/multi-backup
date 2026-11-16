@@ -280,6 +280,17 @@ def main():
                         "--log-level=warn"]
                 etcd[i] = start(root / f"etcd-{i}.log", *args)
                 processes[f"etcd{i}"] = etcd[i]
+            # Check genuine peer TLS handshakes before waiting for Raft
+            # to elect a leader. Diagnostics contain no production secrets.
+            time.sleep(3)
+            for i, ip in enumerate(ADDRESSES):
+                probe = run("openssl", "s_client", "-connect", f"{ip}:2380",
+                    "-cert", str(root / "node-0.crt"),
+                    "-key", str(root / "node-0.key"),
+                    "-CAfile", str(ca), "-verify_return_error", "-brief",
+                    check=False, timeout=6)
+                print(f"CI etcd peer {i+1} handshake: exit={probe.returncode}; "
+                      f"details={probe.stderr[-350:]}", flush=True)
             wait_for("genuine 3-member TLS etcd quorum", lambda: health(root),
                      processes, 75)
             for i in range(3):
@@ -340,13 +351,19 @@ def main():
             print("Scope: separate processes on one ephemeral runner, not "
                   "independent physical hosts or network-namespace split-brain test")
         except Exception:
+            for i in range(3):
+                check = run(*etcd_command(root, i), "endpoint", "health",
+                    check=False, timeout=6)
+                print(f"etcdctl endpoint-{i+1}: code={check.returncode}; "
+                      f"{check.stderr[-300:]} {check.stdout[-300:]}")
             for name in ("etcd-0.log", "etcd-1.log", "etcd-2.log",
                          "patroni-0.log", "patroni-1.log", "patroni-2.log"):
                 path = root / name
                 if path.is_file():
                     print(f"CI HA diagnostics {name}:")
                     lines = path.read_text(errors="replace").splitlines()
-                    print("\n".join(lines[-18:]))
+                    print("Startup evidence:\n" + "\n".join(lines[:35]))
+                    print("Tail evidence:\n" + "\n".join(lines[-18:]))
                     errors = [line for line in lines if any(term in line.lower()
                         for term in ("tls", "certificate", "handshake", "connection refused",
                                      "peer rejected", "remote error"))]
