@@ -533,3 +533,31 @@ L'operatore ha installato e verificato su tutti e tre i nodi RHEL 9.8 **kernel-d
   aggiunti messaggi diagnostici fail-closed sull'attestazione FSTYPE/RO.
   Il CI più recente deve essere riesaminato, senza considerare i lavori
   skipped come PASS.
+
+## r048 — WebDAV davfs2 and MinIO S3 WORM CI repairs (16 Nov 2026)
+
+- Hosted WebDAV initially failed from davfs2 Linux readdir EINVAL.
+  The CI runner now configures buf_size 64 before mounting (upstream
+  davfs2 1.7.2 fixes this kernel compatibility regression).
+  Subsequent CI progressed into the Rust scanner but failed on the
+  local davfs2 virtual lost+found recovery directory (EACCES), not on
+  an actual remote WebDAV object.
+- Rust chunk storage has a narrowly scoped exclusion only for the
+  top-level davfs2 virtual lost+found and only when an operator explicitly
+  sets --davfs-cache-not-on-remote on an attested WebDAV input.
+  Hosted CI verifies via HTTPS PROPFIND that the directory is absent on
+  the REMOTE server before opt-in. Any other unreadable path remains a
+  fatal backup error; no silent partial success.
+- Added contextual mounted source scan/open/read errors for diagnosis.
+- MinIO image quay.io/minio/minio:latest is unavailable (registry
+  unauthorized following upstream withdrawal). Hosted S3 CI now builds
+  the pinned official MinIO source RELEASE.2025-10-15T17-29-55Z using
+  Go, starts an isolated temporary real MinIO server, and uses awscli.
+  It checks bucket versioning, Object Lock COMPLIANCE, encrypted backup,
+  pinned-version verification/restore, bad age identity, working delete
+  control on the unlocked test bucket, and denied version-specific delete
+  of the WORM-retained object.
+- No certification claim from code alone. The newest feature head must
+  finish real WebDAV, MinIO, and Production Gate acceptance successfully.
+  Ceph RGW requires its own independent field test; not certified here.
+- All work remains in draft PR #20 on r047; no release or merge promoted.
