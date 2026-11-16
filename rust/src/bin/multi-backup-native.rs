@@ -3,12 +3,16 @@
 use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
-use std::{collections::BTreeMap, env, path::Path, process};
+use std::{collections::BTreeMap, env, path::{Path,Component}, process};
+use sha2::{Digest,Sha256};
 
 fn usage() -> &'static str {
     "Multi Backup Rust archive CLI (EUPL-1.2)\n\
      Usage:\n\
        multi-backup-native --version\n\
+       multi-backup-native updates check|stage --channel rc|stable|early-release [--directory PRIVATE]\n\
+       multi-backup-native updates activate-portable --active DIR --candidate DIR --rollback NEW_DIR --binary REL --expected-sha256 SHA (APP STOPPED; portable only)\n\
+       multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
        multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
@@ -757,6 +761,56 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     if family == "updates" {
         if password_stdin { return Err("No credentials accepted for update checks".into()); }
+        if matches!(command,"activate-portable"|"rollback-portable"){
+            accepted(&flags,&["--active","--candidate","--rollback","--rejected",
+                "--binary","--expected-sha256"])?;
+            let active=Path::new(required(&flags,"--active")?);
+            let relative=Path::new(required(&flags,"--binary")?);
+            let parts=relative.components();
+            if relative.as_os_str().is_empty()||relative.is_absolute()||
+               parts.clone().any(|c|!matches!(c,Component::Normal(_))){
+                return Err("Version executable must be a safe relative path".into());
+            }
+            let expected=required(&flags,"--expected-sha256")?;
+            if expected.len()!=64 || !expected.bytes().all(|c|c.is_ascii_hexdigit()){
+                return Err("Expected SHA256 must be 64 hexadecimal characters".into());
+            }
+            let health=|root:&Path|->updater::UpdateResult<()> {
+                let item=root.join(relative);
+                let metadata=std::fs::symlink_metadata(&item)?;
+                if !metadata.file_type().is_file()||metadata.file_type().is_symlink(){
+                    return Err("Portable update executable must be a real file".into());
+                }
+                let mut input=std::fs::File::open(&item)?;
+                let mut hash=Sha256::new();
+                let mut buffer=[0u8;131072];
+                loop {
+                    let n=input.read(&mut buffer)?;
+                    if n==0 {break;}
+                    hash.update(&buffer[..n]);
+                }
+                if hex::encode(hash.finalize())!=expected.to_ascii_lowercase(){
+                    return Err("Portable update executable hash differs from explicit expected digest".into());
+                }
+                Ok(())
+            };
+            match command {
+                "activate-portable"=>{
+                    updater::activate_portable_version(active,
+                        Path::new(required(&flags,"--candidate")?),
+                        Path::new(required(&flags,"--rollback")?),&health)?;
+                    println!("Portable update atomically activated; previous version retained for rollback");
+                }
+                "rollback-portable"=>{
+                    updater::rollback_portable_version(active,
+                        Path::new(required(&flags,"--rollback")?),
+                        Path::new(required(&flags,"--rejected")?),&health)?;
+                    println!("Portable previous version restored; rejected candidate retained");
+                }
+                _=>unreachable!(),
+            }
+            return Ok(());
+        }
         accepted(&flags, if command == "stage" {
             &["--channel", "--directory"] } else { &["--channel"] })?;
         let channel = required(&flags, "--channel")?;

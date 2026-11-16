@@ -941,3 +941,8 @@ The existing PG16 ignored acceptance test now includes real database-backed `mon
 - **CI final publisher PASS:** https://github.com/desalvo/multi-backup/actions/runs/43947524553 (2/2). Prior r174 completed four service/security/HA functional jobs all PASS; r177 uses their exact evidence rather than rerunning. Production matrix 32 PASS https://github.com/desalvo/multi-backup/actions/runs/43932195582 .
 - Signatures/notarization are waived ONLY for explicit RC preview, not stable. Do not confuse real NetNS Patroni partitions with three independent physical hosts. The app has 33 provider contracts but not all generic plugin executors. Field-only and stable signing blockers remain unclosed.
 - `main` unmodified. PR #30 remains Draft; do not silently merge or promote prerelease to stable without qualification.
+
+
+## r176 branch handoff
+
+Branch `feature/r176-native-rc2-updates-fencing` based on r175 PR #30. See `docs/RC2_READINESS_R176_IT.md` for exact changed code, test scope, and remaining blockers. RC1 published source unchanged; do not claim new RC2 or stable readiness until the new SHA passes Rust, real PostgreSQL, real MinIO and Mac/Windows runtime validation. Full OS-install auto-update and physical 3-host HA remain unverified.

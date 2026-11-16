@@ -477,6 +477,10 @@ impl Database {
                 AND n.storage_ids ? j.storage_id
                 AND (s.visibility='shared' OR s.owner_replica=$1)
                 AND j.status='queued'
+                -- Only server_local has a Rust worker executor. Remote SSH/agent
+                -- requests must stay queued for the dedicated authenticated
+                -- dispatch path: never steal them and mark them failed.
+                AND j.source_transport='server_local'
                 AND (
                   SELECT count(*) FROM mb_cluster_jobs running
                   WHERE running.replica_id=$1 AND running.status='running'
@@ -502,6 +506,7 @@ impl Database {
                 attempts:r.get(7)})
         }).transpose()
     }
+    /// Remote agent/SSH jobs are never stolen by server-local workers.
     /// Expired or abandoned claimed jobs are quarantined, NOT reassigned.
     /// Without a durable manifest write fence, retrying a still-running
     /// worker could publish a second backup or race with garbage collection.

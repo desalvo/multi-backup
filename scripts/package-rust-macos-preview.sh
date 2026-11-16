@@ -7,6 +7,7 @@ ARCH="$(uname -m)"
 if [[ -n "$(printenv MAC_ARCH || true)" ]]; then ARCH="$(printenv MAC_ARCH)"; fi
 case "$ARCH" in arm64|x86_64) ;; *) echo "Unsupported Mac architecture" >&2; exit 2;; esac
 cargo build --manifest-path rust/Cargo.toml --release
+cargo test --manifest-path rust-desktop/Cargo.toml --all-targets
 cargo build --manifest-path rust-desktop/Cargo.toml --release
 CLI="rust/target/release/multi-backup-native"
 GUI="rust-desktop/target/release/multi-backup-desktop"

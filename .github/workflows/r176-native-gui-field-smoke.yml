@@ -1,0 +1,97 @@
+name: Multi Backup - RC1 real native GUI smoke on macOS Windows
+on:
+  push:
+    branches: ["feature/r176-native-rc2-updates-fencing"]
+    paths: [".github/workflows/r176-native-gui-field-smoke.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-rc1-gui-runtime-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  macos:
+    name: Real RC1 macOS GUI window ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64, digest: a61a96d817578faa0167d186ea8785fce100043d964632095d590bdd2e15093f}
+          - {runner: macos-15-intel, arch: x86_64, digest: f930473889865a21522d51fdced597dce9f342a80632d8bc906d85ad8922b064}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SHA256 verify actual published DMG
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+          DIGEST: ${{ matrix.digest }}
+        run: |
+          set -euo pipefail
+          command -v gh || brew install gh
+          test "$(uname -m)" = "$ARCH"
+          gh release download rc-0.1.0-rc.1 --repo desalvo/multi-backup --pattern "multi-backup-rust-preview-macos-$ARCH.dmg"
+          printf '%s  %s\n' "$DIGEST" "multi-backup-rust-preview-macos-$ARCH.dmg" | shasum -a 256 -c -
+      - name: Mount native app, copy to disposable Applications and render GUI
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          ROOT="$(mktemp -d)"
+          MOUNT="$ROOT/mounted"
+          mkdir -p "$MOUNT" "$ROOT/Applications"
+          cleanup() {
+            hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true
+            rm -rf "$ROOT"
+          }
+          trap cleanup EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "multi-backup-rust-preview-macos-$ARCH.dmg" -quiet
+          test -L "$MOUNT/Applications"
+          test "$(readlink "$MOUNT/Applications")" = /Applications
+          ditto "$MOUNT/Multi Backup Rust Preview.app" "$ROOT/Applications/Multi Backup Rust Preview.app"
+          APP="$ROOT/Applications/Multi Backup Rust Preview.app"
+          codesign --verify --deep --strict "$APP"
+          python3 - "$APP/Contents/MacOS/Multi Backup" <<'PY'
+          import subprocess,sys
+          run=subprocess.run([sys.argv[1],"--smoke"],capture_output=True,text=True,timeout=50)
+          print(run.stdout[-3000:])
+          if run.returncode:
+              print(run.stderr[-3000:],file=sys.stderr)
+              raise SystemExit(run.returncode)
+          for page in ("Dashboard","Backup","Archivi","Ripristina","Storage chunk",
+                       "Plugin","Server e agenti","Vault e chiavi","Aggiornamenti",
+                       "Impostazioni","About"):
+              if "RUST_GUI_PAGE_SMOKE="+page not in run.stdout:
+                  raise SystemExit("Native page not rendered: "+page)
+          PY
+          echo 'PASS: native macOS RC1 app GUI rendered 10 pages and About' >> "$GITHUB_STEP_SUMMARY"
+  windows:
+    name: Real RC1 Windows portable GUI window
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: SHA256 verify actual published portable ZIP
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download rc-0.1.0-rc.1 --repo desalvo/multi-backup --pattern multi-backup-rust-preview-windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'RC1 download failed' }
+          $digest=(Get-FileHash multi-backup-rust-preview-windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne '166ce8e22bee44880ca43bb3aade48a29c7467487ad9dffd7cf1cdaedb1005b0') { throw 'RC1 archive digest mismatch' }
+          Expand-Archive multi-backup-rust-preview-windows-x64.zip "$env:RUNNER_TEMP\MultiBackupRC1"
+      - name: Open actual Windows Rust GUI window and verify clean exit
+        shell: pwsh
+        run: |
+          $binary=Join-Path $env:RUNNER_TEMP 'MultiBackupRC1\MultiBackupRust.exe'
+          if (!(Test-Path $binary)) { throw 'Packaged GUI missing' }
+          $p=Start-Process -FilePath $binary -ArgumentList '--smoke' -PassThru
+          try { Wait-Process -Id $p.Id -Timeout 50 -ErrorAction Stop }
+          catch { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; throw 'Native GUI crash or timeout' }
+          $p.Refresh()
+          if ($p.ExitCode -ne 0) { throw "GUI failed with exit code $($p.ExitCode)" }
+          'PASS: Windows RC1 Rust desktop opened and closed' | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY

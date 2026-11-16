@@ -5,6 +5,8 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 cargo build --manifest-path rust/Cargo.toml --release
 if ($LASTEXITCODE -ne 0) { throw 'Rust core build failed' }
+cargo test --manifest-path rust-desktop/Cargo.toml --all-targets
+if ($LASTEXITCODE -ne 0) { throw 'Native GUI unit tests failed' }
 cargo build --manifest-path rust-desktop/Cargo.toml --release
 if ($LASTEXITCODE -ne 0) { throw 'Rust desktop build failed' }
 $gui = 'rust-desktop/target/release/multi-backup-desktop.exe'
