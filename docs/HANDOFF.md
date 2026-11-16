@@ -782,3 +782,12 @@ One-line English commit summary: Require HTTPS and bearer for remote Prometheus 
 - Strictly an opt-in one-shot job; no automatic heavy CI on arbitrary commits. A PASS certifies only the genuine **standalone loopback** Prometheus HTTPS path. Remote VLAN monitoring and real PostgreSQL-scoped REST API require separate field/integration checks. The r131 unit security matrix still requires both TLS and bearer for non-loopback.
 
 One-line English commit summary: Exercise native Rust Prometheus HTTPS and bearer denial against a real isolated server.
+
+
+## r133 — correct opaque bearer CI fixture before real HTTPS acceptance
+
+- Prometheus intentionally refuses newline-bearing tokens. `openssl rand -hex 32` emits a trailing LF, so the disposable live CI token fixture must trim the LF **when writing the file**, not when the server validates it. The token remains unpredictable and secret, chmod 0600.
+- The focused HTTPS job now cancels stale in-progress runs for the exact branch and has one fresh r133 test request; no change to native Rust security policy.
+- Do not claim the HTTP/TLS+Bearer integration PASS before the new job completes.
+
+One-line English commit summary: Write newline-free random Prometheus tokens for the real native HTTPS acceptance.

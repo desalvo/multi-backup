@@ -21,7 +21,7 @@ chmod 0700 "$ROOT"
 mkdir -m 0700 "$ROOT/data" "$ROOT/exports"
 # Public CI password verifier fixture: no real credential is stored/used.
 printf '%s\n' '$argon2id$v=19$m=65536,t=3,p=4$T3BlbkFJLU1CLUNJLXIwNDA$l6bp51sbsLonNBWiZD8ckafdxSbf/+nP19GSR0Tmzgc' > "$ROOT/hash"
-openssl rand -hex 32 > "$ROOT/prometheus-token"
+openssl rand -hex 32 | tr -d '\n' > "$ROOT/prometheus-token"
 TOKEN="$(cat "$ROOT/prometheus-token")"
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
   -subj '/CN=localhost' \

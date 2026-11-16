@@ -4,12 +4,13 @@ on:
     branches: ["feature/r131-monitoring-https-hardening"]
     paths:
       - '.github/ci-requests/monitoring-https-r132.request'
+      - '.github/ci-requests/monitoring-https-r133.request'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: mb-monitor-https-real-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   native-prometheus-https:
     name: Native Rust TLS metric producer, verified bearer and negative HTTP/CA tests
