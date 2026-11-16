@@ -1016,3 +1016,10 @@ See `docs/RC2_READINESS_R176_IT.md`. Release RC1 is immutable and already publis
 - New r177 **candidate** switches Windows Rust desktop to native WGPU (DirectX12 capable) while leaving Mac/Linux proven Glow; tests current WGPU build on real Windows-2025 runner, exercising all ten tabs and About, emitting stderr on actual window failure. The published RC1 Windows exe is unchanged; this backend fix must qualify a *new* RC to affect downloadable binaries.
 - Until actual Windows WGPU window CI passes, Mac/Windows GUI cross-platform remains partial. Protected vault under compromised local root, remote distributed dispatcher and privileged system-wide auto-update/rollback remain outstanding; no false global Ready.
 - One-line English commit summary: Add native DirectX/WGPU Windows renderer with real-window CI diagnostics while preserving verified macOS/Linux Glow backend.
+
+
+## r178 — S3/Ceph RGW/RustFS B-In and Dropbox B-Out native Rust previews
+
+Implemented the dedicated S3 version-pinned, independently SHA256-validated streamed input to encrypted age chunks and Dropbox new-object-only, encrypted output with Dropbox metadata content-hash readback. Real RustFS integration test extended for newer-version drift and age restore. A manual, explicitly owner-approved isolated Dropbox test-account workflow is prepared but NOT run automatically. Both registry stages are Preview, never global Ready; direct restore to cloud, multipart resume, physical Ceph field and verified Dropbox credentials remain open. See `docs/PLUGIN_S3_DROPBOX_R178_IT.md`.
+
+One-line English commit summary: Add pinned S3 input and create-only Dropbox output backed by encryption, digest verification and scoped live-test gates.

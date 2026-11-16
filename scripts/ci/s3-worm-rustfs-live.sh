@@ -150,6 +150,36 @@ fi
 "$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
   --manifest-version "$MANIFEST_VER" --identity "$TMP/key.age" --destination "$TMP/pinned-restore"
 cmp "$TMP/source/binary.bin" "$TMP/pinned-restore/multi-backup/s3-vault/$ID/binary.bin"
+# r178 B-In: genuine pinned-version object import to age-encrypted chunk
+# store, not a mock or mutable "latest version" read.
+INPUT_KEY=ci/rustfs/r050/source-versioned.txt
+printf 'Original versioned RustFS source bytes\n' > "$TMP/s3-original.txt"
+OLD_VERSION="$(s3 put-object --bucket "$BUCKET" --key "$INPUT_KEY" \
+  --body "$TMP/s3-original.txt" --query VersionId --output text)"
+test -n "$OLD_VERSION" && test "$OLD_VERSION" != None && test "$OLD_VERSION" != null
+printf 'New conflicting latest RustFS version\n' > "$TMP/s3-newer.txt"
+s3 put-object --bucket "$BUCKET" --key "$INPUT_KEY" \
+  --body "$TMP/s3-newer.txt" >/dev/null
+DIGEST="$(sha256sum "$TMP/s3-original.txt" | cut -d' ' -f1)"
+mkdir "$TMP/age-object-store"
+"$NATIVE" storage init --root "$TMP/age-object-store" --recipient "$PUB"
+"$NATIVE" plugins s3-object-backup --config "$TMP/rustfs.json" \
+  --object-key source-versioned.txt --version-id "$OLD_VERSION" \
+  --sha256 "$DIGEST" --root "$TMP/age-object-store" \
+  --identity "$TMP/key.age" --label "Pinned RustFS object" --json > "$TMP/imported.json"
+IMPORTED_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "$TMP/imported.json")"
+"$NATIVE" storage restore --root "$TMP/age-object-store" --identity "$TMP/key.age" \
+  --id "$IMPORTED_ID" --destination "$TMP/object-recovery"
+cmp "$TMP/s3-original.txt" \
+  "$TMP/object-recovery/s3/$BUCKET/$INPUT_KEY"
+if "$NATIVE" plugins s3-object-backup --config "$TMP/rustfs.json" \
+  --object-key source-versioned.txt --version-id "$OLD_VERSION" \
+  --sha256 "$(printf '0%.0s' {1..64})" --root "$TMP/age-object-store" \
+  --identity "$TMP/key.age" --label "Reject corrupt digest" >/dev/null 2>&1;then
+  echo "FAIL: RustFS B-In accepted an independent mismatching SHA256" >&2
+  exit 1
+fi
+echo "PASS: S3 B-In genuine RustFS old version pinned across newer write, SHA256 and age restore"
 export MB_DR_CI_TMP="$TMP" MB_DR_CI_NATIVE="$NATIVE" MB_DR_CI_PUB="$PUB" \
   MB_DR_CI_KEY="$TMP/key.age" MB_DR_CI_BUCKET="$BUCKET"
 bash "$ROOT/scripts/ci/db-disaster-rustfs-live.sh"

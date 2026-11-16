@@ -162,6 +162,11 @@ impl PluginDescriptor {
         self.access_gate = gate;
         self
     }
+    /// A source adapter does not automatically imply a destination restore.
+    const fn with_restore_output_stage(mut self, stage:Stage)->Self{
+        self.restore_output=stage;
+        self
+    }
     const fn with_gpfs_ces(mut self) -> Self {
         self.gpfs_access = GPFS_CES_ACCESS;
         self
@@ -187,8 +192,9 @@ const EXPERIMENTAL: Stage = Stage::Experimental;
 pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("github", "GitHub", DataKind::SourceControl, PREVIEW, NONE,
         "Git mirror+LFS and remote metadata checkpoint", "Repository/settings/Actions; remote restore creates new repositories only"),
-    PluginDescriptor::new("dropbox", "Dropbox", DataKind::Files, PREVIEW, PLAN,
-        "File ID+revision and content hash", "Native incremental read exists; target output plugin needs transactional upload/commit"),
+    PluginDescriptor::new("dropbox", "Dropbox", DataKind::Files, PREVIEW, PREVIEW,
+        "File ID+revision and content hash",
+        "B-In read by file-id/revision and hash; dedicated Rust B-Out accepts only verified age archives, create-only upload sessions, no auto-rename or overwrite, then confirms independent remote metadata id/rev/hash; remote restore still needs an end-to-end qualification"),
     PluginDescriptor::new("google-drive", "Google Drive", DataKind::Files, PLAN, PLAN,
         "File ID+revision/export format and shared-drive inventory",
         "OAuth-scoped Drive app folder and Google-native export; upload encrypted objects to a new destination with no overwrite").with_access_gate(AccessGate::OAuthScopeReview),
@@ -197,9 +203,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Graph OAuth/tenant consent, upload-session retry and explicit conflict handling for new encrypted objects").with_access_gate(AccessGate::OAuthScopeReview),
     PluginDescriptor::new("posix", "Local POSIX filesystem", DataKind::Files, PREVIEW, PREVIEW,
         "Filesystem walk+metadata+optional consistent snapshot", "Archive CLI supports local files; generic plugin wiring and complete ACL/xattr capture are pending"),
-    PluginDescriptor::new("s3", "S3 WORM / MinIO / Ceph RGW / RustFS", DataKind::ObjectStore, PLAN, PREVIEW,
-        "Bucket versioning enabled, default Object Lock COMPLIANCE and version-specific retention attestation",
-        "Dedicated native Rust s3-vault writes age ciphertext and restores only fresh paths; verified MinIO and RustFS single-server real CI; Ceph RGW 3-MON/3-OSD still unqualified; generic S3 import/restore-to-S3, multipart resume and authenticated independent catalog not certified"),
+    PluginDescriptor::new("s3", "S3 WORM / MinIO / Ceph RGW / RustFS", DataKind::ObjectStore, PREVIEW, PREVIEW,
+        "Version-pinned S3 GetObject with independently supplied SHA-256 and server length; source snapshot pinned, WORM output only when explicitly configured",
+        "Dedicated Rust B-In streams a version-pinned S3/Ceph RGW/RustFS object to age-encrypted chunks with pre-commit digest; WORM B-Out/restore-from-vault remain separate. Batch ListObjects, ACL fidelity, vendor RGW field evidence and generic restore-to-S3 are unqualified")
+        .with_restore_output_stage(PLAN),
     PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PREVIEW, PLAN,
         "Exact read-only authenticated davfs2 mount, with independently attested quiescent collection", "Experimental mounted WebDAV input to encrypted POSIX chunks; no native WebDAV output, ETag certification, or remote write/restore"),
     PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
@@ -386,6 +393,15 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
                 required_preflight.push("verify exact writable NFS/SMB mount, create-only new target, verified backup decryption, and no overwrite; IBM CES write semantics not separately certified");
             }
         }
+        if plugin.id == "s3" {
+            required_preflight.push("S3 source B-In requires exact immutable version ID and independent raw SHA-256 reference; no mutable latest-object fallback");
+            required_preflight.push("S3 source must pass authenticated HTTPS, exact returned version and size; after streaming chunks verify SHA before publishing encrypted manifest");
+            if writing {required_preflight.push("S3 WORM output requires independent versioning and COMPLIANCE retention; generic restore-to-S3 is not implemented");}
+        }
+        if plugin.id == "dropbox" {
+            required_preflight.push("Dropbox B-Out requires scoped files.content.write and files.metadata.read; upload only age ciphertext to a NEW destination without overwrite or autorename");
+            required_preflight.push("Verify returned object ID, revision, bytes and Dropbox block content_hash against independent GET metadata; retry ambiguous commits only after operator reconciliation");
+        }
         if plugin.id == "webdav" {
             required_preflight.push("require exact mounted FUSE davfs2 read-only client, trusted HTTPS server certificate, authentication and out-of-band quiescent snapshot attestation");
             required_preflight.push("WebDAV output/remote restore is NOT implemented; ETag cache, metadata and transactional publish need live certification");
@@ -489,7 +505,15 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 23);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            assert_eq!(entry.backup_input, entry.restore_output);
+            if entry.id=="s3" {
+                // Native pinned-object backup source does NOT confer a
+                // generic restore-to-S3 capability; keep this direction
+                // planned until a write adapter is qualified.
+                assert_eq!(entry.backup_input,Stage::Preview);
+                assert_eq!(entry.restore_output,Stage::Planned);
+            } else {
+                assert_eq!(entry.backup_input, entry.restore_output);
+            }
             assert_eq!(entry.backup_output, entry.restore_input);
         }
     }
@@ -590,8 +614,8 @@ mod tests {
     #[test]
     fn native_s3_worm_vault_is_dedicated_preview_not_generic_backup_pipeline() {
         let s3=find("s3").expect("S3 vault registry is required");
-        assert_eq!(s3.backup_input,Stage::Planned,
-            "S3 remote source import is not yet a generic plugin");
+        assert_eq!(s3.backup_input,Stage::Preview,
+            "S3 version-pinned object import has dedicated native Rust CLI");
         assert_eq!(s3.backup_output,Stage::Preview);
         assert_eq!(s3.restore_input,Stage::Preview);
         assert_eq!(s3.restore_output,Stage::Planned);
@@ -600,6 +624,19 @@ mod tests {
         assert!(!backup.executable && !backup.preview_executable,
             "Dedicated s3-vault command MUST NOT bypass generic dispatcher");
         assert!(!restore.executable && !restore.preview_executable);
+    }
+    #[test]
+    fn s3_input_and_dropbox_output_are_dedicated_but_not_general_executors(){
+        let s3=find("s3").unwrap();
+        let dropbox=find("dropbox").unwrap();
+        assert_eq!(s3.backup_input,Stage::Preview);
+        assert_eq!(s3.restore_output,Stage::Planned);
+        assert_eq!(dropbox.backup_output,Stage::Preview);
+        assert_eq!(dropbox.restore_input,Stage::Preview);
+        let s3_pair=plan(Mode::Backup,"s3","posix").unwrap();
+        let output_pair=plan(Mode::Backup,"posix","dropbox").unwrap();
+        assert!(!s3_pair.executable && !s3_pair.preview_executable);
+        assert!(!output_pair.executable && !output_pair.preview_executable);
     }
     #[test]
     fn anti_ransomware_vault_is_ciphertext_destination_and_restore_source_only() {

@@ -108,4 +108,33 @@ if s3 delete-object --bucket vault-worm --key "ci/test-r047/snapshots/$ID.tar.gz
   echo "FAIL: COMPLIANCE-retained archive version was deleted" >&2; exit 1
 fi
 "$NATIVE" s3-vault verify --config "$TMP/s3.json" --id "$ID" --identity "$TMP/identity"
+# r178 independent REAL MinIO B-In versioned object import: immutable
+# versionId + caller-provided raw SHA256, verified age restore into a new path.
+INPUT_OBJECT=ci/test-r047/source-20261116.txt
+printf 'MinIO original versioned S3 source\n' > "$TMP/input-old.txt"
+OLD="$(s3 put-object --bucket vault-worm --key "$INPUT_OBJECT" \
+  --body "$TMP/input-old.txt" --query VersionId --output text)"
+test -n "$OLD" && test "$OLD" != null && test "$OLD" != None
+printf 'MinIO newer mutable current source\n' > "$TMP/input-new.txt"
+s3 put-object --bucket vault-worm --key "$INPUT_OBJECT" \
+  --body "$TMP/input-new.txt" >/dev/null
+HASH="$(sha256sum "$TMP/input-old.txt" | cut -d' ' -f1)"
+mkdir -p "$TMP/import-store"
+"$NATIVE" storage init --root "$TMP/import-store" --recipient "$RECIPIENT"
+"$NATIVE" plugins s3-object-backup --config "$TMP/s3.json" \
+ --object-key source-20261116.txt --version-id "$OLD" --sha256 "$HASH" \
+ --root "$TMP/import-store" --identity "$TMP/identity" \
+ --label "MinIO older exact source version" --json > "$TMP/pinned-input.json"
+SNAPSHOT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "$TMP/pinned-input.json")"
+"$NATIVE" storage restore --root "$TMP/import-store" --identity "$TMP/identity" \
+  --id "$SNAPSHOT" --destination "$TMP/input-restored"
+cmp "$TMP/input-old.txt" "$TMP/input-restored/s3/vault-worm/$INPUT_OBJECT"
+if "$NATIVE" plugins s3-object-backup --config "$TMP/s3.json" \
+   --object-key source-20261116.txt --version-id "$OLD" \
+   --sha256 "$(printf '0%.0s' {1..64})" --root "$TMP/import-store" \
+   --identity "$TMP/identity" --label "Expect rejection" >/dev/null 2>&1;then
+  echo "FAIL: MinIO S3 B-In accepted incorrect independently pinned SHA" >&2
+  exit 1
+fi
+echo "PASS: real MinIO S3 B-In old-version snapshot, encrypted chunk restore, wrong-hash denial"
 echo "PASS: real MinIO source build, Object Lock COMPLIANCE negative delete, encrypted backup/verify/restore"

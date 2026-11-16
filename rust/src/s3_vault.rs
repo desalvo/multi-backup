@@ -2,7 +2,8 @@
 //! Explicit COMPLIANCE retention is mandatory. Credentials come from the
 //! process environment, never from files, command arguments or log output.
 //! No DeleteObject, DeleteObjects, PutObjectRetention or bucket mutation API.
-use crate::archive;
+use crate::{archive,chunk_store::{BackupKind,LogicalBackup,Store}};
+use std::{cell::RefCell,rc::Rc,io};
 use base64::Engine;
 use md5::Md5;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
@@ -305,6 +306,86 @@ impl Client {
 
 pub fn preflight(config:&Config)->Result<()> { Client::new(config)?.preflight() }
 
+// B-In S3 / Ceph RGW / RustFS: read ONLY a caller-pinned object version.
+// Never LIST the mutable current view or materialize plaintext to a local
+// file. The encrypted chunk store commits its manifest only after an
+// independently supplied SHA-256 and the exact object size are verified.
+const MAX_SOURCE_OBJECT: u64 = 1_099_511_627_776;
+struct SourceEvidence { digest:Sha256, bytes:u64 }
+struct PinnedSource<R:Read> {
+    input:R, proof:Rc<RefCell<SourceEvidence>>, limit:u64
+}
+impl<R:Read> Read for PinnedSource<R> {
+    fn read(&mut self,output:&mut [u8])->io::Result<usize>{
+        let count=self.input.read(output)?;
+        if count==0 {return Ok(0);}
+        let mut state=self.proof.borrow_mut();
+        let updated=state.bytes.checked_add(count as u64)
+            .ok_or_else(||io::Error::other("S3 source length overflow"))?;
+        if updated>self.limit {
+            return Err(io::Error::other("S3 source larger than declared Content-Length"));
+        }
+        state.digest.update(&output[..count]);
+        state.bytes=updated;
+        Ok(count)
+    }
+}
+fn check_pinned_s3_source(key:&str,version:&str,expected_sha:&str)->Result<()> {
+    if !valid_key(key) || version.is_empty() || version.len()>512 ||
+       version.bytes().any(|b|b.is_ascii_control() || b==b'\\') ||
+       expected_sha.len()!=64 ||
+       !expected_sha.bytes().all(|b|b.is_ascii_hexdigit()) {
+        return Err("S3 B-In requires safe object key, explicit version ID and SHA-256".into());
+    }
+    Ok(())
+}
+pub fn backup_object_to_store(
+    config:&Config,object_key:&str,version:&str,expected_sha:&str,
+    store_root:&Path,identity:&Path,label:&str,top_namespace:&str,
+)->Result<LogicalBackup>{
+    check_pinned_s3_source(object_key,version,expected_sha)?;
+    if label.trim().is_empty() || label.len()>256 {
+        return Err("S3 B-In label must be 1..256 characters".into());
+    }
+    let client=Client::new(config)?;
+    let full_key=config.object_key(object_key);
+    // The explicit version subresource pins a stable snapshot even when the
+    // latest object is modified or hidden by a delete marker.
+    let response=client.sign("GET",Some(&full_key),&[("versionId",version)],
+        &[],EMPTY_HASH)?.set("Accept-Encoding","identity").call()?;
+    if response.header("x-amz-version-id")!=Some(version) ||
+       response.header("x-amz-delete-marker")==Some("true"){
+        return Err("S3 returned an unpinned, different or deleted object version".into());
+    }
+    let length:u64=response.header("Content-Length")
+        .ok_or("Pinned S3 GET missing Content-Length")?.parse()?;
+    if length==0 || length>MAX_SOURCE_OBJECT {
+        return Err("Pinned S3 content length outside permitted bounds".into());
+    }
+    let proof=Rc::new(RefCell::new(SourceEvidence{digest:Sha256::new(),bytes:0}));
+    let check=Rc::clone(&proof);
+    let expected=expected_sha.to_ascii_lowercase();
+    let mut source=PinnedSource{input:response.into_reader(),proof,limit:length};
+    let store=Store::open(store_root,identity)?;
+    let logical=format!("s3/{}/{}",config.bucket,full_key);
+    let snapshot=store.backup_stream(identity,label,top_namespace,&logical,
+        &mut source,BackupKind::Full,None,move||{
+            let state=check.borrow();
+            if state.bytes!=length {
+                return Err("Pinned S3 object download incomplete".into());
+            }
+            if hex::encode(state.digest.clone().finalize())!=expected {
+                return Err("Pinned S3 object SHA-256 does not match supplied reference".into());
+            }
+            Ok(())
+        })?;
+    if !store.verify(identity,&snapshot.id)?.healthy {
+        return Err("Pinned S3 input encryption or chunk integrity verification failed".into());
+    }
+    Ok(snapshot)
+}
+
+
 pub fn backup(config:&Config,source:&Path)->Result<Record> {
     let client=Client::new(config)?;
     client.preflight()?;
@@ -462,6 +543,30 @@ mod tests {
             region:"us-east-1".into(),bucket:"vault-worm".into(),
             prefix:"tenant/backup".into(),recipient:format!("age1{}", "q".repeat(40)),
             retention_days:30,allow_loopback_http_for_testing:false}
+    }
+    #[test]
+    fn s3_input_requires_pinned_object_version_and_caller_digest(){
+        let valid="a".repeat(64);
+        assert!(check_pinned_s3_source("directory/file.bin","3/L4kv=+", &valid).is_ok());
+        assert!(check_pinned_s3_source("../secret","v1",&valid).is_err());
+        assert!(check_pinned_s3_source("file","",&valid).is_err());
+        assert!(check_pinned_s3_source("file","v1","not-a-hash").is_err());
+        assert!(check_pinned_s3_source("file","bad\nversion",&valid).is_err());
+    }
+    #[test]
+    fn truncated_or_excess_pinned_s3_download_cannot_publish(){
+        use std::io::{Cursor,Read};
+        for (content,limit) in [(b"hello".to_vec(),4u64),(b"hel".to_vec(),5u64)]{
+            let p=Rc::new(RefCell::new(SourceEvidence{digest:Sha256::new(),bytes:0}));
+            let mut reader=PinnedSource{input:Cursor::new(content),proof:p.clone(),limit};
+            let mut bytes=Vec::new();
+            if limit==4 {
+                assert!(reader.read_to_end(&mut bytes).is_err());
+            }else{
+                reader.read_to_end(&mut bytes).unwrap();
+                assert_ne!(p.borrow().bytes,limit);
+            }
+        }
     }
     #[test]
     fn manifest_version_escrow_is_optional_for_legacy_receipts(){
