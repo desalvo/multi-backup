@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -61,6 +61,7 @@ fn usage() -> &'static str {
        multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
        multi-backup-native restore github --archive ARCHIVE --vault PROTECTED.agevault --target OWNER/NEW --confirm CREATE-NEW [--password-stdin]\n\
        multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
+       multi-backup-native s3-vault preflight|backup|verify|restore --config CONFIG.json [--source DIR] [--id ID --identity AGE_KEY --destination NEW_DIR]\n\
        multi-backup-native vault-store init --root EXISTING_DIR --recipient age1PUBLIC\n\
        multi-backup-native vault-store backup --root VAULT_DIR --source DIR [--json]\n\
        multi-backup-native vault-store list|status --root VAULT_DIR [--json]\n\
@@ -136,6 +137,37 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "s3-vault" {
+        if password_stdin {return Err("S3 vault never receives account passwords".into());}
+        let config=s3_vault::Config::load(Path::new(required(&flags,"--config")?))?;
+        match command {
+            "preflight" => {
+                accepted(&flags,&["--config"])?;
+                s3_vault::preflight(&config)?;
+                println!("S3 bucket versioning + default COMPLIANCE Object Lock preflight: PASS");
+            },
+            "backup" => {
+                accepted(&flags,&["--config","--source"])?;
+                let item=s3_vault::backup(&config,Path::new(required(&flags,"--source")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            "verify" => {
+                accepted(&flags,&["--config","--id","--identity"])?;
+                let item=s3_vault::verify(&config,required(&flags,"--id")?,
+                    Path::new(required(&flags,"--identity")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            "restore" => {
+                accepted(&flags,&["--config","--id","--identity","--destination"])?;
+                let item=s3_vault::restore(&config,required(&flags,"--id")?,
+                    Path::new(required(&flags,"--identity")?),
+                    Path::new(required(&flags,"--destination")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
     if family == "vault-store" {
         if password_stdin { return Err("Vault store does not accept plaintext passwords".into()); }
         match command {
