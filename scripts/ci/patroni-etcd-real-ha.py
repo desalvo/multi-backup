@@ -346,6 +346,12 @@ def main():
             if dcs_sync_candidate(root, initial) != candidate:
                 raise RuntimeError("DCS sync candidate changed; refuse unsafe leader kill")
             print("Witness committed on DCS-confirmed synchronous primary", flush=True)
+            if os.environ.get("MULTI_BACKUP_HA_NETWORK_ISOLATION_REQUIRED") == "true":
+                drill = globals().get("network_fault_drill")
+                if drill is None:
+                    raise RuntimeError("Network isolation required but no genuine fault injection installed")
+                drill(root, initial, processes)
+                return
             # Crash the original leader and its database, simulating node loss.
             patroni[initial].kill()
             patroni[initial].wait(timeout=6)
