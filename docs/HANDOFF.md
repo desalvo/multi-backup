@@ -639,3 +639,7 @@ New `rust/src/virtualization_inventory.rs` supports explicit read-only PVE QEMU/
 ## r074 — Rust virtualization CLI help and CI cost fix
 
 Fixed the Rust CLI help-line escaping introduced by r073. Removed unrelated `rust/src/lib.rs` edits from the independently expensive RustFS WORM automatic trigger; dedicated S3 vault/archive/Cargo changes still trigger that live acceptance, and final full Production CI remains mandatory. Cheap policy regression test prevents the unrelated trigger from returning. No hypervisor plugin has been declared READY.
+
+## r075 — cheap single-target Rocky 9 RPM install certification
+
+Added `.github/workflows/rocky9-server-r075.yml` with trigger restricted to one explicit request file `.github/ci-requests/rocky9-server-r075.request`. Exactly one disposable Rocky Linux 9 x86_64 container builds the current Rust server using native compilers, constructs the RPM, installs it with **real DNF dependency resolution** (EPEL for age), validates service/user/0600 config, removes it and verifies a sentinel under the backup data directory survives. Not a full distro matrix, signed release, bare-metal boot or HA field test. This replaces the temptation to rerun all 12 platform builds merely to confirm the prior rpmbuild %_unitdir fix. A failed test must remain FAIL until diagnosed.

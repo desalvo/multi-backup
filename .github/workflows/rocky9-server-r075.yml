@@ -1,0 +1,64 @@
+name: Multi Backup - one-shot Rocky 9 Rust RPM installation acceptance
+on:
+  push:
+    branches: ["feature/r060-baremetal-server-cluster-vault"]
+    paths:
+      - '.github/ci-requests/rocky9-server-r075.request'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: one-shot-rocky9-rpm-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  rocky9-real-install:
+    name: Rocky Linux 9 x86_64 Rust server RPM build/install/remove
+    runs-on: ubuntu-24.04
+    container:
+      image: rockylinux/rockylinux:9
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native server with distro toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y ca-certificates curl-minimal gcc gcc-c++ make tar git \
+            pkgconf-pkg-config openssl-devel cmake clang perl rpm-build \
+            findutils shadow-utils
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          cargo build --manifest-path rust-server/Cargo.toml --release --bin multi-backup-server
+          rust-server/target/release/multi-backup-server --version |
+            grep -F native-preview
+          SERVER_PACKAGE_FORMAT=rpm bash scripts/package-rust-server-unix.sh
+          rpm -qp --queryformat '%{NAME} %{ARCH}\n' packages/multi-backup-server-*.rpm |
+            grep -Fx 'multi-backup-server x86_64'
+          bash -n scripts/configure-baremetal-snmp.sh
+          bash -n scripts/db-disaster-restore.sh
+      - name: Install RPM with REAL dependency resolution, then remove without losing data
+        shell: bash
+        run: |
+          set -euo pipefail
+          # age is installed from EPEL on Rocky 9; do NOT suppress
+          # dependency verification with rpm --nodeps.
+          dnf install -y epel-release
+          dnf install -y ./packages/multi-backup-server-*.rpm
+          rpm -q multi-backup-server
+          test -x /usr/bin/multi-backup-server
+          test -f /usr/lib/systemd/system/multi-backup-server.service
+          test -f /etc/multi-backup/server.env
+          test "$(stat -c '%a' /etc/multi-backup/server.env)" = 600
+          getent passwd multi-backup >/dev/null
+          mkdir -p /var/lib/multi-backup/recovery-test
+          printf 'do-not-delete\n' >/var/lib/multi-backup/recovery-test/sentinel
+          dnf remove -y multi-backup-server
+          test -f /var/lib/multi-backup/recovery-test/sentinel
+          echo 'PASS: Rocky9 native Rust RPM dependency-aware install/remove preserved backup data'
+      - name: Publish package inspection artifact (never a signed stable release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocky9-rust-server-rpm-preview
+          path: packages/*
+          retention-days: 5

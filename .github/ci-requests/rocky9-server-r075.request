@@ -1,0 +1,3 @@
+One-shot isolated Rocky Linux 9 x86_64 native RPM build-install-remove acceptance.
+Intentional CI request for the r075 packaging blocker; no full 12-platform matrix.
+No real user data or credentials. Expected outcome must be assessed from actual job log.
