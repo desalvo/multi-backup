@@ -74,7 +74,7 @@ jobs:
           echo 'PASS: 32 required Production CI jobs and all 27 Rust artifact groups, fixed SHA' >> "$GITHUB_STEP_SUMMARY"
 
   rc1:
-    name: Publish integrity-checked v0.1.0-rc.1 as a PRE-RELEASE only
+    name: Publish integrity-checked rc-0.1.0-rc.1 as a PRE-RELEASE only
     needs: [provenance, prometheus, snmp, patroni-netns]
     if: >-
       github.repository == 'desalvo/multi-backup' &&
@@ -88,7 +88,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RC_SOURCE_SHA: 1f1a726a3ffed7b46a7498b99891bfb935570865
       RC_RUN_ID: "43932195582"
-      RC_TAG: v0.1.0-rc.1
+      RC_TAG: rc-0.1.0-rc.1
     steps:
       - uses: actions/checkout@v4
         with:
