@@ -943,6 +943,7 @@ pub(crate) fn live_pg_ci_fixture()->Database {
             dsn.contains("sslmode=disable"),
             "CI fixture may only point to isolated loopback PostgreSQL");
     let db=Database{dsn};
-    db.connect().unwrap().batch_execute(SCHEMA).unwrap();
+    let mut client=db.connect().unwrap();
+    migrate_schema(&mut client).unwrap();
     db
 }
