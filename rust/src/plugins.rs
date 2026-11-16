@@ -249,9 +249,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("kubernetes", "Kubernetes / OpenShift / OKD", DataKind::Cluster, PLAN, NONE,
         "API object resourceVersion, CSI VolumeSnapshots and etcd/CRD scope", "Never capture Secrets without explicit policy; cluster restore requires name remapping"),
     PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PLAN, NONE,
-        "VADP/CBT snapshot and config inventory", "Restore into a new VM and datastore; license/API checks required"),
+        "VM-only VADP/CBT snapshot and config inventory", "CT disabled unless a specific vSphere version offers documented native CT types AND matching backup and restore modes, independently certified; NO guest-agent/container-runtime CT fallback. Restore into new VM/datastore; license/API checks apply"),
     PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PLAN, NONE,
-        "VM snapshot/engine API and volume exports", "Engine state, VM identity and disk snapshots are distinct scopes"),
+        "VM-only Engine API snapshot and volume exports", "CT disabled unless the deployed oVirt Engine exposes vendor-documented native CT types AND matching backup and restore modes, independently certified; historical feature proposals are insufficient. NO guest-agent/container-runtime CT fallback"),
     PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
         "Rust MariaDB InnoDB transactional FULL logical dump and create-only restore",
         "Requires client-installed mariadb-dump/mariadb, private credentials, TLS CA for remote; no binlog PITR, DDL snapshot certification or Oracle MySQL acceptance"),
@@ -485,6 +485,18 @@ mod tests {
         for entry in CATALOG {
             assert_eq!(entry.backup_input, entry.restore_output);
             assert_eq!(entry.backup_output, entry.restore_input);
+        }
+    }
+    #[test]
+    fn vmware_and_ovirt_ct_are_disabled_until_native_api_certification() {
+        for id in ["vmware","ovirt"] {
+            let adapter=find(id).expect("Hypervisor catalog entry required");
+            assert_eq!(adapter.backup_input,Stage::Planned);
+            assert_eq!(adapter.backup_output,Stage::Unsupported);
+            assert!(adapter.notes.contains("CT disabled"));
+            assert!(adapter.notes.contains("NO guest-agent/container-runtime CT fallback"));
+            assert!(!plan(Mode::Backup,id,"posix").unwrap().preview_executable);
+            assert!(!plan(Mode::Restore,"posix",id).unwrap().preview_executable);
         }
     }
     #[test]
