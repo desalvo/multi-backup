@@ -54,11 +54,16 @@ def desired_nodes(status,tree,pods,bindings):
             raise ValueError("Missing/duplicated OSD daemon")
         if not pod.get("metadata",{}).get("name","").startswith(f"rook-ceph-osd-{id}-"):
             raise ValueError("OSD pod name does not match daemon ID")
-        observed[id]=(node,wanted[block[5:]],block)
+        crush_hostname=data.get("ROOK_CRUSHMAP_HOSTNAME","")
+        if not WORKER.fullmatch(crush_hostname):
+            raise ValueError("Missing or unsafe OSD CRUSH hostname in live daemon")
+        observed[id]=(node,wanted[block[5:]],block,crush_hostname)
     if len(observed)!=3 or len({v[2] for v in observed.values()})!=3:
         raise ValueError("Three distinct live OSDs and distinct dedicated loop devices required")
-    return [(id,target) for id,(_,target,_) in sorted(observed.items())
-            if observed[id][0]!=target]
+    # Kubernetes scheduling alone cannot fix stale ROOK_CRUSHMAP_HOSTNAME.
+    # The daemon otherwise reasserts its former logical CRUSH host.
+    return [(id,target) for id,(_,target,_,_) in sorted(observed.items())
+            if observed[id][0]!=target or observed[id][3]!=target]
 
 if __name__=="__main__":
     try:

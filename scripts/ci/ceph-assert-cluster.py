@@ -30,8 +30,23 @@ def attest(status: dict, tree: dict) -> dict:
         raise ValueError("Ceph CRUSH tree lacks three hosts with UP OSDs")
     if len(set(active_hosts)) != len(active_hosts):
         raise ValueError("Ceph CRUSH hosts not unique")
+    # Do not qualify transient recovery after CRUSH relocation: every PG
+    # must have converged, with no remapped or degraded status.
+    pgmap = status.get("pgmap") or {}
+    num_pgs = int(pgmap.get("num_pgs", 0))
+    remapped = int(pgmap.get("num_remapped_pgs", -1))
+    states = pgmap.get("pgs_by_state") or []
+    if num_pgs < 1 or remapped != 0 or not states:
+        raise ValueError("Ceph PGs are not ready or remain remapped")
+    if sum(int(row.get("count", 0)) for row in states) != num_pgs or any(
+        not str(row.get("state_name", "")).startswith("active+clean")
+        or "remapped" in str(row.get("state_name", ""))
+        or "degraded" in str(row.get("state_name", ""))
+        for row in states
+    ):
+        raise ValueError("Ceph PGs are not all active+clean")
     return {"mons": len(mons), "quorum": len(quorum),
-            "osds": len(osds), "hosts": active_hosts}
+            "osds": len(osds), "hosts": active_hosts, "pgs": num_pgs}
 
 
 if __name__ == "__main__":

@@ -232,7 +232,7 @@ ready=0
 cluster_errors=0
 crush_fixed=0
 osd_pod_fixed=0
-for attempt in $(seq 1 40); do
+for attempt in $(seq 1 55); do
   if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status -f json \
       > "$TEMP/ceph-status.json" 2>/dev/null &&
      kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph osd tree -f json \
@@ -254,7 +254,20 @@ for attempt in $(seq 1 40); do
         test "$(kubectl config current-context)" = "kind-$NAME"
         echo "Fixing real OSD pod placement to its verified disposable loop device's owning kind worker"
         while read -r osdid worker;do
-          kubectl -n rook-ceph patch deployment "rook-ceph-osd-$osdid"             --type merge             -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"$worker\"}}}}}"
+          # Strategic merge preserves command, securityContext and unrelated
+          # env. Patching nodeSelector ALONE leaves stale daemon CRUSH host.
+          kubectl -n rook-ceph patch deployment "rook-ceph-osd-$osdid" \
+            --type=strategic \
+            -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"$worker\"},\"containers\":[{\"name\":\"osd\",\"env\":[{\"name\":\"ROOK_CRUSHMAP_HOSTNAME\",\"value\":\"$worker\"}]}]}}}}"
+          kubectl -n rook-ceph rollout status deployment/"rook-ceph-osd-$osdid" --timeout=150s
+          observed_node="$(kubectl -n rook-ceph get deployment "rook-ceph-osd-$osdid" -o json |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["spec"]["template"]["spec"]["nodeSelector"].get("kubernetes.io/hostname",""))')"
+          observed_host="$(kubectl -n rook-ceph get deployment "rook-ceph-osd-$osdid" -o json |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); cs=d["spec"]["template"]["spec"]["containers"]; osds=[c for c in cs if c["name"]=="osd"]; assert len(osds)==1; print(next((x["value"] for x in osds[0]["env"] if x["name"]=="ROOK_CRUSHMAP_HOSTNAME"),""))')"
+          if [ "$observed_node" != "$worker" ] || [ "$observed_host" != "$worker" ];then
+            echo "FAIL OSD Deployment CRUSH hostname or worker reset during rollout" >&2
+            exit 1
+          fi
         done < "$TEMP/pod-node-moves"
         sleep 8
         continue
@@ -294,7 +307,7 @@ for attempt in $(seq 1 40); do
   sleep 8
 done
 if [ "$ready" -ne 1 ]; then
-  echo "FAIL: genuine Ceph 3-MON 3-OSD quorum never reached after 320s" >&2
+  echo "FAIL: genuine Ceph 3-MON 3-OSD quorum never reached after at most 440s" >&2
   if [ -s "$TEMP/ceph-status.json" ]; then
     echo "::group::Ceph final status JSON" >&2
     python3 -m json.tool "$TEMP/ceph-status.json" | head -100 >&2 || true

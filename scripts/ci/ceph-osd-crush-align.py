@@ -45,6 +45,8 @@ def reconcile(status,tree,pods,bindings):
         osd=int(env["ROOK_OSD_ID"])
         if osd not in osds or env.get("ROOK_BLOCK_PATH")!="/dev/"+expected[node]:
             raise ValueError("OSD ID or disposable block device mismatch")
+        if env.get("ROOK_CRUSHMAP_HOSTNAME")!=node:
+            raise ValueError("OSD daemon CRUSH hostname does not match verified worker")
         active.append((osd,node))
     if len(active)!=3 or len(set(active))!=3 or len({a[0] for a in active})!=3 or (
         len({a[1] for a in active})!=3 or {a[0] for a in active}!=osds):

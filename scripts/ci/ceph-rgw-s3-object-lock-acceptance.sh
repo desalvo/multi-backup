@@ -129,4 +129,21 @@ parse=lambda s:datetime.datetime.fromisoformat(s.replace("Z","+00:00"))
 assert parse(after["RetainUntilDate"]) >= parse(before["RetainUntilDate"])
 PY
 "$CLI" s3-vault verify --config "$WORK/ceph.json" --id "$ID" --identity "$WORK/key.age"
-echo "PASS: real Ceph RGW S3 COMPLIANCE retention, no overwrite, denied version delete & reduction, Rust age backup/verify/restore"
+# An unversioned DELETE may hide the current manifest but Object Lock
+# preserves the independently recorded version. Rescue MUST work.
+s3 delete-object --bucket "$BUCKET" --key "$MANIFEST" > "$WORK/delete-marker.json"
+if s3 head-object --bucket "$BUCKET" --key "$MANIFEST" >/dev/null 2>&1;then
+  echo "FAIL: delete marker did not conceal current RGW manifest" >&2;exit 1
+fi
+if "$CLI" s3-vault verify --config "$WORK/ceph.json" --id "$ID" \
+   --identity "$WORK/key.age" >/dev/null 2>&1;then
+  echo "FAIL: unpinned RGW manifest lookup bypassed delete marker" >&2;exit 1
+fi
+"$CLI" s3-vault verify --config "$WORK/ceph.json" --id "$ID" \
+  --identity "$WORK/key.age" --manifest-version "$MANIFEST_VER"
+"$CLI" s3-vault restore --config "$WORK/ceph.json" --id "$ID" \
+  --identity "$WORK/key.age" --manifest-version "$MANIFEST_VER" \
+  --destination "$WORK/pinned-restored"
+cmp "$WORK/source/data.bin" "$WORK/pinned-restored/multi-backup/s3-vault/$ID/data.bin"
+cmp "$WORK/source/nested/example.txt" "$WORK/pinned-restored/multi-backup/s3-vault/$ID/nested/example.txt"
+echo "PASS: real Ceph RGW S3 COMPLIANCE retention, denied deletion, Rust age restore and pinned recovery after delete marker"
