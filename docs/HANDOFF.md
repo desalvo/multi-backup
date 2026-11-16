@@ -882,3 +882,10 @@ One-line English commit summary: Expose typed read-only PVE/PBS and VMware/oVirt
 - A passing job is limited to native Linux GUI runtime. It is not a visual screenshot certification, signed/notarized macOS/Windows installer qualification or complete UI backup and restore journey.
 
 One-line English commit summary: Verify native Rust egui GUI startup and rendering through isolated Xvfb CI.
+
+
+### r164 — 16 Nov 2026 — open integration branch
+
+- Branch: `feature/r164-protected-hypervisor-config`, parent branch `feature/r163-desktop-real-xvfb-smoke` (Linux Xvfb real GUI #43906909522 PASS), upstream RC PR #22 remains DRAFT. Read-only PVE/PBS/VMware/oVirt API credential JSON now uses shared Unix O_NOFOLLOW, fd inode/mode check, strict size cap, and zeroized input. No hypervisor backup or VM/CT restore is thereby certified.
+- Initial focused Rust #43908977857 failed only a new 0644 test fixture; 114 tests passed. Fix sets 0600 in fixture; check follow-up exact-SHA CI before any integration. Keep GPFS protocol-only NFS/SMB, native GPFS postponed.
+- Outstanding RC gates: signed native Mac/Windows/Linux packages, installed updater/rollback, real multi-machine agent quotas and fenced shared-storage manifests, physical 3-host PG16 Patroni/etcd acceptance, live hypervisor backups/restores, REST external TLS/PG token acceptance, final security/Production CI. No main merge/tag/stable release.

@@ -54,6 +54,10 @@ mod tests{
         let path=root.path().join("config");
         assert!(read_owner_only(&path,16_384).is_err());
         fs::write(&path,b"{}").unwrap();
+        #[cfg(unix)]{
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path,fs::Permissions::from_mode(0o600)).unwrap();
+        }
         assert_eq!(read_owner_only(&path,16_384).unwrap(),b"{}");
         assert!(read_owner_only(&path,1).is_err());
         fs::write(&path,vec![b'a';16_385]).unwrap();

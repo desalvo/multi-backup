@@ -913,3 +913,13 @@ One-line English commit summary: Expose typed read-only PVE/PBS and VMware/oVirt
 - A passing job is limited to native Linux GUI runtime. It is not a visual screenshot certification, signed/notarized macOS/Windows installer qualification or complete UI backup and restore journey.
 
 One-line English commit summary: Verify native Rust egui GUI startup and rendering through isolated Xvfb CI.
+
+
+## r164 — secure Rust native hypervisor credential reads (16 Nov 2026)
+
+- On branch `feature/r164-protected-hypervisor-config` (based on r163 Xvfb), all four VMware/oVirt/PVE/PBS read-only inventory adapters now consume token/session files with a common bounded reader. On Unix this opens with O_NOFOLLOW/O_NONBLOCK, checks the descriptor's device/inode against lstat, enforces owner-only mode and verifies maximum size after read; symlink swapping, group-readable tokens and growing files fail closed. Token JSON input buffers are zeroized on drop. Windows permission/TOCTOU parity is still a separate OS acceptance requirement.
+- The first focused CI #43908977857 compiled 115 tests: 114 passed and a NEW fixture failed because it wrote a test file with 0644 rather than required 0600. r164 corrects the fixture without reducing production protections; a new exact-SHA Rust CI PASS is mandatory before claiming certification.
+- r163 separate native Linux GUI Xvfb run #43906909522 PASS, but no cross-platform signing, UI E2E or release acceptance is implied.
+- Keep draft/stacked branch; do not merge to main, tag RC or publish installers until the final unified Production Gate and remaining field acceptance.
+
+One-line English commit summary: Harden native hypervisor credential loading against symlink races and oversized token files, and correct permission test fixture.

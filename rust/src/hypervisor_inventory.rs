@@ -3,7 +3,7 @@
 //! is exposed. Credentials are short-lived, preissued session/bearer tokens.
 use serde::{Deserialize,Serialize};
 use serde_json::Value;
-use std::{collections::HashSet,error::Error,fs,io::Read,path::Path,time::Duration};
+use std::{collections::HashSet,error::Error,io::Read,path::Path,time::Duration};
 use url::Url;
 use zeroize::Zeroize;
 type Result<T>=std::result::Result<T,Box<dyn Error+Send+Sync>>;
@@ -20,7 +20,7 @@ impl Drop for Config {
 }
 impl Config {
     pub fn load(path:&Path)->Result<Self>{
-        let bytes=crate::protected_config::read_owner_only(path,16_384)?;
+        let bytes=zeroize::Zeroizing::new(crate::protected_config::read_owner_only(path,16_384)?);
         let config:Self=serde_json::from_slice(&bytes)?;
         config.validate()?;
         Ok(config)
