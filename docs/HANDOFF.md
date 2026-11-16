@@ -899,3 +899,9 @@ One-line English commit summary: Verify native Rust egui GUI startup and renderi
 - `rust/src/bin/multi-backup-agent.rs`: use shared bounded O_NOFOLLOW secure file reader; first-use credentials use persist_noclobber; existing sequence counter intentionally retains atomic replacement under lock.
 - `scripts/ci/ha-three-host-field-r166.py` and manual field workflow: three genuine remote kernels required; real outage/split-brain and independent physical fault domains cannot be certified without a dedicated operator-provided lab. Run self-test first.
 - Remaining: live 3-host Patroni/etcd failover and fence, server+agent E2E ciphertext/restore on independent hosts, GUI Mac/Windows/Linux signed installation/upgrades/rollback, final full Production Gate on exact SHA. No release/tag/main merge.
+
+
+### r166 signed agent upload live acceptance extension
+
+- `rust-server/src/live_pg_acceptance.rs`: ignored CI test invokes actual streaming upload handler under genuine PG16, real locally generated age ciphertext, Ed25519 credentials, durable on-disk spool, PG receipt, real decrypted byte-level restore, collision 409 and revoked 401.
+- `.github/workflows/agent-cluster-live-pg.yml`: installs age binary for the test. Do not mark this as remote TLS/three-host certification. Recheck exact CI result before promoting.

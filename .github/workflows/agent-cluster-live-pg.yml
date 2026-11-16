@@ -35,6 +35,11 @@ jobs:
           --health-retries 15
     steps:
       - uses: actions/checkout@v4
+      - name: Install native age encryption/restore binaries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          age --version
       - name: Exercise real database enrollment, nonces, replica leases and quarantine
         env:
           MULTI_BACKUP_TEST_PG_DSN: postgresql://mb_live:local_ci_only@127.0.0.1:5432/mb_ci?sslmode=disable

@@ -935,3 +935,9 @@ One-line English commit summary: Harden native hypervisor credential loading aga
 - Do not merge to main, tag RC or distribute unverified installers based on focused tests.
 
 One-line English commit summary: Add native Rust server-agent monitoring, atomic no-clobber encrypted uploads and guarded three-host HA field preflight.
+
+
+### r166 native signed-agent encrypted transfer E2E extension
+
+- Added an ignored-only live PostgreSQL16 test `real_pg_agent_encrypted_upload_no_clobber_and_restore` to the existing disposable DB workflow: generates a real age recipient and ciphertext with the native age CLI; enrolls and approves an Ed25519 device/profile in PG; calls the actual streaming Rust upload handler with signed hash; attests one PostgreSQL receipt and byte-identical age decrypt; blocks duplicate backup ID overwrite and rejects a revoked device. The job installs `age` explicitly; no real account secrets.
+- This tests an in-process handler with genuine PostgreSQL and cryptography, **NOT independent physical agent/server machines, WAN TLS proxy or recovery to a live AFS/VM source**. A passing CI remains scope-limited. Exact SHA CI evidence is needed.
