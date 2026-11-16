@@ -147,12 +147,12 @@ impl Client {
         cfg.validate()?;
         let access=env::var("AWS_ACCESS_KEY_ID")?;
         let secret=env::var("AWS_SECRET_ACCESS_KEY")?;
-        if access.is_empty() || secret.is_empty() || access.contains(['\n','\r'])
-            || secret.contains(['\n','\r']) {
+        if access.is_empty() || secret.is_empty() || access.bytes().any(|b|b==b'\n'||b==b'\r')
+            || secret.bytes().any(|b|b==b'\n'||b==b'\r') {
             return Err("Missing or unsafe S3 credentials".into());
         }
         let token=env::var("AWS_SESSION_TOKEN").ok();
-        if token.as_deref().is_some_and(|s|s.contains(['\n','\r'])) {
+        if token.as_deref().is_some_and(|s|s.bytes().any(|b|b==b'\n'||b==b'\r')) {
             return Err("Unsafe S3 session token".into());
         }
         Ok(Self{cfg:cfg.clone(),access,secret,token})
@@ -182,7 +182,7 @@ impl Client {
             if *k!="if-none-match" && !k.starts_with("x-amz-") {
                 return Err("Only signed S3 security headers are allowed".into());
             }
-            if v.contains(['\n','\r']) {return Err("Unsafe S3 header".into());}
+            if v.bytes().any(|b|b==b'\n'||b==b'\r') {return Err("Unsafe S3 header".into());}
             headers.insert(k.to_string(),v.trim().to_string());
         }
         let signed=headers.keys().cloned().collect::<Vec<_>>().join(";");
@@ -259,8 +259,8 @@ impl Client {
     }
     fn download(&self,key:&str,version:Option<&str>,dest:&Path) -> Result<()> {
         if fs::symlink_metadata(dest).is_ok() {return Err("Refusing to overwrite downloaded ciphertext".into());}
-        let response=self.sign("GET",Some(key),&version.map(|v|[("versionId",v)])
-            .unwrap_or([("versionId","")])[..version.map(|_|1).unwrap_or(0)],&[],EMPTY_HASH)?.call()?;
+        let query=version.map(|v|vec![("versionId",v)]).unwrap_or_default();
+        let response=self.sign("GET",Some(key),&query,&[],EMPTY_HASH)?.call()?;
         let mut out=fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
         let mut src=response.into_reader();
         std::io::copy(&mut src,&mut out)?;
