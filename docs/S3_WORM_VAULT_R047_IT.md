@@ -50,8 +50,9 @@ e l'integrità age. Destinazioni esistenti rifiutate. Nessuna API DELETE,
 purge, cancellazione retention o modifica del bucket viene esposta.
 
 Non ci sono ancora multipart/resume remoti né catalogo firmato indipendente.
-Al momento backup, verify e restore sono via CLI; GUI/server/HA e agenti
-necessitano ancora di integrazione dedicata. Non definire pronta una RC
+CLI, GUI Rust e API server ora invocano il trasporto S3; ogni percorso deve
+ancora passare test reali indipendenti. HA e agenti S3 necessitano ancora
+di un collaudo end-to-end e fencing dedicato. Non definire pronta una RC
 finché tutti questi percorsi non sono certificati.
 
 ## CI reale
@@ -88,3 +89,25 @@ richiesto, deve fallire chiuso, senza attenuare i controlli.
 - Stable: firma installatori, notarizzazione, upgrade e rollback certificati.
 
 **Mai indicare come PASS un test saltato, un mock o la sola compilazione.**
+
+## Desktop Rust e API server
+
+La pagina Vault dell'app Rust ora include config JSON S3, preflight,
+backup, verify e restore. Se la chiave age è stata già sbloccata, il
+restore usa l'identità IN RAM; in alternativa richiede il path di una
+identity privata. S3 username/password non vengono inseriti nei campi GUI.
+
+Sul server impostare MULTI_BACKUP_S3_VAULT_CONFIG sul path del JSON,
+AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY tramite il secret store di
+deployment e MULTI_BACKUP_AGE_IDENTITY_FILE per verify/restore. API:
+- GET /api/s3-vault/status — sessione admin e vero preflight remoto;
+- POST /api/s3-vault/backup — admin, same-origin, CSRF, copia cifrata del
+  SOLO store live configurato sul server, nessun path dal browser;
+- POST /api/s3-vault/verify — admin, same-origin e CSRF; JSON {"id":"HEX"};
+- POST /api/s3-vault/restore — admin, CSRF, same-origin, approvazione
+  indipendente di recovery e destinazione NUOVA sotto export root.
+
+Non esiste endpoint delete/purge. In produzione il server deve usare
+credenziali ingest e restore con privilegi minimi e separati secondo
+l'architettura del deployment. L'uso di un'unica credenziale S3
+read+write in un processo non è ancora certificato least-privilege.
