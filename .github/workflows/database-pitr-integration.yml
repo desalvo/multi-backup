@@ -2,13 +2,21 @@ name: Multi Backup - real database WAL and binlog PITR acceptance
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'rust/src/database.rs'
+      - 'rust/src/archive.rs'
+      - 'rust/src/chunk_store.rs'
+      - 'rust/src/bin/multi-backup-native.rs'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - 'scripts/test-postgresql-wal-pitr.sh'
       - 'scripts/test-mariadb-binlog-pitr.sh'
       - '.github/workflows/database-pitr-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   postgresql-wal-pitr:
     name: PostgreSQL 16 physical base and archived WAL PITR

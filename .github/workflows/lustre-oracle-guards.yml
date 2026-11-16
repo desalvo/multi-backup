@@ -2,7 +2,13 @@ name: Multi Backup - Lustre and Oracle safe provider guards
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'rust/src/plugin_executor.rs'
+      - 'rust/src/mount_probe.rs'
+      - 'rust/src/database.rs'
+      - 'rust/src/plugins.rs'
+      - 'rust/src/bin/multi-backup-native.rs'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - 'scripts/test-lustre-oracle-guards.sh'
       - 'scripts/test-real-lustre-roundtrip.sh'
       - 'scripts/test-oracle-rman-lab.sh'
@@ -10,6 +16,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   safe-lustre-oracle-guards:
     name: Rust Lustre mount isolation and Oracle RMAN fail-closed checks

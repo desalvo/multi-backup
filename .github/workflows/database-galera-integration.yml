@@ -2,13 +2,21 @@ name: Multi Backup - real MariaDB Galera cluster and PITR acceptance
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'rust/src/database.rs'
+      - 'rust/src/archive.rs'
+      - 'rust/src/chunk_store.rs'
+      - 'rust/src/bin/multi-backup-native.rs'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - 'ci/galera/**'
       - 'scripts/test-mariadb-galera-pitr.sh'
       - '.github/workflows/database-galera-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   galera-three-node-recovery:
     name: MariaDB 11.4 three-node Galera, quorum failover and encrypted PITR

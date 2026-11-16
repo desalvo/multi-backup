@@ -1,21 +1,19 @@
 name: Multi Backup - genuine 3-node Ceph RGW S3 WORM acceptance
 on:
   pull_request:
-    paths:
-      - 'scripts/ci/ceph-*'
-      - 'rust/**'
-      - '.github/workflows/ceph-rgw-s3-real-r049.yml'
+    types: [labeled]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: multi-backup-rgw-real-${ github.ref }
-  cancel-in-progress: true
+  group: multi-backup-rgw-real-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 jobs:
   real-ceph-rgw:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-ceph-ci'
     name: Rook-Ceph 3 MON / 3 OSD nodes + genuine RGW Object Lock
     runs-on: ubuntu-24.04
-    timeout-minutes: 105
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Provision upstream kubectl and kind

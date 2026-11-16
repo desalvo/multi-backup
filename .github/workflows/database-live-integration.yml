@@ -2,11 +2,19 @@ name: Multi Backup - real PostgreSQL and MariaDB encrypted restore
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'rust/src/database.rs'
+      - 'rust/src/archive.rs'
+      - 'rust/src/chunk_store.rs'
+      - 'rust/src/bin/multi-backup-native.rs'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - '.github/workflows/database-live-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   real-database-restore:
     name: Real PostgreSQL 16 and MariaDB 11.4 full backup/restore

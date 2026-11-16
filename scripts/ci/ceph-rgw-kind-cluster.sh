@@ -184,17 +184,21 @@ kubectl -n rook-ceph rollout status deploy/rook-ceph-tools --timeout=900s
 # Poll Ceph itself, not just pod readiness. Require 3 MON quorum, 3 UP+IN
 # OSD and three distinct CRUSH hosts. No MOCK/skip/single-OSD fallback.
 ready=0
-for attempt in $(seq 1 90); do
+for attempt in $(seq 1 40); do
   if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status -f json \
       > "$TEMP/ceph-status.json" 2>/dev/null &&
      kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph osd tree -f json \
       > "$TEMP/osd-tree.json" 2>/dev/null &&
      python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" \
       >/dev/null 2>&1; then ready=1;break;fi
-  sleep 10
+  sleep 8
 done
 if [ "$ready" -ne 1 ]; then
-  echo "FAIL: genuine Ceph 3-MON 3-OSD quorum never reached" >&2
+  echo "FAIL: genuine Ceph 3-MON 3-OSD quorum never reached after 320s" >&2
+  kubectl -n rook-ceph get pods -o wide >&2 || true
+  kubectl -n rook-ceph describe cephcluster mb-ceph >&2 || true
+  kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s >&2 || true
+  kubectl -n rook-ceph get events --sort-by=.lastTimestamp 2>&1 | tail -50 >&2 || true
   exit 1
 fi
 python3 "$ROOT/scripts/ci/ceph-assert-cluster.py" "$TEMP/ceph-status.json" "$TEMP/osd-tree.json"

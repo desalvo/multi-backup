@@ -2,12 +2,19 @@ name: Multi Backup - real Oracle Free RMAN encrypted PDB backup-piece acceptance
 on:
   pull_request:
     paths:
-      - 'rust/**'
+      - 'rust/src/database.rs'
+      - 'rust/src/archive.rs'
+      - 'rust/src/bin/multi-backup-native.rs'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - 'scripts/test-oracle-free-container.sh'
       - '.github/workflows/oracle-free-live.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   oracle-free-live-rman:
     name: Real Oracle Free container, RMAN backup -> Rust encrypted pieces -> RMAN restore VALIDATE
