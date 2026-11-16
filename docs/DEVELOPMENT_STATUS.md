@@ -795,3 +795,14 @@ One-line English commit summary: Prove strict Patroni fencing with both genuine 
 - The test continues after this negative fence and must verify old-leader rejoin, the former second standby's rejoin, acknowledged post-rejoin writes, and failure of stale writes after etcd majority loss. No change to production Patroni strict settings or emergency fail-open override; run one focused bounded real lab r130. GPFS unchanged suspended/out of RC.
 
 One-line English commit summary: Treat validated strict PostgreSQL commit blocking as expected and complete rejoin plus DCS-majority fault injection.
+
+
+## r134 — integrate reviewed native Proxmox PVE/PBS Rust workstreams into RC development branch
+
+- Consolidates the three executable Rust files that passed [r125 real Rust CI 43881321237](https://github.com/desalvo/multi-backup/actions/runs/43881321237) and [r129 real Rust CI 43883196245](https://github.com/desalvo/multi-backup/actions/runs/43883196245) from stacked draft PRs #24/#25 into active `feature/r060-baremetal-server-cluster-vault`. The two provider paths are independent and neither allows deleting existing archives.
+- **PVE preview:** explicitly confirmed one-guest native QEMU VM/LXC CT `vzdump` task trigger (snapshot/suspend/stop), exact HTTPS inventory+node+kind+VMID match, `remove=0`, scoped token, protected UPID and read-only task status; task success is **not** a Multi Backup archive verification.
+- **PBS preview:** scoped TLS read-only datastore snapshot inventory `vm`, `ct`, `host`, strict namespace/identity validation and provenance: PBS verification OK is NOT independently verified encrypted backup or restore.
+- Field work still required: PVE live/offline backup archive ingestion, PBS export verification, create-only restores of VM/CT, test account and real hypervisor certification. VMware/oVirt VM adapters remain planned; CT disabled without documented native support. GPFS suspended/excluded from RC.
+- Production Gate on the final release candidate is mandatory; the integration is a development branch commit, not a stable tag or a released installer.
+
+One-line English commit summary: Integrate passed native PVE vzdump and PBS snapshot inventory Rust adapters into the RC development line.
