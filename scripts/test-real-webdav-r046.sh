@@ -43,7 +43,21 @@ fi
 printf "%s %s %s\n" "https://localhost:18919/" mbci "$PASSWORD" | sudo tee -a /etc/davfs2/secrets >/dev/null
 sudo chmod 0600 /etc/davfs2/secrets
 unset PASSWORD
+# davfs2 1.7.1 on newer Linux kernels may mount successfully but return
+# EINVAL from getdents64/readdir due to an undersized FUSE buffer.
+# Official davfs2 fix is 1.7.2; documented compatibility workaround: buf_size 64.
+# Apply ONLY inside the disposable GitHub-hosted runner, before mounting.
+printf '\n# Multi Backup CI: davfs2 kernel/FUSE readdir compatibility\nbuf_size 64\n' \
+  | sudo tee -a /etc/davfs2/davfs2.conf >/dev/null
 sudo mount -t davfs -o ro "https://localhost:18919/" "$RO"
+# Do not mask readdir errors or accept an empty mounted directory.
+if ! ls -la "$RO" > "$WORK/davfs-directory-list.txt"; then
+  echo "FAIL: actual davfs2 directory readdir failed (check buf_size/kernel)" >&2
+  exit 1
+fi
+test -r "$RO/nested/data.txt" && test -r "$RO/test.bin" || {
+  echo "FAIL: expected authenticated WebDAV fixture is not readable" >&2; exit 1;
+}
 FSTYPE="$(findmnt -rn -T "$RO" -o FSTYPE)"
 MOUNT_SOURCE="$(findmnt -rn -T "$RO" -o SOURCE)"
 case "$FSTYPE" in
