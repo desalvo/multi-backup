@@ -128,14 +128,17 @@ def dcs_sync_candidate(root, leader):
     if not isinstance(view, dict):
         return None
     members = view.get("members") or []
+    # Patroni /cluster reports a healthy streaming replica as
+    # state='streaming' (not necessarily 'running'). Cross-check /sync 200
+    # from that very peer, which only succeeds for DCS-qualified sync nodes.
     sync_nodes = [m.get("name") for m in members if m.get("role") == "sync_standby"
-                  and m.get("state") == "running"]
+                  and m.get("state") in ("streaming", "running")]
     if len(sync_nodes) != 1:
         return None
     candidate = sync_nodes[0]
     for number in range(3):
         if candidate == f"mb-node{number + 1}" and number != leader:
-            return number
+            return number if role(root, number, "sync") else None
     return None
 
 
