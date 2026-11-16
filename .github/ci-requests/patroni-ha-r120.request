@@ -1,0 +1,1 @@
+One-shot Patroni three-node real PG16 and etcd mutual TLS HA acceptance. Require Patroni /sync DCS witness, committed durability after primary crash, failover, rewind/rejoin, new sync writer and fail-close quorum loss. Diagnostics enabled; never force promotion.
