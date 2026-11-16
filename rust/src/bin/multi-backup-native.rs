@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -61,6 +61,11 @@ fn usage() -> &'static str {
        multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
        multi-backup-native restore github --archive ARCHIVE --vault PROTECTED.agevault --target OWNER/NEW --confirm CREATE-NEW [--password-stdin]\n\
        multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
+       multi-backup-native vault-store init --root EXISTING_DIR --recipient age1PUBLIC\n\
+       multi-backup-native vault-store backup --root VAULT_DIR --source DIR [--json]\n\
+       multi-backup-native vault-store list|status --root VAULT_DIR [--json]\n\
+       multi-backup-native vault-store verify --root VAULT_DIR --id SNAPSHOT_ID --identity AGE_KEY [--json]\n\
+       multi-backup-native vault-store restore --root VAULT_DIR --id SNAPSHOT_ID --identity AGE_KEY --destination NEW_DIR [--json]\n\
        multi-backup-native vault verify --file PROTECTED.agevault [--password-stdin]\n\
        multi-backup-native vault create --file NEW.agevault [--password-stdin]\n\
        multi-backup-native vault export --file SOURCE.agevault --destination RECOVERY.agevault [--password-stdin]\n\
@@ -131,6 +136,50 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family == "vault-store" {
+        if password_stdin { return Err("Vault store does not accept plaintext passwords".into()); }
+        match command {
+            "init" => {
+                accepted(&flags,&["--root","--recipient"])?;
+                immutable_vault::init(Path::new(required(&flags,"--root")?),
+                    required(&flags,"--recipient")?)?;
+                println!("Created an APPEND-ONLY PREVIEW vault (external WORM NOT VERIFIED)");
+            },
+            "backup" => {
+                accepted(&flags,&["--root","--source"])?;
+                let item=immutable_vault::backup(
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--source")?))?;
+                println!("{}",serde_json::to_string_pretty(&item)?);
+            },
+            "status" => {
+                accepted(&flags,&["--root"])?;
+                println!("{}",immutable_vault::status(Path::new(required(&flags,"--root")?))?);
+            },
+            "list" => {
+                accepted(&flags,&["--root"])?;
+                println!("{}",serde_json::to_string_pretty(
+                    &immutable_vault::list(Path::new(required(&flags,"--root")?))?)?);
+            },
+            "verify" => {
+                accepted(&flags,&["--root","--id","--identity"])?;
+                let record=immutable_vault::verify(
+                    Path::new(required(&flags,"--root")?),required(&flags,"--id")?,
+                    Path::new(required(&flags,"--identity")?))?;
+                println!("{}",serde_json::to_string_pretty(&record)?);
+            },
+            "restore" => {
+                accepted(&flags,&["--root","--id","--identity","--destination"])?;
+                let record=immutable_vault::restore(
+                    Path::new(required(&flags,"--root")?),required(&flags,"--id")?,
+                    Path::new(required(&flags,"--identity")?),
+                    Path::new(required(&flags,"--destination")?))?;
+                println!("{}",serde_json::to_string_pretty(&record)?);
+            },
+            _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
     if family == "plugins" {
         if password_stdin { return Err("Plugin catalog does not accept passwords".into()); }
         match command {
