@@ -39,6 +39,7 @@ struct AppConfig {
     security: SecurityPolicy,
     root: PathBuf,
     identity: Option<PathBuf>,
+    immutable_vault_root: Option<PathBuf>,
     exports: PathBuf,
     audit: PathBuf,
     smtp: Option<SmtpConfig>,
@@ -59,6 +60,8 @@ struct Login { username: String, password: String }
 impl Drop for Login { fn drop(&mut self) { self.password.zeroize(); } }
 #[derive(Deserialize)]
 struct Export { backup_id: String, selection: Option<String>, selections: Option<Vec<String>> }
+#[derive(Deserialize)]
+struct VaultRestore { id: String }
 
 fn random_token() -> String {
     let mut bytes=[0u8;32];rand::rngs::OsRng.fill_bytes(&mut bytes);hex::encode(bytes)
@@ -345,6 +348,72 @@ async fn dashboard(State(state):State<AppState>,headers:HeaderMap)->Response {
 fn unauthorized()->(StatusCode,Json<Value>) {
     (StatusCode::UNAUTHORIZED,Json(json!({"error":"authentication_required"})))
 }
+async fn vault_store_status(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)> {
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name {return Err((StatusCode::FORBIDDEN,Json(json!({"error":"admin_required"}))));}
+    let root=state.0.immutable_vault_root.as_ref().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"immutable_vault_not_configured"}))))?;
+    let value=multi_backup_core::immutable_vault::status(root).map_err(|_|(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"immutable_vault_unavailable"}))))?;
+    Ok(Json(value))
+}
+async fn vault_store_list(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)> {
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name {return Err((StatusCode::FORBIDDEN,Json(json!({"error":"admin_required"}))));}
+    let root=state.0.immutable_vault_root.as_ref().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"immutable_vault_not_configured"}))))?;
+    let list=multi_backup_core::immutable_vault::list(root).map_err(|_|(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"immutable_vault_read_failed"}))))?;
+    Ok(Json(json!({"snapshots":list,"external_worm_verified":false})))
+}
+async fn vault_store_backup(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)> {
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name || !same_origin(&headers,&state.0) ||
+        headers.get("x-csrf-token").and_then(|s|s.to_str().ok())!=Some(actor.csrf.as_str()) {
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"vault_write_denied"}))));
+    }
+    let root=state.0.immutable_vault_root.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"immutable_vault_not_configured"}))))?;
+    let source=state.0.root.clone();
+    let task=tokio::task::spawn_blocking(move||multi_backup_core::immutable_vault::backup(&root,&source));
+    let record=task.await.map_err(|_|(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_backup_worker_failed"}))))?
+        .map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_backup_failed"}))))?;
+    audit_actor(&state.0,"immutable_vault_backup_created",&actor.user);
+    Ok(Json(serde_json::to_value(record).unwrap_or(json!({"error":"serialization_failed"}))))
+}
+async fn vault_store_restore(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<VaultRestore>)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)> {
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name || !same_origin(&headers,&state.0) ||
+        headers.get("x-csrf-token").and_then(|s|s.to_str().ok())!=Some(actor.csrf.as_str()) ||
+        !state.0.security.can_restore(&actor.user,&state.0.name) ||
+        !state.0.security.recovery_ok(&headers) {
+        audit_actor(&state.0,"immutable_vault_restore_denied",&actor.user);
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"recovery_approval_required"}))));
+    }
+    let root=state.0.immutable_vault_root.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"immutable_vault_not_configured"}))))?;
+    let identity=state.0.identity.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_identity_not_configured"}))))?;
+    fs::create_dir_all(&state.0.exports).map_err(|_|(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_restore_export_root_failed"}))))?;
+    let dest=state.0.exports.join(format!("vault-restore-{}",&random_token()[..24]));
+    let snapshot=req.id;
+    let task_dest=dest.clone();
+    let task=tokio::task::spawn_blocking(move||
+        multi_backup_core::immutable_vault::restore(&root,&snapshot,&identity,&task_dest));
+    let record=task.await.map_err(|_|(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_restore_worker_failed"}))))?
+        .map_err(|_|(StatusCode::BAD_REQUEST,Json(json!({"error":"vault_restore_integrity_failed"}))))?;
+    audit_actor(&state.0,"immutable_vault_restore_completed",&actor.user);
+    Ok(Json(json!({"snapshot_id":record.id,"files":record.files,
+        "new_restore_directory":dest.to_string_lossy(),"overwrote_existing":false})))
+}
+
 async fn backups(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)> {
     let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
@@ -421,7 +490,9 @@ async fn security_status(State(state):State<AppState>,headers:HeaderMap)
     Ok(Json(json!({"hardened":state.0.security.hardened(),
         "private_gateway_required":state.0.security.private_gate_enabled(),
         "recovery_approval_required":state.0.security.approval_enabled(),
-        "vault_storage_write_api":false,
+        "vault_storage_write_api":state.0.immutable_vault_root.is_some(),
+        "vault_delete_api":false,
+        "vault_external_worm_verified":false,
         "remote_delete_api":false,
         "keys_or_internal_paths_exposed":false})))
 }
@@ -556,6 +627,17 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let exports=PathBuf::from(std::env::var("MULTI_BACKUP_EXPORT_ROOT")
         .unwrap_or_else(|_|"/data/exports".into()));
     let identity=std::env::var_os("MULTI_BACKUP_AGE_IDENTITY_FILE").map(PathBuf::from);
+    let immutable_vault_root=std::env::var_os("MULTI_BACKUP_IMMUTABLE_VAULT_ROOT").map(PathBuf::from);
+    if let Some(vault_root)=&immutable_vault_root {
+        // Independent filesystem is an operator responsibility. Never allow
+        // vault and live backup store to overlap, even by symlink aliases.
+        let vault=fs::canonicalize(vault_root)?;
+        let live=fs::canonicalize(&root)?;
+        if vault.starts_with(&live)||live.starts_with(&vault){
+            return Err("Immutable vault and live store must be disjoint".into());
+        }
+        multi_backup_core::immutable_vault::status(&vault)?;
+    }
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
     // The postgres 0.19 synchronous client internally blocks on a Tokio
@@ -630,7 +712,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let ldap=LdapConfig::from_env()?;
     let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,security,root,exports,identity,audit,smtp,dav,ldap,oidc,
+        name,password_hash:hash,origin,security,root,exports,identity,immutable_vault_root,audit,smtp,dav,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
@@ -644,6 +726,10 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
+        .route("/api/vault-store/status",get(vault_store_status))
+        .route("/api/vault-store/list",get(vault_store_list))
+        .route("/api/vault-store/backup",post(vault_store_backup))
+        .route("/api/vault-store/restore",post(vault_store_restore))
         .route("/dav/:id",axum::routing::any(dav::root))
         .route("/dav/:id/",axum::routing::any(dav::root))
         .route("/dav/:id/*path",axum::routing::any(dav::file))
