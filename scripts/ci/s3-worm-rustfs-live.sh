@@ -135,7 +135,22 @@ assert new["Mode"]=="COMPLIANCE"
 assert parse(new["RetainUntilDate"])>=parse(old["RetainUntilDate"])
 PY
 "$NATIVE" s3-vault verify --config "$TMP/rustfs.json" --id "$ID" --identity "$TMP/key.age"
-echo "PASS real RustFS versioned S3 COMPLIANCE, verified encrypted backup/restore and blocked adversarial delete"
+# A bare DELETE without versionId may create a delete marker and hide an
+# immutable manifest. The independently escrowed version ID MUST still
+# support verified age decryption and restore after this attack.
+s3 delete-object --bucket "$BUCKET" --key "$MANIFEST" > "$TMP/delete-marker.json"
+if s3 head-object --bucket "$BUCKET" --key "$MANIFEST" >/dev/null 2>&1;then
+  echo "FAIL: RustFS did not hide current manifest with a delete marker" >&2;exit 1
+fi
+if "$NATIVE" s3-vault verify --config "$TMP/rustfs.json" --id "$ID" --identity "$TMP/key.age" >/dev/null 2>&1;then
+  echo "FAIL: mutable manifest lookup unexpectedly ignored the delete marker" >&2;exit 1
+fi
+"$NATIVE" s3-vault verify --config "$TMP/rustfs.json" --id "$ID" \
+  --manifest-version "$MANIFEST_VER" --identity "$TMP/key.age"
+"$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
+  --manifest-version "$MANIFEST_VER" --identity "$TMP/key.age" --destination "$TMP/pinned-restore"
+cmp "$TMP/source/binary.bin" "$TMP/pinned-restore/multi-backup/s3-vault/$ID/binary.bin"
+echo "PASS real RustFS versioned COMPLIANCE, verified age backup and pinned recovery after delete marker"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ];then
   {
     echo "### RustFS real S3 WORM acceptance"
