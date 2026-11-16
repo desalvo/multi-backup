@@ -40,6 +40,7 @@ struct AppConfig {
     root: PathBuf,
     identity: Option<PathBuf>,
     immutable_vault_root: Option<PathBuf>,
+    s3_vault_config: Option<multi_backup_core::s3_vault::Config>,
     exports: PathBuf,
     audit: PathBuf,
     smtp: Option<SmtpConfig>,
@@ -414,6 +415,86 @@ async fn vault_store_restore(State(state):State<AppState>,headers:HeaderMap,Json
         "new_restore_directory":dest.to_string_lossy(),"overwrote_existing":false})))
 }
 
+
+async fn s3_vault_status(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name {
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"admin_required"}))));
+    }
+    let config=state.0.s3_vault_config.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_vault_not_configured"}))))?;
+    let result=tokio::task::spawn_blocking(move||
+        multi_backup_core::s3_vault::preflight(&config)).await;
+    result.map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_worker_failed"}))))?
+        .map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_worm_preflight_failed"}))))?;
+    Ok(Json(json!({"configured":true,"bucket_versioning":"Enabled",
+        "object_lock":"COMPLIANCE","status":"preflight_pass",
+        "external_worm_certified":false,"delete_supported":false})))
+}
+async fn s3_vault_backup(State(state):State<AppState>,headers:HeaderMap)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name || !same_origin(&headers,&state.0)
+        || headers.get("x-csrf-token").and_then(|h|h.to_str().ok())!=Some(actor.csrf.as_str()){
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"s3_vault_backup_denied"}))));
+    }
+    let config=state.0.s3_vault_config.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_vault_not_configured"}))))?;
+    let source=state.0.root.clone(); // Only server-owned data; never browser-supplied path.
+    let result=tokio::task::spawn_blocking(move||
+        multi_backup_core::s3_vault::backup(&config,&source)).await;
+    let record=result.map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_worker_failed"}))))?
+        .map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_backup_failed"}))))?;
+    audit_actor(&state.0,"s3_worm_vault_backup_created",&actor.user);
+    Ok(Json(serde_json::to_value(record).unwrap_or(json!({"error":"serialization_failed"}))))
+}
+async fn s3_vault_verify(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<VaultRestore>)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name || !same_origin(&headers,&state.0)
+        || headers.get("x-csrf-token").and_then(|h|h.to_str().ok())!=Some(actor.csrf.as_str()){
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"s3_verify_denied"}))));
+    }
+    let config=state.0.s3_vault_config.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_vault_not_configured"}))))?;
+    let identity=state.0.identity.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_identity_not_configured"}))))?;
+    let snapshot=req.id;
+    let result=tokio::task::spawn_blocking(move||
+        multi_backup_core::s3_vault::verify(&config,&snapshot,&identity)).await;
+    let record=result.map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_worker_failed"}))))?
+        .map_err(|_|(StatusCode::BAD_REQUEST,Json(json!({"error":"s3_verify_failed"}))))?;
+    Ok(Json(serde_json::to_value(record).unwrap_or(json!({"error":"serialization_failed"}))))
+}
+async fn s3_vault_restore(State(state):State<AppState>,headers:HeaderMap,Json(req):Json<VaultRestore>)
+    ->Result<Json<Value>,(StatusCode,Json<Value>)>{
+    let actor=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if actor.user!=state.0.name || !same_origin(&headers,&state.0)
+        || headers.get("x-csrf-token").and_then(|h|h.to_str().ok())!=Some(actor.csrf.as_str())
+        || !state.0.security.can_restore(&actor.user,&state.0.name)
+        || !state.0.security.recovery_ok(&headers){
+        audit_actor(&state.0,"s3_worm_vault_restore_denied",&actor.user);
+        return Err((StatusCode::FORBIDDEN,Json(json!({"error":"recovery_approval_required"}))));
+    }
+    let config=state.0.s3_vault_config.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_vault_not_configured"}))))?;
+    let identity=state.0.identity.clone().ok_or_else(||(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"vault_identity_not_configured"}))))?;
+    fs::create_dir_all(&state.0.exports).map_err(|_|(
+        StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_export_root_failed"}))))?;
+    let destination=state.0.exports.join(format!("s3-vault-restore-{}",&random_token()[..24]));
+    let target=destination.clone();
+    let snapshot=req.id;
+    let result=tokio::task::spawn_blocking(move||
+        multi_backup_core::s3_vault::restore(&config,&snapshot,&identity,&target)).await;
+    let record=result.map_err(|_|(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"s3_worker_failed"}))))?
+        .map_err(|_|(StatusCode::BAD_REQUEST,Json(json!({"error":"s3_restore_failed"}))))?;
+    audit_actor(&state.0,"s3_worm_vault_restore_completed",&actor.user);
+    Ok(Json(json!({"snapshot_id":record.id,"files":record.files,
+        "new_restore_directory":destination.to_string_lossy(),"overwrote_existing":false})))
+}
+
 async fn backups(State(state):State<AppState>,headers:HeaderMap)
     ->Result<Json<Value>,(StatusCode,Json<Value>)> {
     let auth=session(&headers,&state.0).await.ok_or_else(unauthorized)?.1;
@@ -638,6 +719,9 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         }
         multi_backup_core::immutable_vault::status(&vault)?;
     }
+    let s3_vault_config=std::env::var_os("MULTI_BACKUP_S3_VAULT_CONFIG")
+        .map(|config| multi_backup_core::s3_vault::Config::load(&PathBuf::from(config)))
+        .transpose()?;
     let audit=PathBuf::from(std::env::var("MULTI_BACKUP_AUDIT_LOG")
         .unwrap_or_else(|_|"/data/audit/events.jsonl".into()));
     // The postgres 0.19 synchronous client internally blocks on a Tokio
@@ -712,7 +796,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let ldap=LdapConfig::from_env()?;
     let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,security,root,exports,identity,immutable_vault_root,audit,smtp,dav,ldap,oidc,
+        name,password_hash:hash,origin,security,root,exports,identity,immutable_vault_root,s3_vault_config,audit,smtp,dav,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
@@ -726,6 +810,10 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
+        .route("/api/s3-vault/status",get(s3_vault_status))
+        .route("/api/s3-vault/backup",post(s3_vault_backup))
+        .route("/api/s3-vault/verify",post(s3_vault_verify))
+        .route("/api/s3-vault/restore",post(s3_vault_restore))
         .route("/api/vault-store/status",get(vault_store_status))
         .route("/api/vault-store/list",get(vault_store_list))
         .route("/api/vault-store/backup",post(vault_store_backup))
