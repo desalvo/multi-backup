@@ -981,3 +981,13 @@ One-line English commit summary: Fix stale hardcoded agent revision assertions s
 - All 33 plugin stages remain unchanged: do not invent `Ready` for provider plans. Physical three-host network/DR, remote agent TLS field, root-resistant vault and stable signing still require external infrastructure evidence.
 
 One-line English commit summary: Release gated Rust-native RC1 from proven one-SHA artifacts while qualifying monitoring and Patroni netns without requiring notarization in prerelease.
+
+
+## r175 — recover Windows artifact directory layout without retesting qualified binaries (16 Nov 2026)
+
+- RC1 qualification [#43945759433](https://github.com/desalvo/multi-backup/actions/runs/43945759433) passed **four independent jobs** on commit `f314bc3b5043e9ef70fe43c573d6ba84f360158d`: exact native r173 32-job/27-artifact provenance, real Rust Prometheus HTTPS, Net-SNMPv3 authPriv with native Rust producer, and real Patroni/etcd PostgreSQL16 netns network-partition failover/fencing. Its fifth job **correctly denied publishing** because native Windows EXEs from real GitHub artifacts live inside `installers/`, whereas the strict collector accepts only root-level native archives. No RC release was created by the failed job.
+- Added `scripts/ci/normalize-rust-native-artifacts-r175.sh`: checks the *known, exact* two Windows native EXE names and expected artifact directories, rejects symlink/destination overwrite, copies bytes without modification and checks both content and SHA-256; `tests/test_rc_windows_normalize_r175.py` verifies positive, overwrite rejection and symlink rejection.
+- r174 workflow is now manual-only and shares this normalization step. **New** `.github/workflows/rc-publish-r175.yml` reuses the exact four successful r174 jobs through GitHub-provided status at pinned SHA, revalidates **all 32 successful r173 production jobs and 27 native artifacts** without repeating them, and assembles/publicizes only a prerelease in distinct `rc-0.1.0-rc.1` tag namespace (not `v*`, avoiding a duplicate stable full CI). Stable release policy and production notarization requirement remain unchanged.
+- RC is a **software prerelease scope**. Three independent physical hosts, remote multi-machine TLS for agents, root-resistant vault trust-domain separation and vendor plugin integrations remain outside the certified CI scope and must stay described explicitly as open.
+
+One-line English commit summary: Normalize nested Windows installer artifacts byte-for-byte and publish only the already qualified native Rust RC without re-running monitored HA tests.

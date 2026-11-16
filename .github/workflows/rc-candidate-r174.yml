@@ -1,9 +1,5 @@
 name: Multi Backup - RC1 notarization-optional qualified Rust bundle
 on:
-  push:
-    branches: ["ci/r168-software-field-gates"]
-    paths:
-      - ".github/workflows/rc-candidate-r174.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -107,6 +103,8 @@ jobs:
           run-id: 43932195582
           pattern: rust-agent-*
           path: collected/agents
+      - name: Normalize verified Windows installers without changing EXE bytes
+        run: bash scripts/ci/normalize-rust-native-artifacts-r175.sh collected/gui collected/agents
       - name: Reuse strict Rust-only release collector without rebuilding
         shell: bash
         run: |
