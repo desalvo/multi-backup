@@ -50,9 +50,25 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
   - role: worker
+    extraMounts:
+      - hostPath: /run/udev
+        containerPath: /run/udev
+        readOnly: true
   - role: worker
+    extraMounts:
+      - hostPath: /run/udev
+        containerPath: /run/udev
+        readOnly: true
   - role: worker
+    extraMounts:
+      - hostPath: /run/udev
+        containerPath: /run/udev
+        readOnly: true
 EOF
+# Rook/ceph-volume 20.x require host udev data for loop-device inventory.
+# A kind node without the runner's /run/udev cannot prepare a real OSD.
+test -d /run/udev/data || { echo "FAIL: runner has no live udev database" >&2; exit 3; }
+command -v udevadm >/dev/null
 kind create cluster --name "$NAME" --config "$TEMP/kind.yaml" --wait 240s
 kubectl wait --for=condition=Ready node --all --timeout=180s
 test "$(kubectl get nodes -o json | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["items"]))')" -eq 4
@@ -81,6 +97,24 @@ test "${#OSD_NAMES[@]}" -eq 3
 test "${OSD_NAMES[0]}" != "${OSD_NAMES[1]}"
 test "${OSD_NAMES[0]}" != "${OSD_NAMES[2]}"
 test "${OSD_NAMES[1]}" != "${OSD_NAMES[2]}"
+
+# Rebuild udev observations for ONLY the ephemeral runner's loop devices.
+# ceph-volume enumerates ALL loop sysfs devices, not only the requested one.
+# The trigger is restricted to the loop subsystem; never trigger host disks.
+sudo udevadm trigger --action=change --subsystem-match=block --sysname-match='loop*'
+sudo udevadm settle --timeout=40
+for i in 0 1 2; do
+  device="${OSD_NAMES[$i]}"
+  node="${WORKERS[$i]}"
+  number="$(docker exec "$node" cat "/sys/block/$device/dev")"
+  case "$number" in 7:*) ;; *) echo "FAIL: unsafe non-loop OSD major/minor" >&2; exit 1;; esac
+  if ! test -s "/run/udev/data/b$number" ||
+     ! docker exec "$node" test -s "/run/udev/data/b$number"; then
+    echo "FAIL: $node $device has no authentic host udev database (b$number)" >&2
+    exit 1
+  fi
+done
+echo "PASS: three disposable OSD loop devices have real udev state inside kind"
 
 UPSTREAM="https://raw.githubusercontent.com/rook/rook/$ROOK_VERSION/deploy/examples"
 for name in crds common operator; do
