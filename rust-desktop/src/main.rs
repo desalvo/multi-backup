@@ -41,6 +41,18 @@ impl Page {
         }
     }
 }
+/// The GUI lists the authoritative Rust registry, not a hardcoded two-item
+/// provider subset. Search is read-only and never grants execution rights.
+fn matching_providers(query:&str)->Vec<&'static plugins::PluginDescriptor>{
+    let needle=query.trim().to_lowercase();
+    plugins::CATALOG.iter().filter(|provider|{
+        needle.is_empty()||
+        provider.id.to_lowercase().contains(&needle)||
+        provider.title.to_lowercase().contains(&needle)||
+        provider.notes.to_lowercase().contains(&needle)
+    }).collect()
+}
+
 enum Event {
     Status(String),
     Progress(f32, String),
@@ -90,6 +102,7 @@ struct Fields {
     plugin_namespace: String,
     plugin_gpfs_access: String,
     plugin_snapshot_attested: bool,
+    plugin_search: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -728,17 +741,56 @@ impl NativeApp {
         self.draw_progress(ui);
     }
     fn plugins(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Provider nativi");
-        Self::card(ui, "GitHub", |ui| {
-            ui.label("Git mirror, metadata e Actions CI tramite gh/git con Rust.");
-            if ui.button("Seleziona GitHub").clicked() {
-                self.provider = "github".into(); self.page = Page::Backup;
-            }
+        ui.heading("Catalogo plugin Rust");
+        ui.label("Input = origine del backup; Output = destinazione dell'archivio. "
+            .to_owned() + "Le operazioni di restore hanno uno stato separato.");
+        ui.horizontal(|ui| {
+            ui.label("Cerca provider:");
+            ui.add(egui::TextEdit::singleline(&mut self.fields.plugin_search)
+                .hint_text("Nome, ID o funzionalità…").desired_width(280.0));
+            if ui.button("Pulisci").clicked() {self.fields.plugin_search.clear();}
         });
-        Self::card(ui, "Dropbox", |ui| {
-            ui.label("Download TLS read-only, revisioni e archivi cifrati.");
-            if ui.button("Seleziona Dropbox").clicked() {
-                self.provider = "dropbox".into(); self.page = Page::Backup;
+        let visible=matching_providers(&self.fields.plugin_search);
+        ui.label(RichText::new(format!("{} di {} provider — contratto dal motore Rust",
+            visible.len(),plugins::CATALOG.len())).color(MUTED));
+        ui.label(RichText::new("Preview NON significa collaudo produttivo. "
+            .to_owned() + "Nessun comando di backup viene avviato soltanto selezionando un provider.")
+            .small().color(MUTED));
+        ui.separator();
+        egui::ScrollArea::vertical().max_height(700.0).show(ui,|ui|{
+            for descriptor in visible {
+                egui::CollapsingHeader::new(format!("{} — {}",descriptor.id,descriptor.title))
+                    .default_open(matches!(descriptor.id,"github"|"dropbox"))
+                    .show(ui,|ui|{
+                        ui.horizontal_wrapped(|ui|{
+                            ui.label(format!("Backup input: {:?}",descriptor.backup_input));
+                            ui.label(format!("Backup output: {:?}",descriptor.backup_output));
+                        });
+                        ui.horizontal_wrapped(|ui|{
+                            ui.label(format!("Restore input: {:?}",descriptor.restore_input));
+                            ui.label(format!("Restore output: {:?}",descriptor.restore_output));
+                        });
+                        ui.label(RichText::new(descriptor.notes).color(MUTED).small());
+                        ui.label(RichText::new(format!("Coerenza: {}",descriptor.consistency))
+                            .color(MUTED).small());
+                        if matches!(descriptor.id,"github"|"dropbox"){
+                            if ui.add_enabled(!self.active,
+                                egui::Button::new("Apri backup nativo")).clicked(){
+                                self.provider=descriptor.id.into();
+                                self.page=Page::Backup;
+                            }
+                        }else if matches!(descriptor.id,"posix"|"nfs"|"smb"|"sshfs"|"gpfs"){
+                            if ui.add_enabled(!self.active,
+                                egui::Button::new("Configura sorgente montata")).clicked(){
+                                self.fields.plugin_input=descriptor.id.into();
+                                self.page=Page::Storage;
+                            }
+                        }else{
+                            ui.label(RichText::new(
+                                "Nessun comando generico abilitato dalla GUI per questo provider.")
+                                .color(MUTED).small());
+                        }
+                    });
             }
         });
     }
@@ -1758,6 +1810,8 @@ fn main() -> eframe::Result {
         assert!(image::load_from_memory(include_bytes!("../../assets/icon-256.png")).is_ok());
         assert_eq!(progress_rgb(0.), (232,32,32));
         assert_eq!(progress_rgb(100.), (32,232,32));
+        assert_eq!(matching_providers("").len(),plugins::CATALOG.len());
+        assert!(matching_providers("gpfs").iter().any(|p|p.id=="gpfs"));
         println!("Native Rust GUI self-test OK"); return Ok(());
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
@@ -1770,4 +1824,27 @@ fn main() -> eframe::Result {
     };
     eframe::run_native("Multi Backup", options,
         Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))))
+}
+
+#[cfg(test)]
+mod provider_gui_tests{
+    use super::*;
+    #[test]
+    fn every_catalog_plugin_is_discoverable_and_missing_plugins_are_not_invented(){
+        assert_eq!(matching_providers("").len(),plugins::CATALOG.len());
+        assert_eq!(matching_providers("   ").len(),plugins::CATALOG.len());
+        assert_eq!(matching_providers("GPFS").len(),1);
+        assert_eq!(matching_providers("missing-provider-not-registered").len(),0);
+        for id in ["github","dropbox","pbs","proxmox","vmware","ovirt",
+                   "gpfs","nfs","smb","postgresql","anti-ransomware-vault"]{
+            assert!(matching_providers(id).iter().any(|d|d.id==id));
+        }
+    }
+    #[test]
+    fn no_catalog_source_is_implicitly_production_ready(){
+        assert!(!plugins::CATALOG.is_empty());
+        assert!(plugins::CATALOG.iter().all(|p|
+            p.backup_input!=plugins::Stage::Ready &&
+            p.backup_output!=plugins::Stage::Ready));
+    }
 }
