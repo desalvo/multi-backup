@@ -1,0 +1,36 @@
+name: Multi Backup - actual authenticated WebDAV davfs2 Rust backup
+on:
+  pull_request:
+    paths:
+      - "rust/**"
+      - "scripts/test-real-webdav-r046.sh"
+      - ".github/workflows/webdav-live-r046.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-webdav:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install real WebDAV server/client and Rust age requirements
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y davfs2 rclone apache2-utils ca-certificates age jq openssl curl
+          test -c /dev/fuse
+          bash -n scripts/test-real-webdav-r046.sh
+      - name: Build compiled Rust native plugin dispatcher
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Actual loopback TLS WebDAV with htpasswd and verified FUSE mount
+        env:
+          RUNNER_ENVIRONMENT: github-hosted
+        run: bash scripts/test-real-webdav-r046.sh
+      - name: Record honest field boundary
+        if: success()
+        run: |
+          echo "PASS authentic authenticated HTTPS WebDAV server, davfs2 FUSE RO client, Rust age-encrypted backup, verify and bytewise local recovery." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED provider API ETag, durable remote snapshot, ACL/xattr, target WebDAV restore, disconnected-client faults." >> "$GITHUB_STEP_SUMMARY"
