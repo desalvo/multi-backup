@@ -5,7 +5,11 @@ on:
       - 'scripts/gpfs-lab/06-adsnet-vm-preflight.sh'
       - 'scripts/gpfs-lab/07-adsnet-dns-check.sh'
       - 'scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh'
+      - 'scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh'
+      - 'scripts/gpfs-lab/10-adsnet-observe-gpfs-core.sh'
+      - 'scripts/gpfs-lab/11-adsnet-observe-ces-lowmem.sh'
       - 'docs/GPFS_ADSNET_LAB_R043_IT.md'
+      - 'docs/GPFS_DEVELOPER_LAB_R042_IT.md'
       - '.github/workflows/gpfs-adsnet-preflight-r043.yml'
   workflow_dispatch:
 permissions:
@@ -19,12 +23,16 @@ jobs:
       - name: Assert scripts parse, never auto-enroll SSH fingerprints or mutate disks
         run: |
           set -euo pipefail
-          for file in scripts/gpfs-lab/06-adsnet-vm-preflight.sh scripts/gpfs-lab/07-adsnet-dns-check.sh scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh; do
+          for file in scripts/gpfs-lab/06-adsnet-vm-preflight.sh scripts/gpfs-lab/07-adsnet-dns-check.sh scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh scripts/gpfs-lab/10-adsnet-observe-gpfs-core.sh scripts/gpfs-lab/11-adsnet-observe-ces-lowmem.sh; do
             bash -n "$file"
           done
           grep -F 'StrictHostKeyChecking=yes' scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh
           grep -F 'BatchMode=yes' scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh
-          if grep -Eq '(ssh-keyscan|ssh-keygen|ssh-copy-id|mkfs|pvcreate|mmcrnsd|systemctl stop|firewall-cmd --|dnf update)' scripts/gpfs-lab/06-adsnet-vm-preflight.sh scripts/gpfs-lab/07-adsnet-dns-check.sh scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh; then
+          grep -F 'wipefs --no-act' scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh
+          grep -F 'kernel-devel-$KERNEL' scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh
+          grep -F 'findmnt -rn -t gpfs' scripts/gpfs-lab/10-adsnet-observe-gpfs-core.sh
+          grep -F 'mmces state show' scripts/gpfs-lab/11-adsnet-observe-ces-lowmem.sh
+          if grep -Eq '(ssh-keyscan|ssh-keygen|ssh-copy-id|mkfs|pvcreate|mmcrnsd|systemctl stop|firewall-cmd --|dnf update)' scripts/gpfs-lab/06-adsnet-vm-preflight.sh scripts/gpfs-lab/07-adsnet-dns-check.sh scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh scripts/gpfs-lab/09-adsnet-dependency-nsd-audit.sh; then
             echo 'FAIL mutating command in read-only lab audit'; exit 1
           fi
           if bash scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh >/dev/null 2>&1; then
