@@ -1,0 +1,33 @@
+name: Multi Backup - ADSNET GPFS node and SSH preflight lint
+on:
+  pull_request:
+    paths:
+      - 'scripts/gpfs-lab/06-adsnet-vm-preflight.sh'
+      - 'scripts/gpfs-lab/07-adsnet-dns-check.sh'
+      - 'scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh'
+      - 'docs/GPFS_ADSNET_LAB_R043_IT.md'
+      - '.github/workflows/gpfs-adsnet-preflight-r043.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe-static-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert scripts parse, never auto-enroll SSH fingerprints or mutate disks
+        run: |
+          set -euo pipefail
+          for file in scripts/gpfs-lab/06-adsnet-vm-preflight.sh scripts/gpfs-lab/07-adsnet-dns-check.sh scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh; do
+            bash -n "$file"
+          done
+          grep -F 'StrictHostKeyChecking=yes' scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh
+          grep -F 'BatchMode=yes' scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh
+          if grep -Eq '(ssh-keyscan|ssh-keygen|ssh-copy-id|mkfs|pvcreate|mmcrnsd|systemctl stop|firewall-cmd --|dnf update)' scripts/gpfs-lab/06-adsnet-vm-preflight.sh scripts/gpfs-lab/07-adsnet-dns-check.sh scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh; then
+            echo 'FAIL mutating command in read-only lab audit'; exit 1
+          fi
+          if bash scripts/gpfs-lab/08-adsnet-verify-ssh-mesh.sh >/dev/null 2>&1; then
+            echo 'FAIL physical GPFS SSH test accepted GitHub hosted runner'; exit 1
+          fi
+          echo 'PASS offline validation only; no host connection, NSD disk or license was tested'
