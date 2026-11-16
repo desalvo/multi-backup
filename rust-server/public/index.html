@@ -17,6 +17,16 @@ un filesystem locale resta assegnato soltanto alla replica che lo possiede.</p>
 <div><h3>Job e agenti</h3><div id="cluster-jobs"></div><div id="cluster-agents"></div></div>
 </div>
 </section>
+<section id="immutable-vault">
+<div class="controls"><h2>Vault backup anti-ransomware</h2><button id="vault-refresh" type="button">Aggiorna vault</button></div>
+<p class="muted">Lato server: copia cifrata verificabile dello store Multi Backup in uno storage separato. Ogni versione è nuova; nessuna API di delete o overwrite. Protezione ransomware effettiva solo con WORM/append-only applicato fuori dal processo.</p>
+<div id="vault-state" role="status" class="muted"></div>
+<div class="controls"><button id="vault-backup" type="button">Crea nuovo backup cifrato nel vault</button>
+<button id="vault-restore" type="button">Ripristina snapshot scelto in nuova cartella</button></div>
+<label>ID snapshot vault da ripristinare <input id="vault-snapshot" type="text" maxlength="32" autocomplete="off" placeholder="32 caratteri esadecimali"></label>
+<p class="muted">Il restore richiede l’autorizzazione offline già presente nella sezione esportazione. Non scrive mai sullo store originale.</p>
+<div id="vault-snapshots" role="status"></div>
+</section>
 <section><h2>Notifiche SMTP(S)</h2>
 <p class="muted">Il server può inviare un messaggio di prova al destinatario configurato.
 La password viene letta da un Secret separato; TLS e certificato server sono obbligatori.</p>
