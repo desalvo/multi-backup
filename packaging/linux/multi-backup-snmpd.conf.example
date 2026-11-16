@@ -1,0 +1,8 @@
+# Multi Backup optional Net-SNMP read-only monitoring, service disabled by default
+# Configure an SNMPv3 authPriv user with net-snmp-create-v3-user before enabling.
+# For legacy local-only v1/v2c, use scripts/configure-baremetal-snmp.sh.
+agentAddress udp:127.0.0.1:161
+sysLocation Multi Backup private monitoring
+view mbstatus included .1.3.6.1.4.1.8072.1.3.2
+rouser mbmonitor priv -V mbstatus
+extend mbStatus /usr/bin/multi-backup-server monitor-snmp-status
