@@ -1,0 +1,29 @@
+name: Multi Backup - genuine SNMPv3 authPriv private monitoring acceptance
+on:
+  push:
+    branches: ["feature/r060-baremetal-server-cluster-vault"]
+    paths:
+      - 'scripts/ci/snmp-v3-real-r117.sh'
+      - '.github/workflows/snmp-v3-real-r118.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-snmpv3-real-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-snmpv3:
+    name: Real Net-SNMPv3 SHA/AES authPriv, wrong key, no v2c, loopback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install real Net-SNMP agent and client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends snmp snmpd iproute2
+          bash -n scripts/ci/snmp-v3-real-r117.sh
+          bash -n scripts/configure-baremetal-snmp.sh
+      - name: Perform real on-host authenticated and encrypted SNMPv3 polling
+        run: bash scripts/ci/snmp-v3-real-r117.sh
