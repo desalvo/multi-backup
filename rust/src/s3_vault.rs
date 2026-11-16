@@ -272,14 +272,17 @@ impl Client {
         if actual<expected {return Err("S3 server retention shorter than requested".into());}
         Ok(())
     }
-    fn download(&self,key:&str,version:Option<&str>,dest:&Path) -> Result<()> {
+    fn download(&self,key:&str,version:Option<&str>,dest:&Path,max_bytes:u64) -> Result<()> {
         if fs::symlink_metadata(dest).is_ok() {return Err("Refusing to overwrite downloaded ciphertext".into());}
         let query=version.map(|v|vec![("versionId",v)]).unwrap_or_default();
         let response=self.sign("GET",Some(key),&query,&[],EMPTY_HASH)?.call()?;
         let mut out=fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
-        let mut src=response.into_reader();
-        std::io::copy(&mut src,&mut out)?;
+        let mut src=response.into_reader().take(max_bytes.saturating_add(1));
+        let copied=std::io::copy(&mut src,&mut out)?;
         out.sync_all()?;
+        if copied!=max_bytes {
+            return Err("S3 response length differs from immutable manifest".into());
+        }
         Ok(())
     }
     fn preflight(&self) -> Result<()> {
@@ -346,7 +349,7 @@ fn read_record(client:&Client,id:&str)->Result<Record>{
 }
 fn staged(client:&Client,record:&Record,where_to:&Path)->Result<std::path::PathBuf> {
     let output=where_to.join(format!("{}.tar.gz.age",record.id));
-    client.download(&record.archive_key,Some(&record.archive_version),&output)?;
+    client.download(&record.archive_key,Some(&record.archive_version),&output,record.bytes)?;
     let (actual,bytes)=hash_file(&output)?;
     if actual!=record.sha256 || bytes!=record.bytes{
         return Err("S3 restored ciphertext digest or size mismatch".into());
