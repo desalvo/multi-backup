@@ -14,6 +14,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
        multi-backup-native plugins pve-task-status --config-json OWNER_ONLY_PVE.json --node NODE --upid PVE_UPID [--json] (read-only status)\n\
+       multi-backup-native plugins pve-backup-media --config-json OWNER_ONLY_PVE.json --node NODE --storage STORE --guest-id VMID [--json] (read-only provider backup volume metadata; NOT Multi Backup verified)\n\
        multi-backup-native plugins pbs-snapshots --config-json OWNER_ONLY_PBS.json --datastore DATASTORE [--namespace NS] [--json] (read-only native VM/CT/host snapshots; PBS verification is not Multi Backup verification)\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins database-backup --profile-json DB.json --root STORE --identity AGE_KEY --label NAME [--json]\n\
@@ -236,6 +237,17 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 if json {println!("{}",serde_json::to_string_pretty(&inventory)?);}
                 else {println!("PBS {}: {} native snapshots (READ-ONLY; Multibackup recovery NOT verified)",
                     inventory.datastore,inventory.snapshots.len());}
+            },
+            "pve-backup-media" => {
+                accepted(&flags,&["--config-json","--node","--storage","--guest-id"])?;
+                let cfg=virtualization_inventory::Config::load(
+                    Path::new(required(&flags,"--config-json")?))?;
+                let vmid:u32=required(&flags,"--guest-id")?.parse()?;
+                let media=virtualization_inventory::pve_backup_media(&cfg,
+                    required(&flags,"--node")?,required(&flags,"--storage")?,vmid)?;
+                if json {println!("{}",serde_json::to_string_pretty(&media)?);}
+                else {println!("PVE storage {}: {} backup volumes for guest {} (provider metadata only, NOT verified archive)",
+                    media.storage,media.media.len(),vmid);}
             },
             "pve-start-backup" => {
                 accepted(&flags,&["--config-json","--node","--guest-kind",

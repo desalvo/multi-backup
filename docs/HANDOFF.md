@@ -854,3 +854,13 @@ One-line English commit summary: Integrate real isolated Patroni PG16 and TLS et
 - This is admission control, not a certified global exactly-once transaction/storage write fence; real multi-replica network failure testing and manifest atomic fencing remain open. No signed RC/stable release has been issued.
 
 One-line English commit summary: Reject mismatched replica admission limits at server startup before distributing jobs.
+
+
+## r160 — extend PVE Rust recovery prerequisites with actual remote backup media inventory
+
+- Native `plugins pve-backup-media --config-json CONFIG --node NODE --storage STORAGE --guest-id VMID --json` lists provider-identified PVE `vzdump` backup media using the read-only endpoint `GET /api2/json/nodes/NODE/storage/STORAGE/content?content=backup&vmid=VMID`. Bounded HTTPS/no redirect, owner-only scoped token; rejects other guest's VMID, another datastore, unsafe volume paths, duplicates, oversized or malformed responses and cross-provider credentials.
+- Information includes VM/CT subtype when source explicitly provides it, format, volume ID, size/time, protected flag and provider verification outcome. Crucially `multibackup_archive_verified=false`, `exported_to_multibackup=false` and `multibackup_restore_certified=false` regardless of the provider state.
+- [Focused Rust core unit CI 43904400603](https://github.com/desalvo/multi-backup/actions/runs/43904400603) **PASS** on source r159. A real authenticated Proxmox cluster, ciphertext archive capture, restore-new VM/CT and verification against source remain RC/field blockers.
+- Integrated into current Rust RC development line, not main or a release tag; full final Production Gate remains mandatory.
+
+One-line English commit summary: Integrate tested PVE native backup-media inventory with strict per-guest verification provenance.
