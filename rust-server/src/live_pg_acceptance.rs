@@ -216,3 +216,37 @@ fn real_pg_parallel_claims_and_signed_nonce_single_winner(){
         .filter(|accepted|*accepted).count();
     assert_eq!(accepted,1,"Concurrent requests must never reuse a signed nonce");
 }
+
+
+#[test]
+#[ignore = "requires disposable genuine PostgreSQL 16"]
+fn real_pg_monitor_token_issue_revoke_and_single_db_backup_lease(){
+    let db=live_pg_ci_fixture();
+    let id=format!("monitor-{}",Uuid::new_v4().simple());
+    assert!(db.create_monitor_token("",30).is_err());
+    assert!(db.create_monitor_token(&id,0).is_err());
+    let token=db.create_monitor_token(&id,7).unwrap();
+    let raw=token["token"].as_str().unwrap();
+    assert_eq!(raw.len(),70);
+    assert!(raw.starts_with("mbmon_"));
+    assert!(db.monitor_token_valid(raw).unwrap());
+    assert!(!db.monitor_token_valid("bad").unwrap());
+    let catalog=db.monitor_token_list().unwrap().to_string();
+    assert!(!catalog.contains(raw),"token plaintext must never reach catalog");
+    assert!(db.revoke_monitor_token(token["id"].as_str().unwrap()).unwrap());
+    assert!(!db.monitor_token_valid(raw).unwrap());
+    assert!(!db.revoke_monitor_token(token["id"].as_str().unwrap()).unwrap());
+
+    // This tests the PostgreSQL lease state machine only. It does NOT claim
+    // a real age/WORM backup, which has an independent integration test.
+    db.configure_db_backups(false,1440,"s3_worm").unwrap();
+    let replica="pg-live-dbbackup";
+    let claimed=db.claim_db_backup(replica,true).unwrap().unwrap();
+    assert!(db.claim_db_backup(replica,true).unwrap().is_none());
+    assert!(db.finish_db_backup(&claimed,None,Some("ci_expected_failure")).unwrap());
+    assert!(!db.finish_db_backup(&claimed,None,Some("replay")).unwrap());
+    let dashboard=db.db_backup_dashboard().unwrap();
+    assert_eq!(dashboard["lease_state"],"idle");
+    assert!(dashboard["history"].as_array().unwrap().iter()
+        .any(|item|item["status"]=="failed"&&item["error_code"]=="ci_expected_failure"));
+}
