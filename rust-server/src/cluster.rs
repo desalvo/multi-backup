@@ -7,6 +7,7 @@ use multi_backup_core::{
     execution_policy::ExecutionLimits
 };
 use postgres::Client;
+use sha2::{Digest,Sha256};
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
 use std::{env,fmt::Display};
@@ -141,6 +142,80 @@ CREATE TABLE IF NOT EXISTS mb_agent_uploads (
 ALTER TABLE mb_agent_uploads
   ADD COLUMN IF NOT EXISTS profile_sha256 TEXT;
 "#;
+// Each migration is applied once under a PostgreSQL advisory transaction
+// lock, and the SHA256 is pinned. In future: APPEND a new migration, never
+// modify a previously applied version. Existing legacy deployments are
+// bootstrapped atomically with the baseline schema and migration ledger.
+const DB_BACKUP_SCHEMA:&str=r#"
+CREATE TABLE IF NOT EXISTS mb_internal_backup_policy (
+  singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK(singleton),
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  interval_minutes INTEGER NOT NULL DEFAULT 1440
+    CHECK(interval_minutes BETWEEN 60 AND 43200),
+  target TEXT NOT NULL DEFAULT 's3_worm'
+    CHECK(target IN ('s3_worm','local_preview')),
+  next_due TIMESTAMPTZ NOT NULL DEFAULT now(),
+  current_job TEXT,
+  lease_state TEXT NOT NULL DEFAULT 'idle'
+    CHECK(lease_state IN ('idle','running','needs_reconciliation')),
+  lease_token TEXT,
+  last_completed TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO mb_internal_backup_policy(singleton)
+  VALUES(TRUE) ON CONFLICT (singleton) DO NOTHING;
+CREATE TABLE IF NOT EXISTS mb_internal_backup_history (
+  job_id TEXT PRIMARY KEY,
+  backup_id TEXT,
+  target TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('running','success','failed','needs_reconciliation')),
+  replica_id TEXT NOT NULL,
+  manifest JSONB,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  error_code TEXT
+);
+CREATE INDEX IF NOT EXISTS mb_internal_backup_history_recent
+  ON mb_internal_backup_history(started_at DESC);
+"#;
+const MIGRATIONS:&[(i64,&str)]=&[
+    (1,SCHEMA),
+    (2,DB_BACKUP_SCHEMA),
+];
+fn migrate_schema(db:&mut Client)->Result<(),BoxError>{
+    let mut tx=db.transaction()?;
+    // Transaction-scoped lock: only ONE replica performs schema creation or
+    // upgrades, including on a bare-metal cluster with many servers.
+    tx.batch_execute("SELECT pg_advisory_xact_lock(50494787123);
+        CREATE TABLE IF NOT EXISTS mb_schema_migrations (
+          version BIGINT PRIMARY KEY,
+          checksum_sha256 TEXT NOT NULL CHECK(length(checksum_sha256)=64),
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );")?;
+    let installed=tx.query("SELECT version,checksum_sha256
+       FROM mb_schema_migrations ORDER BY version",&[])?;
+    if installed.len()>MIGRATIONS.len(){
+        return Err(error("Database schema newer than this server; downgrade refused"));
+    }
+    for (position,row) in installed.iter().enumerate(){
+        let version:i64=row.get(0);
+        let checksum:String=row.get(1);
+        let (expected_version,sql)=MIGRATIONS[position];
+        let expected=hex::encode(Sha256::digest(sql.as_bytes()));
+        if version!=expected_version || checksum!=expected {
+            return Err(error("Database migration checksum/version mismatch: refusing startup"));
+        }
+    }
+    for &(version,sql) in MIGRATIONS.iter().skip(installed.len()){
+        tx.batch_execute(sql)?;
+        let digest=hex::encode(Sha256::digest(sql.as_bytes()));
+        tx.execute("INSERT INTO mb_schema_migrations(version,checksum_sha256)
+            VALUES($1,$2)",&[&version,&digest])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 fn error(message:impl Display)->BoxError{message.to_string().into()}
 fn ident(value:&str)->bool{
     !value.is_empty()&&value.len()<=128&&
@@ -199,7 +274,7 @@ impl Database {
         // underlying postgres 0.19 transport gets sslmode=require.
         let db=Self{dsn:strict_tls_dsn(&dsn)?};
         let mut client=db.connect()?;
-        client.batch_execute(SCHEMA)?;
+        migrate_schema(&mut client)?;
         Ok(Some(db))
     }
     pub(crate) fn connect(&self)->Result<Client,BoxError>{
@@ -629,6 +704,12 @@ mod tests {
         assert!(SCHEMA.contains("owner_replica"));
         assert!(SCHEMA.contains("node_local"));
         assert!(SCHEMA.contains("storage_ids"));
+    }
+    #[test]fn migration_ledger_is_versioned_and_hash_pinned(){
+        assert_eq!(MIGRATIONS.len(),2);
+        assert!(DB_BACKUP_SCHEMA.contains("mb_internal_backup_policy"));
+        assert!(DB_BACKUP_SCHEMA.contains("mb_internal_backup_history"));
+        assert!(Sha256::digest(SCHEMA.as_bytes()) != Sha256::digest(DB_BACKUP_SCHEMA.as_bytes()));
     }
     #[test]fn cluster_inventory_is_not_an_unscoped_local_export(){
         assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS mb_cluster_backups"));
