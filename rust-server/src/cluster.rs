@@ -819,7 +819,7 @@ impl Database {
         let mut db=self.connect()?;
         db.execute("INSERT INTO mb_monitor_tokens
           (token_id,name,secret_sha256,expires_at)
-          VALUES($1,$2,$3,now()+($4 * INTERVAL '1 day'))",
+          VALUES($1,$2,$3,now()+($4::integer * INTERVAL '1 day'))",
           &[&id,&name,&hash,&days])?;
         Ok(json!({"id":id,"token":token,"name":name,"expires_in_days":days,
                   "scope":"monitor.read"}))

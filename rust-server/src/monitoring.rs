@@ -46,10 +46,23 @@ fn prometheus_key()->Result<Option<Arc<Zeroizing<Vec<u8>>>>,ErrBox>{
     }
     Ok(Some(Arc::new(value)))
 }
+fn remove_sensitive_manifests(database:&mut Value){
+    // A scoped monitor.read token may inspect health and outcome counts,
+    // but must never become a way to list recovery manifests or paths.
+    if let Some(history)=database.get_mut("history").and_then(Value::as_array_mut){
+        for record in history {
+            if let Some(object)=record.as_object_mut(){
+                object.remove("manifest");
+            }
+        }
+    }
+}
 async fn state_snapshot(state:&AppState)->Result<Value,ErrBox>{
     if let Some(db)=state.0.cluster.clone(){
         tokio::task::spawn_blocking(move||->Result<Value,ErrBox>{
-            Ok(json!({"cluster":db.status()?,"database":db.db_backup_dashboard()?}))
+            let mut database=db.db_backup_dashboard()?;
+            remove_sensitive_manifests(&mut database);
+            Ok(json!({"cluster":db.status()?,"database":database}))
         }).await?
     }else{
         Ok(json!({"cluster":{"replicas":[{"healthy":true}],"jobs":[],"storage":[]},
@@ -237,6 +250,14 @@ pub fn snmp_status()->Result<(),ErrBox>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn readonly_monitor_cannot_list_database_recovery_manifests(){
+        let mut db=json!({"history":[{"job_id":"opaque","status":"success",
+            "manifest":{"private_path":"/secret/restore/archive","id":"safe-id"}}]});
+        remove_sensitive_manifests(&mut db);
+        assert_eq!(db["history"][0]["job_id"],"opaque");
+        assert!(db["history"][0].get("manifest").is_none());
+        assert!(!db.to_string().contains("/secret/"));
+    }
     #[test]fn prometheus_format_no_source_paths_or_secrets(){
         let v=json!({"cluster":{"replicas":[{"healthy":true}],"jobs":[{"status":"queued"}]},
            "database":{"enabled":false,"history":[],"database":{"role":"primary","standbys":[]}}});

@@ -685,3 +685,12 @@ CI trigger policy corrected to use actual changed files in feature push events, 
 ## r055 — Rust RC evidence inventory (16 Nov 2026)
 
 Rust S3 vault native dedicated plugin catalog PREVIEW on destination/restore-source only; no generic S3 input certification. Rust core/server/agent/desktop builds previously PASS, but provider parity not complete. Explicit verified real test coverage and missing provider gaps: docs/PLUGIN_CERTIFICATION_R055_IT.md. RC candidate scope and blockers: docs/RC_R055_CANDIDATE_SCOPE_IT.md. Ceph RGW diagnostic real CI 43829457157 has been started; no Ceph certification until PASS. Avoid broad real NFS/SMB and Lustre CI on plugin registry metadata-only changes (focused Rust tests suffice). PR #21 remains draft, no RC published.
+
+## r067 — fix and targeted RC validation (16 Nov 2026)
+
+- Corrected live PostgreSQL 16 monitoring-token issuance failure: `$4::integer * INTERVAL '1 day'` explicitly types token lifetime; prior run 43839136135 failed with PostgreSQL Float8 vs Rust i32 (`ToSql(3)`).
+- Extended real PostgreSQL test with exactly 4 checksum-pinned migrations, repeated initializer preserving versions/checksums, token revocation and out-of-range validation. This is real PostgreSQL, not an offline mock.
+- Monitoring REST (scope `monitor.read`) now removes encrypted-backup manifests from the returned status JSON. Full detailed manifests remain within the authenticated admin-only backup UI.
+- Narrowed real PostgreSQL HA acceptance workflow triggers to DB/monitoring/agent modules; Rust focused compile covers unrelated server Rust files. Do not repeat full CI on every small patch.
+- Latest upstream Ceph run 43832467180 is **FAIL despite 3 MON quorum, 3 OSD UP+IN and RGW running**, because the three OSDs are reported under a single kind worker/CRUSH host. The multi-node placement attestation is mandatory; a green MinIO/RustFS result is not Ceph certification. Need truly isolated per-worker OSD devices or a PVC-backed Ceph lab.
+- The stack of draft PRs (#10–14, #20–22) remains unmerged; no RC tag or new stable assets. For exact gate evidence see `docs/RC_READINESS_R067_IT.md`.

@@ -602,3 +602,12 @@ User-mandated scope is documented at `docs/VIRTUALIZATION_PLUGIN_REQUIREMENTS_R0
 ## r066 — VMware / oVirt container constraint (16 November 2026)
 
 Current VMware and oVirt plugin scope is VM-only. Do NOT build a container-agent/runtime workaround inside the hypervisor plugins; add native CT support only for versions, CT resource types and live/offline backup AND restore modes explicitly supported by official vendor APIs and verified end-to-end in real test environments. Historical oVirt container proposal is not evidence of currently supported CT backup. CT options stay hidden/unsupported otherwise. PVE QEMU VM and native LXC CT requirements remain as previously recorded. Corrected Rust catalog contract/tests and docs/VIRTUALIZATION_PLUGIN_REQUIREMENTS_R065_IT.md; no provider claimed certified. Avoid expensive hypervisor CI for documentation-only changes.
+
+## r067 — fix and targeted RC validation (16 Nov 2026)
+
+- Corrected live PostgreSQL 16 monitoring-token issuance failure: `$4::integer * INTERVAL '1 day'` explicitly types token lifetime; prior run 43839136135 failed with PostgreSQL Float8 vs Rust i32 (`ToSql(3)`).
+- Extended real PostgreSQL test with exactly 4 checksum-pinned migrations, repeated initializer preserving versions/checksums, token revocation and out-of-range validation. This is real PostgreSQL, not an offline mock.
+- Monitoring REST (scope `monitor.read`) now removes encrypted-backup manifests from the returned status JSON. Full detailed manifests remain within the authenticated admin-only backup UI.
+- Narrowed real PostgreSQL HA acceptance workflow triggers to DB/monitoring/agent modules; Rust focused compile covers unrelated server Rust files. Do not repeat full CI on every small patch.
+- Latest upstream Ceph run 43832467180 is **FAIL despite 3 MON quorum, 3 OSD UP+IN and RGW running**, because the three OSDs are reported under a single kind worker/CRUSH host. The multi-node placement attestation is mandatory; a green MinIO/RustFS result is not Ceph certification. Need truly isolated per-worker OSD devices or a PVC-backed Ceph lab.
+- The stack of draft PRs (#10–14, #20–22) remains unmerged; no RC tag or new stable assets. For exact gate evidence see `docs/RC_READINESS_R067_IT.md`.

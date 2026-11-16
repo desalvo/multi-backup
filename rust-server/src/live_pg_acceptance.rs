@@ -222,15 +222,36 @@ fn real_pg_parallel_claims_and_signed_nonce_single_winner(){
 #[ignore = "requires disposable genuine PostgreSQL 16"]
 fn real_pg_monitor_token_issue_revoke_and_single_db_backup_lease(){
     let db=live_pg_ci_fixture();
+    // After concurrent-safe auto-migration the real PG catalog must contain
+    // all four schema versions exactly once, with SHA256 digests. Repeat the
+    // schema initializer to assert that restarting another server replica
+    // preserves the ledger rather than attempting a destructive rebuild.
+    let before=db.connect().unwrap().query(
+       "SELECT version, checksum_sha256 FROM mb_schema_migrations ORDER BY version",&[]).unwrap();
+    assert_eq!(before.len(),4);
+    for (idx,row) in before.iter().enumerate(){
+        assert_eq!(row.get::<_,i64>(0),(idx+1) as i64);
+        assert_eq!(row.get::<_,String>(1).len(),64);
+    }
+    let _another_replica=live_pg_ci_fixture();
+    let after=db.connect().unwrap().query(
+       "SELECT version, checksum_sha256 FROM mb_schema_migrations ORDER BY version",&[]).unwrap();
+    assert_eq!(after.len(),4);
+    for (a,b) in before.iter().zip(after.iter()) {
+        assert_eq!(a.get::<_,i64>(0),b.get::<_,i64>(0));
+        assert_eq!(a.get::<_,String>(1),b.get::<_,String>(1));
+    }
     let id=format!("monitor-{}",Uuid::new_v4().simple());
     assert!(db.create_monitor_token("",30).is_err());
     assert!(db.create_monitor_token(&id,0).is_err());
+    assert!(db.create_monitor_token(&id,366).is_err());
     let token=db.create_monitor_token(&id,7).unwrap();
     let raw=token["token"].as_str().unwrap();
     assert_eq!(raw.len(),70);
     assert!(raw.starts_with("mbmon_"));
     assert!(db.monitor_token_valid(raw).unwrap());
     assert!(!db.monitor_token_valid("bad").unwrap());
+    assert!(!db.monitor_token_valid(&format!("mbmon_{}","F".repeat(64))).unwrap());
     let catalog=db.monitor_token_list().unwrap().to_string();
     assert!(!catalog.contains(raw),"token plaintext must never reach catalog");
     assert!(db.revoke_monitor_token(token["id"].as_str().unwrap()).unwrap());

@@ -3,7 +3,12 @@ on:
   push:
     branches: ["feature/**"]
     paths:
-      - "rust-server/**"
+      - "rust-server/src/cluster.rs"
+      - "rust-server/src/live_pg_acceptance.rs"
+      - "rust-server/src/agent_registry.rs"
+      - "rust-server/src/internal_db_backup.rs"
+      - "rust-server/src/monitoring.rs"
+      - ".github/workflows/agent-cluster-live-pg.yml"
   workflow_dispatch:
 permissions:
   contents: read
