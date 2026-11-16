@@ -7,7 +7,8 @@ use multi_backup_core::s3_vault;
 use serde_json::{json,Value};
 use std::{
     env,error::Error,fs,io,os::unix::fs::PermissionsExt,
-    path::{Path,PathBuf},process::{Command,Stdio},time::Duration
+    path::{Path,PathBuf},process::{Command,Stdio},time::Duration,
+    sync::{Arc,atomic::{AtomicBool,Ordering},mpsc::{self,RecvTimeoutError}}
 };
 type Result<T>=std::result::Result<T,Box<dyn Error+Send+Sync>>;
 
@@ -74,12 +75,22 @@ fn pg_dump_to_encrypted_file(stage:&Path,recipient:&str)->Result<()>{
     }
     Ok(())
 }
-fn perform()->Result<Value>{
+fn verify_live_lease(db:&Database,lease:&str,active:&AtomicBool)->Result<()>{
+    if !active.load(Ordering::Acquire) || !db.renew_db_backup_lease(lease)?{
+        return Err("PostgreSQL DB backup lease lost; no S3 object may be certified".into());
+    }
+    Ok(())
+}
+fn perform(db:&Database,lease:&str,active:&AtomicBool)->Result<Value>{
+    verify_live_lease(db,lease,active)?;
     let cfg=config()?;
     // S3 WORM preflight (versioning+COMPLIANCE) happens again during backup.
     s3_vault::preflight(&cfg)?;
     let stage=temporary_stage()?;
     pg_dump_to_encrypted_file(&stage.0,&cfg.recipient)?;
+    // Never publish this new WORM snapshot if the original owner has died,
+    // timed out or lost the lease during a long PostgreSQL dump.
+    verify_live_lease(db,lease,active)?;
     let result=s3_vault::backup(&cfg,&stage.0)?;
     // Verify that the independently committed S3 object actually decrypts
     // with the locally-provisioned recovery identity before recording PASS.
@@ -88,10 +99,39 @@ fn perform()->Result<Value>{
     if result.archive_version!=checked.archive_version || result.sha256!=checked.sha256 {
         return Err("WORM object version/checksum changed after storage commit".into());
     }
+    verify_live_lease(db,lease,active)?;
     Ok(serde_json::to_value(result)?)
 }
-pub fn execute(db:Database,replica:String,lease:String){
-    let result=perform();
+pub fn execute(db:Database,_replica:String,lease:String){
+    // 30-minute initial lease is renewed every 45 seconds for long dumps.
+    // Only the current writer's UUID fencing token can renew. Errors deny
+    // successful certification; an orphaned immutable S3 object must be
+    // reconciled manually rather than promoted to a valid backup.
+    let active=Arc::new(AtomicBool::new(true));
+    let (stop_tx,stop_rx)=mpsc::channel::<()>();
+    let heartbeat_db=db.clone();
+    let heartbeat_lease=lease.clone();
+    let heartbeat_active=Arc::clone(&active);
+    let heartbeat=std::thread::spawn(move||{
+        loop {
+            match stop_rx.recv_timeout(Duration::from_secs(45)){
+                Ok(())|Err(RecvTimeoutError::Disconnected)=>break,
+                Err(RecvTimeoutError::Timeout)=>{
+                    if !matches!(heartbeat_db.renew_db_backup_lease(&heartbeat_lease),Ok(true)){
+                        heartbeat_active.store(false,Ordering::Release);
+                        eprintln!("DB backup heartbeat lost lease or PostgreSQL quorum");
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let result=perform(&db,&lease,&active);
+    let _=stop_tx.send(());
+    if heartbeat.join().is_err(){active.store(false,Ordering::Release);}
+    let result=if !active.load(Ordering::Acquire){
+        Err("PostgreSQL lease heartbeat failed; manual reconciliation required".into())
+    }else{result};
     let outcome=match &result {Ok(_) => "success",Err(_)=>"failed"};
     let value=result.as_ref().ok();
     let error_code=if result.is_err(){Some("encrypted_db_snapshot_failed")}else{None};

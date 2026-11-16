@@ -263,9 +263,33 @@ fn real_pg_monitor_token_issue_revoke_and_single_db_backup_lease(){
     db.configure_db_backups(false,1440,"s3_worm").unwrap();
     let replica="pg-live-dbbackup";
     let claimed=db.claim_db_backup(replica,true).unwrap().unwrap();
+    assert!(db.renew_db_backup_lease(&claimed).unwrap(),
+        "Only live current-lease writer can renew a long database dump");
     assert!(db.claim_db_backup(replica,true).unwrap().is_none());
+    let (id,_token)=claimed.split_once(':').unwrap();
+    let forged=format!("{id}:{}",Uuid::new_v4());
+    assert!(!db.renew_db_backup_lease(&forged).unwrap(),
+        "A writer with another token must never extend the real writer's lease");
+    assert!(db.renew_db_backup_lease("invalid").is_err());
     assert!(db.finish_db_backup(&claimed,None,Some("ci_expected_failure")).unwrap());
+    assert!(!db.renew_db_backup_lease(&claimed).unwrap(),
+        "A completed writer can no longer renew a lease");
     assert!(!db.finish_db_backup(&claimed,None,Some("replay")).unwrap());
+
+    let stale=db.claim_db_backup(replica,true).unwrap().unwrap();
+    let stale_job=stale.split_once(':').unwrap().0.to_string();
+    db.connect().unwrap().execute("UPDATE mb_internal_backup_policy
+      SET lease_until=now()-interval '5 seconds'
+      WHERE current_job=$1",&[&stale_job]).unwrap();
+    assert!(!db.renew_db_backup_lease(&stale).unwrap(),
+        "Expired lease cannot be revived by the same stale writer");
+    assert!(!db.finish_db_backup(&stale,None,Some("late_success")).unwrap());
+    assert!(db.claim_db_backup(replica,true).unwrap().is_none(),
+        "Expired backup must enter manual reconciliation rather than retry");
+    assert_eq!(db.db_backup_dashboard().unwrap()["lease_state"],"needs_reconciliation");
+    db.connect().unwrap().execute("UPDATE mb_internal_backup_policy SET
+      lease_state='idle',lease_until=NULL,lease_token=NULL,current_job=NULL,
+      enabled=false,updated_at=now() WHERE singleton=TRUE",&[]).unwrap();
     let dashboard=db.db_backup_dashboard().unwrap();
     assert_eq!(dashboard["lease_state"],"idle");
     assert!(dashboard["history"].as_array().unwrap().iter()

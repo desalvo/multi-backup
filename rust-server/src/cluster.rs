@@ -774,6 +774,21 @@ impl Database {
         tx.commit()?;
         Ok(Some(format!("{id}:{token}")))
     }
+    /// Extend the exclusive DB dump lease only if this exact fencing token
+    /// still owns it and its previous deadline has not elapsed. A crashed
+    /// writer can never reacquire an expired lease by renewing late.
+    pub fn renew_db_backup_lease(&self,lease:&str)->Result<bool,BoxError>{
+        let (id,token)=lease.split_once(':').ok_or_else(||error("Unsafe DB backup lease"))?;
+        if uuid::Uuid::parse_str(id).is_err()||uuid::Uuid::parse_str(token).is_err(){
+            return Err(error("Invalid DB backup lease"));
+        }
+        let mut db=self.connect()?;
+        Ok(db.execute("UPDATE mb_internal_backup_policy
+            SET lease_until=now()+interval '30 minutes',updated_at=now()
+            WHERE singleton=TRUE AND lease_state='running'
+              AND current_job=$1 AND lease_token=$2 AND lease_until>now()",
+            &[&id,&token])?==1)
+    }
     pub fn finish_db_backup(&self,lease:&str,manifest:Option<&Value>,error_code:Option<&str>)
         ->Result<bool,BoxError>{
         let (id,token)=lease.split_once(':').ok_or_else(||error("Unsafe DB backup lease"))?;
