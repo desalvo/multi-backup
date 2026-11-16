@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""Real disposable Patroni + 3-member TLS etcd + PostgreSQL16 HA acceptance.
+
+Runs ONLY on a GitHub-hosted ephemeral worker. All 3 independent PostgreSQL
+processes and 3 real TLS etcd members share the runner's loopback network:
+functional leader-election / synchronous replication / fencing test, NOT a
+three-host physical or Kubernetes network-partition qualification.
+"""
+import contextlib
+import os
+from pathlib import Path
+import shutil
+import ssl
+import subprocess
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+
+ADDRESSES = ["127.0.0.11", "127.0.0.12", "127.0.0.13"]
+PGPORTS = [15431, 15432, 15433]
+RESTPORTS = [18081, 18082, 18083]
+DB_PASSWORD = "DISPOSABLE-CI-HA-ONLY-2026"
+REPL_PASSWORD = "DISPOSABLE-CI-REPL-ONLY-2026"
+
+
+def run(*cmd, check=True, timeout=20, env=None):
+    return subprocess.run(cmd, check=check, timeout=timeout, env=env,
+                          text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def issue_cert(directory, index, ca, ca_key):
+    address = ADDRESSES[index]
+    root = Path(directory)
+    key, csr, cert, ext = [root / f"node-{index}.{s}" for s in ("key", "csr", "crt", "ext")]
+    ext.write_text("basicConstraints=critical,CA:FALSE\n"
+                   "keyUsage=critical,digitalSignature,keyEncipherment\n"
+                   "extendedKeyUsage=serverAuth,clientAuth\n"
+                   f"subjectAltName=IP:{address},DNS:mb-node{index+1}.internal\n")
+    run("openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
+        "-subj", f"/CN=mb-node{index+1}.internal",
+        "-keyout", str(key), "-out", str(csr))
+    run("openssl", "x509", "-req", "-sha256", "-days", "1",
+        "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key),
+        "-CAcreateserial", "-extfile", str(ext), "-out", str(cert))
+    key.chmod(0o600)
+    return cert, key
+
+
+def wait_for(label, checker, processes, seconds=90):
+    deadline = time.monotonic() + seconds
+    last = None
+    while time.monotonic() < deadline:
+        for name, proc in processes.items():
+            if proc.poll() is not None:
+                raise RuntimeError(f"{label}: {name} exited with {proc.returncode}")
+        try:
+            value = checker()
+            if value:
+                return value
+        except (OSError, subprocess.SubprocessError, ValueError) as ex:
+            last = str(ex)
+        time.sleep(1)
+    raise RuntimeError(f"{label} not established; last={last}")
+
+
+def etcd_command(root, index=0):
+    return ["etcdctl", f"--endpoints=https://{ADDRESSES[index]}:2379",
+            f"--cacert={root}/ca.crt", f"--cert={root}/node-0.crt",
+            f"--key={root}/node-0.key"]
+
+
+def health(root, indices=(0, 1, 2)):
+    result = run(*etcd_command(root), "endpoint", "health", check=False, timeout=6)
+    return result.returncode == 0
+
+
+def role(root, index, endpoint):
+    ctx = ssl.create_default_context(cafile=str(root / "ca.crt"))
+    try:
+        with urllib.request.urlopen(
+                f"https://{ADDRESSES[index]}:{RESTPORTS[index]}/{endpoint}",
+                context=ctx, timeout=2) as response:
+            return response.status == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def primaries(root, live=(0, 1, 2)):
+    return [index for index in live if role(root, index, "primary")]
+
+
+def pg(root, index, sql, *, expect_ok=True):
+    env = os.environ.copy()
+    env.update({"PGPASSWORD": DB_PASSWORD, "PGSSLMODE": "verify-full",
+                "PGSSLROOTCERT": str(root / "ca.crt"), "PGCONNECT_TIMEOUT": "3"})
+    args = ["psql", "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1",
+            "-h", ADDRESSES[index], "-p", str(PGPORTS[index]),
+            "-U", "postgres", "-d", "postgres", "-c", sql]
+    result = run(*args, check=False, timeout=9, env=env)
+    if expect_ok and result.returncode != 0:
+        raise RuntimeError("TLS PostgreSQL query failed: " + result.stderr[:300])
+    return result
+
+
+def wait_primary(root, live, procs, seconds=110):
+    def choose():
+        elected = primaries(root, live)
+        if len(elected) != 1:
+            return None
+        candidate = elected[0]
+        synced = pg(root, candidate,
+                    "SELECT count(*) FROM pg_stat_replication WHERE sync_state='sync'",
+                    expect_ok=False)
+        if synced.returncode == 0 and synced.stdout.strip().isdigit() and (
+                int(synced.stdout.strip()) >= 1):
+            return candidate
+        return None
+    return wait_for("one synchronous Patroni primary", choose, procs, seconds)
+
+
+def start(log, *cmd):
+    log.parent.mkdir(exist_ok=True, parents=True)
+    handle = log.open("a")
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=handle,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+    finally:
+        handle.close()
+    return proc
+
+
+def conf(root, index):
+    ip = ADDRESSES[index]
+    number = index + 1
+    data = root / f"postgres-{number}"
+    patroni_dir = root / f"patroni-{number}"
+    patroni_dir.mkdir(mode=0o700)
+    ca = root / "ca.crt"
+    cert = root / f"node-{index}.crt"
+    key = root / f"node-{index}.key"
+    path = root / f"patroni-{number}.yaml"
+    path.write_text(f"""scope: multi-backup-disposable-ha
+namespace: /ci-ha/
+name: mb-node{number}
+restapi:
+  listen: {ip}:{RESTPORTS[index]}
+  connect_address: {ip}:{RESTPORTS[index]}
+  certfile: {cert}
+  keyfile: {key}
+  cafile: {ca}
+etcd3:
+  hosts: {','.join(f'{host}:2379' for host in ADDRESSES)}
+  protocol: https
+  cacert: {ca}
+  cert: {cert}
+  key: {key}
+bootstrap:
+  dcs:
+    ttl: 15
+    loop_wait: 2
+    retry_timeout: 3
+    maximum_lag_on_failover: 0
+    synchronous_mode: true
+    synchronous_mode_strict: true
+    synchronous_node_count: 1
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: replica
+        max_wal_senders: 10
+        max_replication_slots: 10
+        hot_standby: 'on'
+        synchronous_commit: remote_apply
+        ssl: 'on'
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - local all all trust
+    - hostssl replication repl 127.0.0.0/8 scram-sha-256
+    - hostssl all all 127.0.0.0/8 scram-sha-256
+postgresql:
+  listen: {ip}:{PGPORTS[index]}
+  connect_address: {ip}:{PGPORTS[index]}
+  data_dir: {data}
+  bin_dir: /usr/lib/postgresql/16/bin
+  pgpass: {patroni_dir}/.pgpass
+  authentication:
+    replication:
+      username: repl
+      password: {REPL_PASSWORD}
+    superuser:
+      username: postgres
+      password: {DB_PASSWORD}
+    rewind:
+      username: postgres
+      password: {DB_PASSWORD}
+  parameters:
+    unix_socket_directories: {patroni_dir}
+    ssl: 'on'
+    ssl_cert_file: {cert}
+    ssl_key_file: {key}
+    ssl_ca_file: {ca}
+    password_encryption: scram-sha-256
+""")
+    path.chmod(0o600)
+    return path, data
+
+
+def main():
+    if (os.environ.get("GITHUB_ACTIONS") != "true" or
+            os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted" or
+            os.geteuid() == 0):
+        raise SystemExit("REFUSED: only disposable unprivileged GitHub-hosted CI")
+    for executable in ("etcd", "etcdctl", "patroni", "psql", "openssl"):
+        if not shutil.which(executable):
+            raise SystemExit(f"Missing HA lab executable: {executable}")
+    if not Path("/usr/lib/postgresql/16/bin/pg_ctl").exists():
+        raise SystemExit("PostgreSQL16 server binary missing")
+    with tempfile.TemporaryDirectory(prefix="mb-real-ha-") as tmp:
+        root = Path(tmp)
+        processes = {}
+        etcd = {}
+        patroni = {}
+        data_dirs = {}
+        try:
+            ca, ca_key = root / "ca.crt", root / "ca.key"
+            run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                "-sha256", "-days", "1", "-subj", "/CN=MultiBackupEphemeralHA-CA",
+                "-addext", "basicConstraints=critical,CA:TRUE",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                "-keyout", str(ca_key), "-out", str(ca))
+            for i in range(3):
+                issue_cert(root, i, ca, ca_key)
+            cluster = ",".join(
+                f"mb-etcd{i+1}=https://{ADDRESSES[i]}:2380" for i in range(3))
+            for i in range(3):
+                ip = ADDRESSES[i]
+                name = f"mb-etcd{i+1}"
+                args = ["etcd", f"--name={name}",
+                        f"--data-dir={root / name}",
+                        f"--listen-client-urls=https://{ip}:2379",
+                        f"--advertise-client-urls=https://{ip}:2379",
+                        f"--listen-peer-urls=https://{ip}:2380",
+                        f"--initial-advertise-peer-urls=https://{ip}:2380",
+                        f"--initial-cluster={cluster}",
+                        "--initial-cluster-state=new",
+                        "--initial-cluster-token=multi-backup-disposable-ci",
+                        "--client-cert-auth=true", f"--trusted-ca-file={ca}",
+                        f"--cert-file={root / f'node-{i}.crt'}",
+                        f"--key-file={root / f'node-{i}.key'}",
+                        "--peer-client-cert-auth=true",
+                        f"--peer-trusted-ca-file={ca}",
+                        f"--peer-cert-file={root / f'node-{i}.crt'}",
+                        f"--peer-key-file={root / f'node-{i}.key'}",
+                        "--log-level=warn"]
+                etcd[i] = start(root / f"etcd-{i}.log", *args)
+                processes[f"etcd{i}"] = etcd[i]
+            wait_for("genuine 3-member TLS etcd quorum", lambda: health(root),
+                     processes, 75)
+            for i in range(3):
+                path, data = conf(root, i)
+                data_dirs[i] = data
+                patroni[i] = start(root / f"patroni-{i}.log", "patroni", str(path))
+                processes[f"patroni{i}"] = patroni[i]
+            initial = wait_primary(root, (0, 1, 2), processes, 130)
+            pg(root, initial, "CREATE TABLE ha_witness(id integer PRIMARY KEY, payload text NOT NULL);")
+            pg(root, initial, "INSERT INTO ha_witness VALUES (1,'acknowledged-before-failover');")
+            # Crash the original leader and its database, simulating node loss.
+            patroni[initial].kill()
+            patroni[initial].wait(timeout=6)
+            processes.pop(f"patroni{initial}", None)
+            run("/usr/lib/postgresql/16/bin/pg_ctl", "-D",
+                str(data_dirs[initial]), "stop", "-m", "immediate",
+                check=False, timeout=20)
+            survivors = tuple(i for i in range(3) if i != initial)
+            successor = wait_primary(root, survivors, processes, 90)
+            if successor == initial:
+                raise RuntimeError("Original dead primary was not fenced")
+            if pg(root, successor, "SELECT payload FROM ha_witness WHERE id=1").stdout.strip() != (
+                    "acknowledged-before-failover"):
+                raise RuntimeError("Acknowledged synchronous transaction missing after promotion")
+            pg(root, successor, "INSERT INTO ha_witness VALUES (2,'committed-after-promotion');")
+            if pg(root, initial, "SELECT 1", expect_ok=False).returncode == 0:
+                raise RuntimeError("Terminated primary still accepts clients")
+            # Rejoin the former leader: Patroni must rewind or rebuild it as a standby.
+            path, _ = conf(root, initial)
+            patroni[initial] = start(root / f"patroni-{initial}-restart.log",
+                                     "patroni", str(path))
+            processes[f"patroni{initial}"] = patroni[initial]
+            def rejoined():
+                return role(root, initial, "replica") and (
+                    pg(root, initial, "SELECT pg_is_in_recovery()",
+                       expect_ok=False).stdout.strip() == "t")
+            wait_for("old primary reintegrated as standby", rejoined, processes, 110)
+            if len(primaries(root)) != 1:
+                raise RuntimeError("Two Patroni primaries visible after rejoin")
+            # Remove etcd majority. All surviving Patroni nodes must lose
+            # writable primary status rather than continue with a stale lease.
+            for i in (1, 2):
+                etcd[i].terminate()
+                etcd[i].wait(timeout=7)
+                processes.pop(f"etcd{i}", None)
+            wait_for("fencing on DCS quorum loss",
+                     lambda: len(primaries(root)) == 0, processes, 65)
+            # A stale client write is forbidden when etcd no longer has quorum.
+            for i in range(3):
+                result = pg(root, i,
+                    "SET statement_timeout='2000ms'; "
+                    "INSERT INTO ha_witness VALUES (3,'must-not-write-without-quorum');",
+                    expect_ok=False)
+                if result.returncode == 0:
+                    raise RuntimeError("UNSAFE: database accepted write without DCS quorum")
+            print("PASS real 3-Patroni / 3-etcd TLS quorum, synchronous replication, "
+                  "primary crash, promotion, durable data, standby rejoin and DCS fencing")
+            print("Scope: separate processes on one ephemeral runner, not "
+                  "independent physical hosts or network-namespace split-brain test")
+        except Exception:
+            for name in ("etcd-0.log", "etcd-1.log", "etcd-2.log",
+                         "patroni-0.log", "patroni-1.log", "patroni-2.log"):
+                path = root / name
+                if path.is_file():
+                    print(f"CI HA diagnostics {name}:")
+                    print("\n".join(path.read_text(errors="replace").splitlines()[-18:]))
+            raise
+        finally:
+            for proc in list(patroni.values()) + list(etcd.values()):
+                if proc.poll() is None:
+                    proc.terminate()
+            for proc in list(patroni.values()) + list(etcd.values()):
+                if proc.poll() is None:
+                    try:
+                        proc.wait(timeout=4)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=4)
+            for data in data_dirs.values():
+                if data.exists():
+                    run("/usr/lib/postgresql/16/bin/pg_ctl", "-D",
+                        str(data), "stop", "-m", "immediate",
+                        check=False, timeout=12)
+
+
+if __name__ == "__main__":
+    main()
