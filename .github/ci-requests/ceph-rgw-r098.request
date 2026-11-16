@@ -1,0 +1,1 @@
+One-shot real Ceph RGW retest after corrected Ceph osdmap remapped-PG parsing. Requires 3 MON/3 UP+IN OSD on separate CRUSH hosts, 89 active+clean PG, S3 WORM COMPLIANCE, negative delete and pinned restore. Fail closed.
