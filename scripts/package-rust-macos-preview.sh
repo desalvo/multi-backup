@@ -16,6 +16,9 @@ test -x "$CLI" && test -x "$GUI"
 # Execute real encrypted create -> verify -> restored-byte comparison on
 # the same native macOS architecture used by the final preview app.
 cargo test --manifest-path rust/Cargo.toml --test native_cli_restore_matrix
+cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
+cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
 APP="dist-rust/Multi Backup Rust Preview.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "dist-rust"
@@ -55,7 +58,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>Multi Backup</string>
   <key>CFBundleIconFile</key><string>MultiBackup</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>20</string>
+  <key>CFBundleVersion</key><string>38</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>

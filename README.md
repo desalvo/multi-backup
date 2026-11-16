@@ -1,6 +1,21 @@
 # Multi Backup
 
-**Multi Backup `0.1.0-r018-rc1`** is a cross-platform, encrypted, resumable backup client with independent source plugins. It is licensed under **EUPL-1.2**.
+### r039+ Native Rust filesystem and OpenAFS executors (development preview)
+
+Eight generic input filesystem paths to encrypted POSIX chunk storage now include CephFS, GlusterFS and Lustre, requiring an exact pre-mounted Linux RO filesystem and explicit snapshot attestation. Six verified POSIX-store restore outputs can create new directories on POSIX, NFS, SSHFS, CephFS, GlusterFS and Lustre, with exact RW mount checks. The separate OpenAFS plugin streams typed local/SSH-agentless full/incremental vos dump into age/zstd/8+2 protected chunks, and can restore a verified volume dump chain to a NEW AFS volume only, with explicit confirmation. See [IT](docs/PLUGIN_EXECUTORS_R039_IT.md) and [EN](docs/PLUGIN_EXECUTORS_R039_EN.md). These are NOT production certified; provider credentials/keytab, remote recovery and live AFS/ACL/VLDB/HA tests remain open.
+
+
+## r039 Rust agent and HA cluster work — PREVIEW
+
+[Parallelism and Kubernetes (IT)](docs/CLUSTER_ORCHESTRATION_R039_IT.md), [cluster operations EN](docs/CLUSTER_ORCHESTRATION_R039_EN.md), [AFS agents IT](docs/AGENTS_AFS_R039_IT.md), [AFS agents EN](docs/AGENTS_AFS_R039_EN.md). r039 PR #11 remains draft. Native agent PKG/EXE/DEB/RPM and multi-replica shared PostgreSQL scheduling are under CI; local storage is pinned to one replica. Full platform/AFS recovery and lease write-fencing are NOT certified.
+
+
+## Manuali operativi e stato r038
+
+La documentazione valida per la corrente anteprima Rust r038 è l'[indice documentale](docs/DOCUMENTATION_INDEX_R038.md), il [manuale IT](docs/OPERATIONS_R038_IT.md), l'[operational manual EN](docs/OPERATIONS_R038_EN.md) e l'[inventario delle funzionalità](docs/FEATURE_INVENTORY_R038.md). I manuali e gli screenshot Python/Tk delle versioni precedenti sono storici; il repack automatico 8+2 è ancora in qualificazione, non certificato come funzione stabile.
+
+
+**Multi Backup `0.1.0-r018-rc1`** is the last published Python/Tk compatibility build. **Rust-native `0.1.0-r038`** is the active development preview, not yet a certified public RC. License: **EUPL-1.2**.
 
 ![Multi Backup dashboard](docs/screenshots/dashboard.png)
 
@@ -74,6 +89,9 @@ Update discovery uses the public GitHub Releases API. Binary downloads require a
 The early release points to [GitHub Releases: early-release](https://github.com/desalvo/multi-backup/releases/tag/early-release); stable releases appear in [GitHub Releases](https://github.com/desalvo/multi-backup/releases). RPM `repodata` is generated for each Rocky/Alma version and channel on the `gh-pages` branch. Its `.repo` definitions are deliberately **disabled** (`enabled=0`, `gpgcheck=1`) until RPM and repo metadata signing is available.
 
 ## Documentation
+
+- [Rust r038 documentation index and verification status](docs/DOCUMENTATION_INDEX_R038.md)
+**Guide operative Rust r038, anteprima di sviluppo:** [Italiano](docs/R038_OPERATIONS_IT.md) · [English](docs/R038_OPERATIONS_EN.md). La r018 Python/Tk rimane l'ultima release distribuita. I manuali PDF generati includeranno un'appendice r038 separatamente identificata; gli screenshot storici sono della r018.
 
 - [User manual, English (PDF)](docs/manuals/Multi-Backup-User-Manual-EN.pdf)
 - [Manuale utente, italiano (PDF)](docs/manuals/Multi-Backup-Manuale-Utente-IT.pdf)
@@ -280,3 +298,54 @@ GitHub CI rejects plaintext/private artifacts under docs/private. The
 operator chooses the PDF password locally; no password is sent to CI or
 ChatGPT. No encrypted final PDF can be committed until the operator has
 created and validated it with their chosen password.
+
+
+## Rust native r038 — real plugin execution preview
+
+The release focus is the compiled Rust GUI/CLI and functionally tested **new** backups. Old Python-created archive byte compatibility is optional, not an RC blocker; no old data or keys are automatically deleted.
+
+The common Rust executor implements POSIX → encrypted POSIX chunk storage and verified restore into a **new** directory. On Linux, read-only **NFS, SMB/CIFS, SSHFS and GPFS CES** mounts can be experimental input sources to the POSIX encrypted store. These require the *exact* read-only mount and an explicit snapshot-attestation flag. The operator's attestation cannot prove backend snapshot or metadata consistency; production qualification remains open.
+
+```bash
+age-keygen -o /private/keys/backup-age.txt
+multi-backup-native storage init --root /private/backup-store --recipient age1PUBLIC_KEY
+multi-backup-native plugins backup --input posix --output posix --source /home/user/data --root /private/backup-store --identity /private/keys/backup-age.txt --label "Native backup" --json
+multi-backup-native plugins restore --input posix --output posix --root /private/backup-store --identity /private/keys/backup-age.txt --id BACKUP_ID --destination /home/user/new-restore
+# On Linux, for a separately prepared read-only NFS snapshot source:
+multi-backup-native plugins backup --input nfs --output posix --source /mnt/nfs-snapshot --source-snapshot-attested --root /private/backup-store --identity /private/keys/backup-age.txt --label "NFS snapshot"
+```
+
+For GPFS CES use `--input gpfs --input-gpfs-access ces-nfs|ces-smb`. No remote mounts, proprietary clients, overwrite or automatic remote deletion are performed. See [plugin architecture](docs/PLUGIN_API.md) and [RC gates](docs/RC_CERTIFICATION_MATRIX.md).
+
+
+## Rust r038 — full/incremental backups, chain-preserving purge and GC
+
+A new Rust backup can be **full** (`--mode full`) or **incremental**
+(`--mode incremental --parent BACKUP_ID`). Incremental manifests retain
+a complete logical file inventory but only introduce new immutable chunks
+when bytes change. File statistics include count, uncompressed size,
+compressed size, compressed+deduplicated size and new compressed increment
+data. `storage info` also shows the complete chain and reference full.
+
+```bash
+multi-backup-native storage backup --root /private/backup-store --identity /private/keys/backup-age.txt --sources-json sources.json --label "Full" --mode full
+multi-backup-native storage backup --root /private/backup-store --identity /private/keys/backup-age.txt --sources-json sources.json --label "Increment" --mode incremental --parent FULL_OR_PREVIOUS_INCREMENT_ID
+multi-backup-native storage info --root /private/backup-store --identity /private/keys/backup-age.txt --id INCREMENT_ID
+multi-backup-native storage verify-chain --root /private/backup-store --identity /private/keys/backup-age.txt --id INCREMENT_ID
+multi-backup-native storage delete-backup --root /private/backup-store --identity /private/keys/backup-age.txt --id OLD_BACKUP_ID --confirm-id OLD_BACKUP_ID
+multi-backup-native storage gc-preview --root /private/backup-store --identity /private/keys/backup-age.txt
+# Only after reviewing preview and explicitly confirming:
+multi-backup-native storage gc-collect --root /private/backup-store --identity /private/keys/backup-age.txt --confirm ERASE-ORPHANS
+```
+
+A confirmed deletion automatically re-links direct descendants or promotes
+incremental successors to full when the deleted ancestor was a full.
+Protected successors must be explicitly unprotected first. **Purge does not
+free physical chunk space**. The separate manually confirmed GC only
+removes old unreferenced encrypted data after a grace period (default 48h).
+Partially live parity groups cannot yet be repacked safely, so their
+obsolete member chunks are temporarily retained. Native scheduler
+`schedule run/daemon` supports full/incremental jobs and periodic
+chain verification, defaulting to complete-chain checks; production
+deployment and UI-based schedule persistence still require acceptance.
+These r038 features are development previews, not a published stable RC.

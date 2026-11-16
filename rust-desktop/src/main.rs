@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault};
+use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, plugins, plugin_executor, backup_chain};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -12,7 +12,7 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const VERSION: &str = "0.1.0-r020-native-preview";
+const VERSION: &str = "0.1.0-r038-native-preview";
 const AUTHOR: &str = "Alessandro De Salvo";
 const REPO: &str = "https://github.com/desalvo/multi-backup";
 const NAVY: Color32 = Color32::from_rgb(10, 26, 60);
@@ -73,10 +73,18 @@ struct Fields {
     chunk_dropbox: String,
     chunk_label: String,
     chunk_top_namespace: String,
+    chunk_mode: String,
+    chunk_verify_full_chain: bool,
+    chunk_gc_grace: String,
     chunk_selection: String,
     chunk_legacy_json: String,
     chunk_volume_mib: String,
     chunk_size_mib: String,
+    plugin_source: String,
+    plugin_input: String,
+    plugin_namespace: String,
+    plugin_gpfs_access: String,
+    plugin_snapshot_attested: bool,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -221,8 +229,14 @@ impl NativeApp {
             max_runs: max_runs.to_string(),
             chunk_root: default_output_path.clone(),
             chunk_label: "Backup completo".into(),
+            chunk_mode: "full".into(),
+            chunk_verify_full_chain: true,
+            chunk_gc_grace: "48".into(),
             chunk_volume_mib: "2048".into(),
             chunk_size_mib: "4".into(),
+            plugin_input: "posix".into(),
+            plugin_namespace: "files".into(),
+            plugin_gpfs_access: "ces-nfs".into(),
             ..Fields::default()
         };
         let entries = archive_catalog(Path::new(&fields.output));
@@ -944,10 +958,18 @@ impl NativeApp {
         let destination=self.fields.chunk_destination.trim().to_string();
         let label=self.fields.chunk_label.trim().to_string();
         let top_namespace=self.fields.chunk_top_namespace.trim().to_string();
+        let mode=self.fields.chunk_mode.clone();
+        let check_chain=self.fields.chunk_verify_full_chain;
+        let gc_grace=self.fields.chunk_gc_grace.clone();
         let selection=self.fields.chunk_selection.clone();
         let legacy=self.fields.chunk_legacy_json.clone();
         let volume=self.fields.chunk_volume_mib.clone();
         let chunk_size=self.fields.chunk_size_mib.clone();
+        let plugin_source=self.fields.plugin_source.clone();
+        let plugin_input=self.fields.plugin_input.clone();
+        let plugin_namespace=self.fields.plugin_namespace.clone();
+        let plugin_gpfs_access=self.fields.plugin_gpfs_access.clone();
+        let plugin_snapshot_attested=self.fields.plugin_snapshot_attested;
         let id=self.chunk_selected.clone();
         let sources=[
             ("github",self.fields.chunk_git.clone()),
@@ -992,10 +1014,33 @@ impl NativeApp {
                                 directory:PathBuf::from(path.trim())
                             }).collect();
                         if input.is_empty(){return Err("Nessuna directory fonte selezionata".into());}
-                        let b=store.backup_in_namespace(key,&label,&top_namespace,&input)
-                            .map_err(|e|e.to_string())?;
+                        let kind=chunk_store::BackupKind::parse(&mode)?;
+                        let parent=if kind==chunk_store::BackupKind::Incremental {
+                            if id.is_empty(){return Err("Selezionare il backup precedente per l'incrementale".into());}
+                            Some(id.as_str())
+                        }else{None};
+                        let b=store.backup_in_namespace_mode(key,&label,&top_namespace,&input,
+                            kind,parent).map_err(|e|e.to_string())?;
                         format!("Creato un solo backup logico {} con {} file",
                             b.id,b.entries.len())
+                    },
+                    "plugin-backup"=>{
+                        let access=if plugin_input=="gpfs" {
+                            Some(plugins::GpfsAccess::parse(&plugin_gpfs_access)
+                                .map_err(|e|e.to_string())?)
+                        } else { None };
+                        let kind=chunk_store::BackupKind::parse(&mode)?;
+                        let parent=if kind==chunk_store::BackupKind::Incremental {
+                            if id.is_empty(){return Err("Selezionare il backup precedente per l'incrementale".into());}
+                            Some(id.as_str())
+                        }else{None};
+                        let b=plugin_executor::backup_with_mode(
+                            &plugin_input,"posix",Path::new(&plugin_source),root,key,
+                            &label,&plugin_namespace,&top_namespace,
+                            plugin_snapshot_attested,access,kind,parent
+                        ).map_err(|e|e.to_string())?;
+                        format!("Plugin Rust {}→POSIX: backup logico {} con {} file verificati",
+                            plugin_input,b.id,b.entries.len())
                     },
                     "migrate-legacy"=>{
                         let json=std::fs::read_to_string(&legacy)
@@ -1029,15 +1074,41 @@ impl NativeApp {
                             if changed {"protezione rimossa"}else{"già non protetto"})
                     },
                     "delete-backup"=>{
-                        store.delete_backup(key,&id,&id).map_err(|e|e.to_string())?;
-                        format!("Backup {} eliminato dal catalogo. Chunk condivisi conservati fino al GC sicuro.",&id)
+                        let moved=store.delete_backup_rebase(key,&id,&id)
+                            .map_err(|e|e.to_string())?;
+                        format!("Backup {} rimosso e {} successori riconciliati. Chunk condivisi conservati fino alla garbage collection.",&id,moved)
+                    },
+                    "gc-preview" | "gc-collect"=>{
+                        let grace=gc_grace.parse::<u64>()
+                            .map_err(|_|"Ore di conservazione GC non valide")?;
+                        let report=store.garbage_collect(key,grace,action=="gc-collect")
+                            .map_err(|e|e.to_string())?;
+                        format!("GC {}: {} chunk candidati, {} stripe obsolete, {} chunk vincolati da parità condivisa; {} B recuperabili; eliminati {} chunk e {} stripe ({} B).",
+                            if action=="gc-preview"{"ANTEPRIMA"}else{"ESEGUITA"},
+                            report.orphan_chunk_candidates,report.obsolete_stripe_candidates,
+                            report.blocked_chunks_by_shared_parity,
+                            report.reclaimable_bytes,report.deleted_chunks,
+                            report.deleted_stripes,report.reclaimed_bytes)
+                    },
+                    "info"=>{
+                        let info=backup_chain::details(&store,key,&id)
+                            .map_err(|e|e.to_string())?;
+                        let s=&info.snapshot;
+                        format!("Backup {:?} | file {} | non compressi {} B | compressi {} B | deduplicati e compressi {} B | nuove parti incrementali {} B | catena {} snapshot | totale {}",
+                            info.kind,s.file_count,s.uncompressed_bytes,
+                            s.compressed_bytes,s.deduplicated_compressed_bytes,
+                            s.incremental_new_compressed_bytes,info.chain.len(),
+                            info.full_reference_id)
                     },
                     "verify"=>{
-                        let r=store.verify(key,&id).map_err(|e|e.to_string())?;
+                        let r=backup_chain::verify_chain(&store,key,&id,check_chain)
+                            .map_err(|e|e.to_string())?;
                         if !r.healthy{return Err(format!("Integrità compromessa: {}",
                             r.issues.join("; ")))}
-                        format!("Integrità age/HMAC/parità OK: {} chunk in {} file",
-                            r.unique_chunks,r.logical_files)
+                        format!("Integrità verificata: {} backup (catena {}), totale di riferimento {}",
+                            r.verified_ids.len(),
+                            if check_chain {"completa"}else{"singolo"},
+                            r.full_reference_id)
                     },
                     "repair"=>{
                         let n=store.repair(key,&id).map_err(|e|e.to_string())?;
@@ -1099,10 +1170,52 @@ impl NativeApp {
                 .clicked(){self.run_chunk_action("list");}
         });
         ui.separator();
-        ui.label("Etichetta del backup logico completo");
+        ui.label("Etichetta del backup logico");
         ui.text_edit_singleline(&mut self.fields.chunk_label);
+        egui::ComboBox::from_label("Modalità")
+            .selected_text(if self.fields.chunk_mode=="incremental"{"Incrementale"}else{"Totale"})
+            .show_ui(ui,|ui|{
+                ui.selectable_value(&mut self.fields.chunk_mode,"full".into(),"Totale");
+                ui.selectable_value(&mut self.fields.chunk_mode,"incremental".into(),"Incrementale");
+            });
+        if self.fields.chunk_mode=="incremental" {
+            ui.label("Incrementale: seleziona nel browser il backup precedente. I chunk invariati saranno deduplicati.");
+        }
         ui.label("Namespace superiore (opzionale; può contenere cartelle annidate: Roma1/Cluster/VM)");
         ui.text_edit_singleline(&mut self.fields.chunk_top_namespace);
+        ui.separator();
+        ui.heading("Plugin Rust eseguibile → Storage POSIX cifrato");
+        ui.label("Sorgente POSIX, oppure su Linux mount NFS/SMB/SSHFS/GPFS CES preesistente e readonly");
+        egui::ComboBox::from_label("Plugin sorgente")
+            .selected_text(self.fields.plugin_input.clone())
+            .show_ui(ui,|ui|{
+                for id in ["posix","nfs","smb","sshfs","gpfs"] {
+                    ui.selectable_value(&mut self.fields.plugin_input,id.to_string(),id);
+                }
+            });
+        ui.label("Directory sorgente (mountpoint esatto per i filesystem remoti)");
+        ui.text_edit_singleline(&mut self.fields.plugin_source);
+        ui.label("Namespace del plugin nel backup logico");
+        ui.text_edit_singleline(&mut self.fields.plugin_namespace);
+        if self.fields.plugin_input!="posix" {
+            ui.checkbox(&mut self.fields.plugin_snapshot_attested,
+                "Attesto che questa sorgente è uno snapshot coerente su mount read-only");
+            if self.fields.plugin_input=="gpfs" {
+                egui::ComboBox::from_label("Protocollo GPFS CES")
+                    .selected_text(self.fields.plugin_gpfs_access.clone())
+                    .show_ui(ui,|ui|{
+                        for mode in ["ces-nfs","ces-smb"] {
+                            ui.selectable_value(&mut self.fields.plugin_gpfs_access,
+                                mode.to_string(),mode);
+                        }
+                    });
+            }
+            ui.label("La dichiarazione NON verifica indipendentemente lo snapshot remoto né ACL/xattr.");
+        }
+        if ui.add_enabled(!self.active,
+            egui::Button::new("Crea backup tramite plugin nativo Rust").fill(VIOLET))
+            .clicked(){self.run_chunk_action("plugin-backup");}
+        ui.separator();
         ui.label("Directory Git (opzionale; preparata dal motore/provider)");
         ui.text_edit_singleline(&mut self.fields.chunk_git);
         ui.label("Directory CI / Actions (opzionale)");
@@ -1119,9 +1232,9 @@ impl NativeApp {
         egui::ScrollArea::vertical().max_height(300.0).show(ui,|ui|{
             for backup in backup_list {
                 let selected=self.chunk_selected==backup.id;
-                let name=format!("{} {} [{}] ({} file) · {}",
+                let name=format!("{} {:?} {} [{}] ({} file) · {}",
                     if backup.protected {"🔒 PROTETTO"} else {"◯"},
-                    backup.label,
+                    backup.kind,backup.label,
                     if backup.top_namespace.is_empty() {"/"}else{&backup.top_namespace},
                     backup.entries.len(),&backup.id[..12]);
                 if ui.selectable_label(selected,name).clicked() {
@@ -1153,6 +1266,10 @@ impl NativeApp {
             } else {
                 "Questo backup non è protetto. Puoi attivare la protezione in qualsiasi momento."
             });
+            ui.label(format!("Tipo: {:?} · precedente: {}",
+                backup.kind,backup.parent_id.as_deref().unwrap_or("nessuno")));
+            if ui.add_enabled(!self.active,egui::Button::new("Informazioni e dimensioni della catena"))
+                .clicked(){self.run_chunk_action("info");}
             ui.horizontal_wrapped(|ui|{
                 if !backup.protected {
                     if ui.add_enabled(!self.active,egui::Button::new("🔒 Proteggi backup"))
@@ -1174,6 +1291,8 @@ impl NativeApp {
         ui.add(egui::TextEdit::multiline(&mut self.fields.chunk_selection).desired_rows(3));
         ui.label("Nuova directory destinazione (restore, ZIP, import o copia storage)");
         ui.text_edit_singleline(&mut self.fields.chunk_destination);
+        ui.checkbox(&mut self.fields.chunk_verify_full_chain,
+            "Verifica completa catena (default, dal full fino a questo incremento)");
         ui.horizontal_wrapped(|ui|{
             if ui.add_enabled(!self.active,egui::Button::new("Verifica integrità"))
                 .clicked(){self.run_chunk_action("verify");}
@@ -1193,6 +1312,18 @@ impl NativeApp {
             if ui.add_enabled(!self.active,egui::Button::new("Copia storage verificato"))
                 .clicked(){self.run_chunk_action("relocate");}
         });
+        ui.separator();
+        ui.heading("Garbage collection: libera spazio solo dopo il purge");
+        ui.label("Un purge elimina o riconcilia i manifest, ma NON cancella i chunk. La GC usa un periodo di sicurezza e rispetta i riferimenti di tutti i backup.");
+        ui.horizontal_wrapped(|ui|{
+            ui.label("Grace period (ore, minimo 24):");
+            ui.text_edit_singleline(&mut self.fields.chunk_gc_grace);
+            if ui.add_enabled(!self.active,egui::Button::new("Anteprima spazio liberabile"))
+                .clicked(){self.run_chunk_action("gc-preview");}
+            if ui.add_enabled(!self.active,egui::Button::new("Esegui GC..."))
+                .clicked(){self.chunk_confirmation=Some(("gc-collect".into(),"GC".into()));}
+        });
+        ui.label("Le stripe di parità miste (chunk ancora utilizzati e orfani) restano integre finché il repack non è certificato.");
         ui.label("File JSON con gli archivi tar.gz.age legacy da riunire nello stesso backup");
         ui.text_edit_singleline(&mut self.fields.chunk_legacy_json);
         if ui.add_enabled(!self.active,egui::Button::new("Migra archivi legacy nel manifest unico"))
@@ -1383,20 +1514,26 @@ impl eframe::App for NativeApp {
             let mut open=true;
             egui::Window::new(if operation=="unprotect-backup" {
                     "Conferma rimozione protezione"
+                } else if operation=="gc-collect" {
+                    "Conferma garbage collection fisica"
                 } else { "Conferma eliminazione backup" })
                 .collapsible(false).resizable(false)
                 .open(&mut open).show(ctx,|ui|{
                     ui.label(if operation=="unprotect-backup" {
                         "Il backup tornerà eliminabile manualmente o tramite retention, se scaduto."
+                    } else if operation=="gc-collect" {
+                        "La garbage collection ELIMINERÀ FISICAMENTE solo ciphertext orfani oltre il grace period. I chunk delle stripe condivise restano preservati."
                     } else {
-                        "Verrà eliminato il manifest logico. I chunk condivisi rimangono fino a GC sicura."
+                        "I successori verranno ricondotti al backup precedente, o promossi a full. Solo il manifest sarà rimosso; i chunk resteranno fino alla GC."
                     });
                     ui.monospace(&backup_id);
                     ui.horizontal(|ui|{
                         if ui.button("Annulla").clicked(){self.chunk_confirmation=None;}
                         if ui.button("Conferma operazione").clicked(){
                             self.chunk_confirmation=None;
-                            self.chunk_selected=backup_id.clone();
+                            if operation!="gc-collect" {
+                                self.chunk_selected=backup_id.clone();
+                            }
                             self.run_chunk_action(&operation);
                         }
                     });

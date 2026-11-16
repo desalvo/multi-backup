@@ -9,7 +9,7 @@
 3. Archive paths are validated against traversal, symlink and tar device entries. Encrypted output is written as `.partial`, finalized with atomic rename and verified by independent SHA-256 sidecars.
 4. Failed or interrupted runs preserve checkpoints and verified archives; old backups are not overwritten by `--restart`. Migration of monolithic archives keeps the source immutable until split archives pass integrity checks.
 5. CI artifact deletion is disabled by default. When selected, the engine scans the current GitHub inventory, protects live and unclassified dependencies, offers dry run, reports per-repository progress and totals. Third-party unreported dependencies cannot be proven safe to delete.
-6. Dropbox backend calls only read-only API endpoints. It has no purge or delete methods, and it does not delete expired historical content already stored locally.
+6. Dropbox **backup reading** calls only read-only API endpoints and does not delete source content. Separately, an explicitly confirmed restore may upload a NEW Dropbox file using a destination-specific write token. The Rust restore verifies that token's target account and refuses overwrites. Live cross-user testing is still required.
 7. Network update requests require HTTPS and an allowlisted release asset domain; download requires a supplied GitHub SHA-256 digest. The app does not silently execute installers. Production auto-install needs platform signing and explicit secure policy.
 8. Native releases require least-privilege CI permissions, artifact integrity, dependency scanning and signed runtime packaging; currently missing signature secrets are release blockers for unattended updates.
 
@@ -53,3 +53,38 @@ by scripts/check-confidential-artifacts.py in the Production Gate.
 A private repository remains preferable even for ciphertext because
 Git objects are widely copyable and password guessing can be attempted
 offline. Never share the PDF password in chat, commits, CLI arguments or CI.
+
+
+## r038 — additional native safeguards and unqualified boundaries
+
+- The source account of a provider snapshot is historical provenance, not write authority. Restore into a different user requires independent destination credentials and explicit target selection; current GitHub new-repository and Dropbox new-file routes are narrow previews.
+- Full/incremental manifests and chunk references are age authenticated; the *multi-manifest* child-rebase path still needs forced-power-loss/fault-injection qualification before production use.
+- Logical purge changes/manages manifests only and does not reclaim ciphertext. A separate, operator-confirmed local GC uses a common store lock, verifies all surviving backup chains and parity, and applies a 48-hour default orphan grace (minimum 24). Mixed live/dead parity stripes are deliberately retained until crash-safe repacking works.
+- The persistent-state scheduler is in development. Keep JSON/state files private and secret-free; OS service isolation, monitoring, retention legal holds, independent WORM and remote GC are NOT certified.
+- [Runbook IT](R038_OPERATIONS_IT.md), [runbook EN](R038_OPERATIONS_EN.md), [release gates](RC_CERTIFICATION_MATRIX.md).
+
+## r038 — Sicurezza di restore tra utenti, purge e repack automatico
+
+Le credenziali del proprietario originale sono soltanto provenienza, non autorizzazione a scrivere nel nuovo account. Il restore GitHub verifica lo slug del nuovo owner e richiede gh autorizzato; Dropbox può verificare l'account del token WRITE della destinazione. Il purge modifica solo manifest cifrati e blocca successori protetti. La GC esamina tutti i backup sotto lock, esegue automaticamente il repack delle stripe 8+2 miste preparando e verificando nuovi shard prima del commit dell'indice autenticato, conserva la vecchia parità fino al grace del successore e rimuove soltanto ciphertext orfano dopo conferma. Non è WORM indipendente; restano da certificare crash, multiwriter e comportamento remoto.
+
+
+## r039 — Agent/cluster and resource security boundaries
+
+Agent ID, user, server-issued high-entropy token and Ed25519 device key require explicit server administrator approval. Proof includes timestamp, monotonic nonce, method/path, ciphertext digest and metadata digest. PostgreSQL stores approval/revocation, token digest and unique replay nonces, supports concurrent agent requests. Agent API is isolated from browser sessions and requires HTTPS proxy attestation injected by a trusted ingress; direct HTTP Pod access is prohibited. Cluster PG requires sslmode=verify-full, and stores shared login sessions and lease assignments.
+
+CPU/RAM policies are cooperative admission/stream checks and NOT hard cgroup/Windows Job Object limits; SSH target remote host load cannot be proven by a local probe. Queue lease tokens protect assignment/result updates but do not yet fence all encrypted object writes after lease loss. Agent push/pull and cross-pod storage use only true shared storage after explicit registration. These gaps require security and multi-node failure drills before RC. [Agent guide](AGENTS_AFS_R039_EN.md), [cluster guide](CLUSTER_ORCHESTRATION_R039_EN.md).
+
+## r039 hardened cluster Secret file ownership correction
+
+Use the Kubernetes example in [CLUSTER_ORCHESTRATION_R039_EN.md](CLUSTER_ORCHESTRATION_R039_EN.md). Multi Backup hardened mode requires **independent** 64-hex private-gate and recovery authorization secrets plus trusted agent-proxy attestation. A non-root process cannot read 0400 root-owned Kubernetes Secret projections. The initContainer copies the files into private memory-backed volumes owned by UID/GID 10001 and mode 0600; the app container remains read-only-rootfs with dropped capabilities. This avoids weakening the server's credential file checks. Cluster ingress must overwrite injected trust headers and restrict direct Pod network access. HPA only affects the availability of API pods and cannot substitute for verified writer fencing under network partitions.
+
+
+## r039 verified PostgreSQL TLS compatibility
+
+The postgres 0.19 Rust driver recognizes TLS require rather than libpq's verify-full option. The HA startup parser REQUIRES and structurally validates an input URI query with exactly one sslmode=verify-full; the internal wire mode is then normalized to require and native-tls enforces TLS >=1.2 with certificate chain and hostname checking explicitly enabled. A custom PEM CA may be provided only by a validated regular file through MULTI_BACKUP_CLUSTER_TLS_CA_FILE, e.g. a 0600 Kubernetes Secret copy from multi-backup-db-ca/db-ca.pem. Tests reject disguised sslmode=disable and duplicate conflicting query values. This is a connection security control, not evidence of a live trusted PostgreSQL failover qualification.
+
+
+## r039 OIDC state across replicas
+
+Pending PKCE state keys are hashed with SHA256 and stored in PostgreSQL with verifier, nonce and expiry of 10 minutes. Callback consumes the record atomically with DELETE RETURNING after verifying the initiating browser's HttpOnly/Secure cookie. No local-memory fallback when database is configured but unavailable. DB roles must protect PKCE verifier and nonce from inspection. Real callback relay/replay/PG failure tests remain outstanding.
+

@@ -74,11 +74,33 @@ jobs:
           python -m unittest discover -s tests -p test_rust_bridge.py -v
           sudo apt-get update -qq
           sudo apt-get install -y age
-          python scripts/test-rust-archive-compat.py rust/target/release/multi-backup-native
+          # Legacy Python archive interoperability is optional, not an RC blocker.
+          # Native functional recovery is mandatory instead.
+          cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test afs_stream_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test incremental_chain_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --test garbage_collection_roundtrip
+          cargo test --manifest-path rust/Cargo.toml --lib execution_policy
+          cargo test --manifest-path rust/Cargo.toml --lib cluster_placement
+          cargo test --manifest-path rust/Cargo.toml --lib agent_protocol
+          cargo test --manifest-path rust/Cargo.toml --lib afs_volume
+          cargo test --manifest-path rust/Cargo.toml --bin multi-backup-agent
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-agent
+      - name: Mandatory Rust Lustre and Oracle fail-closed safety acceptance
+        run: |
+          sudo apt-get install -y jq
+          bash -n scripts/test-real-lustre-roundtrip.sh
+          bash -n scripts/test-oracle-rman-lab.sh
+          bash -n scripts/test-lustre-oracle-guards.sh
+          bash scripts/test-lustre-oracle-guards.sh
+      - name: Guarded IBM GPFS CES Developer lab scripts and anti-fake-mount controls
+        run: bash scripts/test-gpfs-lab-kit-r042.sh
       - name: Reject plaintext confidential artifacts
         run: python scripts/check-confidential-artifacts.py
       - name: Packaging, documentation and trust-policy gate
         run: python scripts/check-production-gate.py
+      - name: Rust r038 operator documentation contract
+        run: python scripts/check-documentation-consistency.py
 
   rust-server-validation:
     name: Rust web server, storage and OCI image build verification
@@ -96,9 +118,53 @@ jobs:
       - name: Exercise private gateway and recovery boundary in a running OCI image
         run: bash scripts/test-server-gateway-container.sh multi-backup:test
 
+  kubernetes-real-cluster:
+    name: Real Kubernetes multi-node control plane and PostgreSQL TLS acceptance
+    needs: [production-gate, rust-server-validation]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install upstream kind and kubectl
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          curl --fail --location --retry 3 --silent --show-error \
+            -o /tmp/kubectl https://dl.k8s.io/release/v1.32.3/bin/linux/amd64/kubectl
+          chmod 0755 /tmp/kind /tmp/kubectl
+          sudo mv /tmp/kind /tmp/kubectl /usr/local/bin/
+          kind version
+          kubectl version --client
+      - name: Boot actual Kubernetes control plane with two worker nodes
+        run: |
+          kind create cluster --name multi-backup-ci \
+            --config tests/kubernetes/kind-config.yaml --wait 240s
+          kubectl wait --for=condition=Ready nodes --all --timeout=180s
+          test "$(kubectl get nodes --no-headers | wc -l)" -eq 3
+      - name: Build the exact PR Rust OCI image and load it into kind
+        run: |
+          docker build --tag multi-backup:ci-kind .
+          kind load docker-image multi-backup:ci-kind --name multi-backup-ci
+      - name: Test two live Rust pods, PostgreSQL verify-full, service security and failover
+        run: bash tests/kubernetes/test-kind-cluster.sh
+      - name: Capture Kubernetes failure diagnostics (no Secret values)
+        if: failure()
+        shell: bash
+        run: |
+          kubectl -n multi-backup-ci get pods,deployments,services -o wide || true
+          kubectl -n multi-backup-ci get events --sort-by=.lastTimestamp || true
+          kubectl -n multi-backup-ci describe deployment mb-ci-server || true
+          kubectl -n multi-backup-ci logs -l app=mb-ci-server --all-containers=true --tail=150 || true
+          kubectl -n multi-backup-ci logs -l app=mb-ci-postgres --all-containers=true --tail=150 || true
+      - name: Tear down isolated Kubernetes cluster
+        if: always()
+        run: kind delete cluster --name multi-backup-ci || true
+
   publish-container:
     name: Push Multi Backup OCI image to Docker Hub
-    needs: [production-gate, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
+    needs: [production-gate, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview, publications-smoke]
     runs-on: ubuntu-24.04
     if: >-
       github.event_name != 'pull_request' &&
@@ -348,6 +414,131 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  rust-agent-macos:
+    name: Rust Agent macOS ${{ matrix.arch }} PKG
+    needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and build native agent PKG
+        env:
+          AGENT_FORMAT: pkg
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+        run: bash scripts/package-rust-agent-unix.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-macos-${{ matrix.arch }}-preview
+          path: packages/multi-backup-agent-preview-macos-${{ matrix.arch }}.pkg
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-windows:
+    name: Rust Agent Windows x64 EXE
+    needs: [production-gate]
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and build agent installer
+        shell: pwsh
+        run: ./scripts/package-rust-agent-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-windows-x64-preview
+          path: |
+            installers/multi-backup-agent-preview-windows-x64.exe
+            installers/checksums-agent-windows-x64.txt
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-debian:
+    name: Rust Agent Debian ${{ matrix.version }} ${{ matrix.arch }} DEB
+    needs: [production-gate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {version: 12, suite: bookworm, arch: amd64, runner: ubuntu-24.04}
+          - {version: 12, suite: bookworm, arch: arm64, runner: ubuntu-24.04-arm}
+          - {version: 13, suite: trixie, arch: amd64, runner: ubuntu-24.04}
+          - {version: 13, suite: trixie, arch: arm64, runner: ubuntu-24.04-arm}
+    container:
+      image: debian:${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies and compile native agent DEB
+        shell: bash
+        env:
+          AGENT_FORMAT: deb
+          DEBIAN_VERSION: ${{ matrix.version }}
+          DEBIAN_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl git age build-essential pkg-config dpkg-dev libssl-dev
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          bash scripts/package-rust-agent-unix.sh
+          apt-get install -y ./packages/*.deb
+          multi-backup-agent --version | grep -F r039
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-debian-${{ matrix.version }}-${{ matrix.arch }}-preview
+          path: packages/multi-backup-agent*.deb
+          retention-days: 14
+          if-no-files-found: error
+
+  rust-agent-rpm:
+    name: Rust Agent ${{ matrix.distro }} EL${{ matrix.el }} RPM
+    needs: [production-gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: rocky, el: 8, image: 'rockylinux/rockylinux:8'}
+          - {distro: rocky, el: 9, image: 'rockylinux/rockylinux:9'}
+          - {distro: rocky, el: 10, image: 'rockylinux/rockylinux:10'}
+          - {distro: alma, el: 8, image: 'almalinux:8'}
+          - {distro: alma, el: 9, image: 'almalinux:9'}
+          - {distro: alma, el: 10, image: 'almalinux:10'}
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native agent on target Enterprise Linux
+        shell: bash
+        env:
+          AGENT_FORMAT: rpm
+          AGENT_DISTRO: ${{ matrix.distro }}
+          AGENT_EL: ${{ matrix.el }}
+        run: |
+          set -euo pipefail
+          dnf install -y dnf-plugins-core
+          dnf config-manager --set-enabled crb || dnf config-manager --set-enabled powertools || true
+          dnf install -y rpm-build gcc gcc-c++ make findutils tar gzip git pkgconf-pkg-config systemd-rpm-macros openssl-devel
+          command -v curl >/dev/null || dnf install -y curl-minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          bash scripts/package-rust-agent-unix.sh
+          test -n "$(find packages -maxdepth 1 -name '*.rpm' -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-${{ matrix.distro }}-el${{ matrix.el }}-preview
+          path: packages/*.rpm
+          retention-days: 14
+          if-no-files-found: error
+
   publications-smoke:
     name: Native GUI screenshots and EN/IT PDF publication smoke
     needs: [production-gate]
@@ -372,6 +563,13 @@ jobs:
           for item in docs/manuals/*.pdf docs/brochures/*.pdf; do
             test -s "$item"
             pdftotext "$item" - | grep -qi 'Multi Backup'
+          done
+          # The two source manuals must actually be rebuilt and carry the
+          # clearly labelled Rust r038 development-preview supplement.
+          for manual in docs/manuals/*.pdf; do
+            pdftotext "$manual" - | grep -Fqi 'Rust r038:'
+            pdftotext "$manual" - | grep -Fq 'gc-collect'
+            pdftotext "$manual" - | grep -Fq 'verify-chain'
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -418,7 +616,7 @@ jobs:
 
   native-release:
     name: Native packages and publication (after Production Gate and macOS smoke)
-    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
+    needs: [production-gate, macos-smoke, publications-smoke, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, rust-windows-native-preview, rust-linux-rpm-native-preview, rust-linux-debian-native-preview]
     if: >-
       github.event_name != 'pull_request' &&
       ((github.ref == 'refs/heads/main' &&

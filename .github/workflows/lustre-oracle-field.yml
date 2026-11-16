@@ -1,0 +1,107 @@
+name: Multi Backup - manually approved Lustre or licensed Oracle field acceptance
+# Intentionally NOT callable from pull_request or push. Never schedule unreviewed
+# repository code onto a privileged Lustre or Oracle self-hosted lab runner.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Select the real dedicated Lustre or licensed Oracle laboratory"
+        required: true
+        type: choice
+        options:
+          - lustre
+          - oracle
+      expected_sha:
+        description: "Exact reviewed 40-character source commit SHA"
+        required: true
+        type: string
+      confirmation:
+        description: "Type APPROVED-DISPOSABLE-FIELD-LAB"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-field-${{ inputs.provider }}
+  cancel-in-progress: false
+jobs:
+  approved-source-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce exact immutable source, author and explicit lab approval before a self-hosted runner is assigned
+        env:
+          SELECTED_SHA: ${{ inputs.expected_sha }}
+          APPROVAL: ${{ inputs.confirmation }}
+          PROVIDER: ${{ inputs.provider }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTOR" = desalvo
+          [[ "$SELECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$APPROVAL" = APPROVED-DISPOSABLE-FIELD-LAB
+          [[ "$PROVIDER" == lustre || "$PROVIDER" == oracle ]]
+  real-lustre-acceptance:
+    needs: [approved-source-gate]
+    if: inputs.provider == 'lustre'
+    environment: lustre-field-lab
+    runs-on: [self-hosted, linux, x64, lustre-ci]
+    timeout-minutes: 150
+    steps:
+      - name: Refuse non-dedicated or root runner
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -u)" -ne 0
+          test -f /etc/multi-backup-ci/allow-disposable-lustre
+          test "$(cat /etc/multi-backup-ci/allow-disposable-lustre)" = DEDICATED_ISOLATED_LUSTRE_FIELD_LAB
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: Pin reviewed source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          bash -n scripts/test-real-lustre-roundtrip.sh
+      - name: Build actual native Rust executable
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Backup two genuine RO MDT+OST snapshots, verify encrypted chain and restore to isolated RW Lustre mount
+        env:
+          LUSTRE_FULL_MOUNT: ${{ vars.LUSTRE_FULL_MOUNT }}
+          LUSTRE_INCREMENTAL_MOUNT: ${{ vars.LUSTRE_INCREMENTAL_MOUNT }}
+          LUSTRE_RESTORE_MOUNT: ${{ vars.LUSTRE_RESTORE_MOUNT }}
+          LUSTRE_SNAPSHOT_ATTESTED: ${{ vars.LUSTRE_SNAPSHOT_ATTESTED }}
+        run: bash scripts/test-real-lustre-roundtrip.sh
+  real-oracle-rman-validation:
+    needs: [approved-source-gate]
+    if: inputs.provider == 'oracle'
+    environment: oracle-field-lab
+    runs-on: [self-hosted, linux, x64, oracle-ci]
+    timeout-minutes: 150
+    steps:
+      - name: Refuse non-dedicated or root runner
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -u)" -ne 0
+          test -f /etc/multi-backup-ci/allow-disposable-oracle
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: Pin reviewed source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          bash -n scripts/test-oracle-rman-lab.sh
+      - name: Build actual native Rust executable
+        run: cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Execute genuine read-only RMAN source and backup restore-validation in a licensed isolated Oracle lab
+        env:
+          ORACLE_HOME: ${{ vars.ORACLE_HOME }}
+          ORACLE_SID: ${{ vars.ORACLE_SID }}
+          MB_ORACLE_EXPECTED_DB_NAME: ${{ vars.MB_ORACLE_EXPECTED_DB_NAME }}
+          MB_ORACLE_LAB_APPROVAL: LICENSED_DISPOSABLE_ORACLE_LAB
+        run: bash scripts/test-oracle-rman-lab.sh

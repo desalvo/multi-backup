@@ -1,0 +1,32 @@
+name: Multi Backup - real Lustre QEMU kernel and client acceptance
+# This runs a genuine Lustre filesystem inside ephemeral QEMU, not a fake
+# directory or userspace filesystem. It does NOT certify MDT/OST snapshots.
+on:
+  pull_request:
+    paths:
+      - 'scripts/test-lustre-ltvm-hosted.sh'
+      - 'tests/lustre/ltvm-guest-smoke.sh'
+      - '.github/workflows/lustre-qemu-live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-lustre-guest:
+    name: Genuine Lustre kernel, OST striping and RO client mount in ephemeral QEMU
+    runs-on: ubuntu-24.04
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse host without hardware virtualization, check disk and script safety
+        run: |
+          bash -n scripts/test-lustre-ltvm-hosted.sh
+          bash -n tests/lustre/ltvm-guest-smoke.sh
+          test -c /dev/kvm || { echo "::error::This hosted runner has no /dev/kvm; real QEMU Lustre lab cannot start"; exit 1; }
+          df -h /
+      - name: Boot pinned Rocky 9 Lustre guest with real MDT and OST disks
+        run: bash scripts/test-lustre-ltvm-hosted.sh
+      - name: Report precise qualification scope
+        if: success()
+        run: |
+          echo 'PASS: real kernel Lustre QEMU VM, client filesystem, 2 OST stripes and separate RO mount.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED: coordinated MDT/OST full/incremental snapshots and Rust native archive/metadata recovery; the protected manual field lab remains mandatory.' >> "$GITHUB_STEP_SUMMARY"

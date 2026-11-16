@@ -1,4 +1,4 @@
-# Multi Backup Rust migration — format and GUI parity gates
+# Multi Backup Rust migration — functional parity gates (r038)
 
 Status: **begun, NOT COMPLETE**. This record prevents accidentally claiming
 Rust-native functionality where Python is still the working engine.
@@ -113,3 +113,10 @@ GitHub fresh-repo mirror restore and Dropbox add-only file restore share the sam
 - Rust standalone desktop now resolves the same protected vault path as Python 0.1.0 on macOS (`~/Library/Application Support/multi-backup/keys/default.agevault`), Windows (`%APPDATA%/multi-backup/keys/default.agevault`) and Linux (`$XDG_CONFIG_HOME/multi-backup/keys/default.agevault`), independent of the user-selected backup destination. If that vault already exists (including a rejected symlink), startup is locked; only an authenticated password or already enrolled Mac Touch ID can unlock backup UI. For a new installation without a vault, Start/Resume takes the user to the Vault panel and requires generation/unlock rather than permitting unsecured backups. An identity already unlocked for the current application session is held exclusively in a zeroized Rust allocation.
 - Added the new Rust updater module and operational CLI/UI controls. They retrieve the official fixed GitHub Releases endpoint by stable/early-release, select native architecture-specific Rust-only assets, reject non-HTTPS/off-domain URL hops and missing official SHA-256 digests, bound redirects/file sizes and stage the bytes atomically. No downloaded executable is installed/launched automatically. Physical system signing and version-by-version upgrade/rollback remain separate release acceptance tests.
 - Existing r018 Python GUI and archives on `main` have not changed. The r020 feature branch is **not** yet a fully certified replacement: external provider E2E with private authenticated accounts, UI/pixel/accessibility review, physical biometry, signed/notarized distribution and end-to-end upgrade/rollback still fail to have sufficient verified evidence.
+
+
+## Current decision supersedes historical gates (2026-11-14)
+
+The user stated that Python-created historical archives have not been materially used and their migration is not critical. Old Python-format byte compatibility is no longer an RC blocker; the older numbered migration/parity gates above are historical. Existing user data/keys and optional converters remain untouched.
+
+Rust GUI/CLI/new encrypted chunk store/restore are now the intended primary runtime. The current branch adds a **real native generic filesystem plugin executor** for POSIX→POSIX and Linux guarded read-only NFS/SMB/SSHFS/GPFS CES→POSIX backups. Functional CLI tests are blocking. Complete the native GitHub/Dropbox source/destination integrations, real backup and restore, LFS/CI metadata, crash-resume, native settings/UI, protected retention/GC, installed OS tests, sign/notarize, update rollback and security gates before considering Rust fully migrated. No green compilation or user snapshot-attestation flag certifies those missing behaviors.

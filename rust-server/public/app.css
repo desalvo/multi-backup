@@ -35,3 +35,20 @@ button[disabled]{opacity:.6;cursor:default}input{border:1px solid #667bb6;backgr
 .virtual-grid .virtual-file{flex:1 1 170px;flex-direction:column;text-align:center;background:#172f66}
 .virtual-grid .virtual-file button{margin:0}
 @media(max-width:800px){.search{width:100%;flex-basis:100%}.virtual-file{flex-wrap:wrap}.virtual-file button{margin:0 auto}}
+
+/* r039 centralized read-only cluster status. Identical metadata on all pods. */
+.cluster-summary{padding:12px 15px;border-radius:11px;background:#16376a;
+  border:1px solid #4369a4;color:#99e6ef;font-weight:700}
+.cluster-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.cluster-columns h3{font-size:1rem;color:#d6def8}
+.cluster-record{display:flex;flex-direction:column;gap:5px;padding:10px 12px;
+  margin:7px 0;border-radius:10px;background:#0e224e;border:1px solid #405d8c;
+  overflow-wrap:anywhere}
+.cluster-record strong{font-weight:650}
+.cluster-record small{display:block;line-height:1.4}
+.cluster-record[data-status="online"]{border-left:4px solid #57c49c}
+.cluster-record[data-status="offline"],.cluster-record[data-status="failed"],
+.cluster-record[data-status="revocato"]{border-left:4px solid #d77d83}
+.cluster-record[data-status="local"]{border-left:4px solid #e7bd60}
+.cluster-record[data-status="shared"]{border-left:4px solid #62c3e6}
+@media(max-width:850px){.cluster-columns{grid-template-columns:1fr}}

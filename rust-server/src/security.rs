@@ -128,7 +128,27 @@ impl SecurityPolicy {
 }
 pub async fn enforce_gateway(State(state):State<AppState>,request:Request,next:Next)->Response {
     // Only a liveness endpoint is exempt; ingress MUST NOT publish it.
-    if request.uri().path()=="/healthz" {
+    if request.uri().path()=="/healthz" || request.uri().path()=="/readyz" {
+        return next.run(request).await;
+    }
+    // Agent transport is isolated from browser sessions. The ingress MUST
+    // inject a 64+ character private secret over a trusted pod network after
+    // validating the public TLS connection. The agent has its own bearer +
+    // approved Ed25519 proof. Without both, fail closed, not an exemption.
+    if request.uri().path()=="/api/agents/poll" ||
+       request.uri().path()=="/api/agents/policy" ||
+       request.uri().path()=="/api/agents/upload" {
+        use subtle::ConstantTimeEq;
+        let value=request.headers().get("x-mb-trusted-https-proxy")
+            .and_then(|h|h.to_str().ok());
+        let tls=request.headers().get("x-forwarded-proto")
+            .and_then(|h|h.to_str().ok())==Some("https");
+        let ok=state.0.agent_proxy_key.as_ref().and_then(|secret|
+            value.map(|actual|secret.as_bytes()
+                .ct_eq(actual.as_bytes()).unwrap_u8()==1)).unwrap_or(false);
+        if !tls || !state.0.origin.starts_with("https://") || !ok {
+            return StatusCode::NOT_FOUND.into_response();
+        }
         return next.run(request).await;
     }
     if !state.0.security.gateway_ok(request.headers()) {

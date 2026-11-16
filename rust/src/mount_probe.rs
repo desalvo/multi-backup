@@ -1,4 +1,4 @@
-//! Read-only Linux mount evidence for pre-mounted GPFS CES and SSHFS.
+//! Read-only Linux mount evidence for pre-mounted NFS/SMB/GPFS CES/SSHFS.
 //! No mount/umount, network, customer-file, SSH credential or write operations.
 use crate::plugins::GpfsAccess;
 use serde::Serialize;
@@ -56,14 +56,14 @@ fn parse_mountinfo(raw:&str)->Vec<MountEvidence>{
 /// authenticate SSH host keys, verify the GPFS backend or prove consistency.
 pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
     ->Result<MountEvidence,String>{
-    if plugin!="gpfs"&&plugin!="sshfs"{
-        return Err("Only gpfs and sshfs mount types are supported".into());
+    if !matches!(plugin,"gpfs"|"sshfs"|"nfs"|"smb"|"cephfs"|"glusterfs"|"lustre"){
+        return Err("Unsupported filesystem source; use nfs/smb/gpfs/sshfs/cephfs/glusterfs/lustre".into());
     }
     if plugin=="gpfs"&&access.is_none(){
         return Err("GPFS requires explicit ces-nfs or ces-smb mode".into());
     }
-    if plugin=="sshfs"&&access.is_some(){
-        return Err("SSHFS must not receive a GPFS access setting".into());
+    if plugin!="gpfs"&&access.is_some(){
+        return Err("Only GPFS may receive a CES access setting".into());
     }
     #[cfg(not(target_os="linux"))]{
         let _=(mountpoint,access);
@@ -85,6 +85,14 @@ pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
             ("gpfs",Some(GpfsAccess::CesNfs))=>&["nfs","nfs4"],
             ("gpfs",Some(GpfsAccess::CesSmb))=>&["cifs","smb3"],
             ("sshfs",None)=>&["fuse.sshfs"],
+            ("nfs",None)=>&["nfs","nfs4"],
+            ("smb",None)=>&["cifs","smb3"],
+            // Native CephFS and the operator-installed FUSE client. Neither
+            // proves snapshot consistency or validates the backing cluster.
+            ("cephfs",None)=>&["ceph","fuse.ceph-fuse"],
+            // Only the explicitly mounted client, never direct brick access.
+            ("glusterfs",None)=>&["fuse.glusterfs"],
+            ("lustre",None)=>&["lustre"],
             _=>return Err("Unsupported mount protocol".into()),
         };
         let mut entry=parse_mountinfo(&mountinfo).into_iter().find(|item|
@@ -118,6 +126,11 @@ mod tests{
         assert!(probe("gpfs",tmp.path(),None).is_err());
         assert!(probe("sshfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
         assert!(probe("posix",tmp.path(),None).is_err());
+        assert!(probe("nfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
+        assert!(probe("smb",tmp.path(),Some(GpfsAccess::CesSmb)).is_err());
+        for plugin in ["cephfs","glusterfs","lustre"] {
+            assert!(probe(plugin,tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
+        }
     }
     #[cfg(target_os="linux")]
     #[test]
@@ -126,5 +139,10 @@ mod tests{
         assert!(probe("gpfs",tmp.path(),Some(GpfsAccess::CesNfs)).is_err());
         assert!(probe("gpfs",tmp.path(),Some(GpfsAccess::CesSmb)).is_err());
         assert!(probe("sshfs",tmp.path(),None).is_err());
+        assert!(probe("nfs",tmp.path(),None).is_err());
+        assert!(probe("smb",tmp.path(),None).is_err());
+        for plugin in ["cephfs","glusterfs","lustre"] {
+            assert!(probe(plugin,tmp.path(),None).is_err());
+        }
     }
 }

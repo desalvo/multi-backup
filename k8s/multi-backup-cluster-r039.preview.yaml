@@ -1,0 +1,186 @@
+# Development EXAMPLE only; replace all placeholders before deployment.
+# Independent PostgreSQL with CA/host verified TLS is mandatory.
+# This is NOT a certified RC, nor a ready-made production deployment.
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  selector:
+    app: multi-backup
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  selector:
+    matchLabels: {app: multi-backup}
+  template:
+    metadata:
+      labels: {app: multi-backup}
+    spec:
+      # Database and agent ingress secrets are never embedded in ConfigMaps.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      # Copy root-owned Kubernetes Secret projections into owner-only files.
+      # The Rust server intentionally refuses group/world-readable credential
+      # files; direct Secret mounts (0400, owned by root) cannot be read by the
+      # unprivileged UID 10001. Do not weaken Rust's permission checks.
+      initContainers:
+        - name: prepare-private-secrets
+          image: alpine:3.20
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              umask 077
+              cp /in-admin/admin-hash /out/admin-hash
+              cp /in-agent/agent-proxy /out/agent-proxy
+              cp /in-age/age-identity /out/age-identity
+              cp /in-gateway/private-gate /out/private-gate
+              cp /in-recovery/recovery /out/recovery
+              cp /in-db-ca/db-ca.pem /out/db-ca.pem
+              chown 10001:10001 /out/*
+              chmod 0600 /out/*
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"], add: ["CHOWN"]}
+          volumeMounts:
+            - {name: private-secrets, mountPath: /out}
+            - {name: admin-secret, mountPath: /in-admin, readOnly: true}
+            - {name: agent-proxy-secret, mountPath: /in-agent, readOnly: true}
+            - {name: age-secret, mountPath: /in-age, readOnly: true}
+            - {name: gateway-secret, mountPath: /in-gateway, readOnly: true}
+            - {name: recovery-secret, mountPath: /in-recovery, readOnly: true}
+            - {name: db-ca-secret, mountPath: /in-db-ca, readOnly: true}
+      containers:
+        - name: server
+          image: REPLACE_WITH_CI_VERIFIED_R039_SERVER_IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: MULTI_BACKUP_BIND, value: "0.0.0.0:8080"}
+            - {name: MULTI_BACKUP_PUBLIC_ORIGIN, value: "https://REPLACE_WITH_FQDN"}
+            - {name: MULTI_BACKUP_CLUSTER_TLS_CA_FILE, value: "/run/secrets/db-ca.pem"}
+            - name: MULTI_BACKUP_CLUSTER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: multi-backup-db, key: postgresql-url-verify-full}
+            - name: MULTI_BACKUP_REPLICA_ID
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - {name: MULTI_BACKUP_REPLICA_MAX_JOBS, value: "4"}
+            - {name: MULTI_BACKUP_CLUSTER_STORAGE_IDS, value: "shared-cephfs"}
+            # Disable automatic backup execution until storage and write-fence
+            # acceptance is complete; opt in only in a controlled test.
+            - {name: MULTI_BACKUP_CLUSTER_EXECUTOR, value: "disabled"}
+            - {name: MULTI_BACKUP_ADMIN_USER, value: "admin"}
+            - {name: MULTI_BACKUP_HARDENED_MODE, value: "true"}
+            - {name: MULTI_BACKUP_PRIVATE_GATE_SECRET_FILE, value: "/run/secrets/private-gate"}
+            - {name: MULTI_BACKUP_RECOVERY_SECRET_FILE, value: "/run/secrets/recovery"}
+            - {name: MULTI_BACKUP_ADMIN_HASH_FILE, value: "/run/secrets/admin-hash"}
+            - {name: MULTI_BACKUP_AGENT_PROXY_SECRET_FILE, value: "/run/secrets/agent-proxy"}
+            - {name: MULTI_BACKUP_AGE_IDENTITY_FILE, value: "/run/secrets/age-identity"}
+            - {name: MULTI_BACKUP_DATA_ROOT, value: "/data/encrypted-store"}
+            - {name: MULTI_BACKUP_EXPORT_ROOT, value: "/data/exports"}
+            - {name: MULTI_BACKUP_AGENT_UPLOAD_ROOT, value: "/data/agent-uploads"}
+            - {name: MULTI_BACKUP_AUDIT_LOG, value: "/data/audit/events.jsonl"}
+          volumeMounts:
+            - {name: shared-data, mountPath: /data}
+            - {name: private-secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: scratch, mountPath: /tmp}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: private-secrets
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+        - name: scratch
+          emptyDir: {sizeLimit: 1Gi}
+        - name: shared-data
+          persistentVolumeClaim: {claimName: multi-backup-rwx}
+        - name: admin-secret
+          secret: {secretName: multi-backup-admin, defaultMode: 256}
+        - name: agent-proxy-secret
+          secret: {secretName: multi-backup-agent-proxy, defaultMode: 256}
+        - name: age-secret
+          secret: {secretName: multi-backup-age, defaultMode: 256}
+        - name: gateway-secret
+          secret: {secretName: multi-backup-private-gate, defaultMode: 256}
+        - name: recovery-secret
+          secret: {secretName: multi-backup-recovery, defaultMode: 256}
+        - name: db-ca-secret
+          secret: {secretName: multi-backup-db-ca, defaultMode: 256}
+---
+# The PVC must bind to a provisioner that supports RWX across all replicas.
+# A local-path or RWO volume is not a valid substitute for shared storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: multi-backup-rwx
+  namespace: multi-backup
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests: {storage: 1Ti}
+  # Set a verified shared CephFS/NFS/etc StorageClass before applying.
+  storageClassName: REPLACE_WITH_VERIFIED_RWX_STORAGECLASS
+
+---
+# Scale the shared-control-plane API horizontally. Pod names remain unique
+# replica IDs. Queue-based autoscaling and exact write fencing still need
+# independent live verification before enabling cluster backup execution.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: multi-backup
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: multi-backup
+  namespace: multi-backup
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: multi-backup}

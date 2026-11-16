@@ -24,9 +24,10 @@ multi-backup-native plugins plan --input posix --output github --mode restore --
 ```
 
 `plugins plan` is **read-only**. It rejects unknown IDs, unsupported
-directional roles and invalid modes; `executable=false` until both generic
-adapters are certified. `preview` means a *separate dedicated native
-operation* exists, not that the unified connector is wired. `planned` means
+directional roles and invalid modes; `executable=false` until fully qualified
+production adapters are certified. `preview_executable=true` now identifies
+an independently gated **real Rust development executor**, not a production
+Ready capability. `preview` means native code exists but is not certified. `planned` means
 only the interface specification/catalogue exists. `unsupported` is an
 explicitly forbidden role. `ready` is reserved for live-tested, qualified
 native adapters (none currently declared).
@@ -58,10 +59,7 @@ native adapters (none currently declared).
   core; one user backup remains **one logical backup**, not multiple objects
   shown as independent backups.
 
-The common engine eventually composes any eligible input with any eligible
-output; plugins are allowed to specialize metadata but cannot circumvent the
-encryption, audit, retention, vault or two-phase commit rules. Runtime
-orchestration is **not implemented by this catalog commit**.
+The generic engine is in partial development: five preview filesystem source→POSIX pairs execute through the common Rust runtime; the majority of catalog combinations remain declarative only. Every adapter must respect encryption, permissions, vault, audit, retention and two-phase commit semantics.
 
 ## Security / platform boundaries
 
@@ -251,3 +249,66 @@ The local chunk-store and legacy archive path now have protection
 enforcement; remote providers still need their own tested enforcement.
 WORM/Object Lock on an independent vault is a separate and stronger
 safety property. See `docs/BACKUP_PROTECTION.md`.
+
+## r038 — operational filesystem adapters (development preview)
+
+The compiled `rust/src/plugin_executor.rs` has the first complete generic
+execution path: **POSIX → POSIX** encrypted native backup and full/selective
+restore into an explicit fresh directory. The destination uses verified
+age-encrypted content-addressed chunks and an encrypted logical manifest.
+No path overlap with the source, storage or private age identity is permitted.
+
+On Linux, `nfs`, `smb`, `sshfs`, and `gpfs` (CES NFS/SMB) can read from
+an already mounted **read-only** source only when (1) the exact mountpoint
+has the expected kernel filesystem type, and (2) the caller explicitly
+supplies `--source-snapshot-attested`. GPFS additionally requires
+`--input-gpfs-access ces-nfs|ces-smb`. Mount evidence plus user attestation
+cannot independently prove a storage-side snapshot, consistent application
+state, ACL/xattr retention or actual IBM backend identity. These adapters
+are not production Ready, and no remote mount or write is ever attempted.
+
+```bash
+multi-backup-native plugins plan --input nfs --output posix --mode backup --json
+multi-backup-native plugins backup --input posix --output posix --source /src \
+  --root /encrypted-store --identity /key/identity.txt --label first --json
+multi-backup-native plugins restore --input posix --output posix \
+  --root /encrypted-store --identity /key/identity.txt \
+  --id BACKUP_ID --destination /fresh-restore
+```
+
+`rust/tests/plugin_dispatch_roundtrip.rs` is a blocking native functional
+test in the Production Gate and macOS/Windows/Debian packaging jobs. Catalog:
+32 plugin IDs, 53 backup roles, **5 preview executable backup pairs**, and
+0 fully certified generic pairs (out of 682 possible); all other combinations
+fail closed. GitHub/Dropbox still have dedicated preview engines outside this
+generic dispatch and require live-service E2E. Legacy Python archive migration
+is explicitly optional and no longer a promotion gate.
+
+
+## r038 — source/target user separation and incremental contract
+
+- An account-scoped restore must store **source account as provenance**, but independently authorize the destination with target-specific credentials and least privilege. Never reuse source API secrets in another user's account by implication.
+- Rust dedicated preview paths: GitHub new repository under an explicitly matched target owner; Dropbox add-only upload of one file using an independently verified target write-token account ID/email. Remote arbitrary selection, multi-account metadata/ACL transfer and full-account restore remain open.
+- Backup plugins must eventually implement both **FULL** and **INCREMENTAL** from CLI/manual schedules, with signed/authenticated lineage, reference full and complete per-snapshot metrics. Verification of incrementals defaults to the full chain, with explicit opt-out.
+- Deletion of any full or increment must preserve all surviving restore points: rebase descendants, promote successors to FULL if necessary, never physically delete live chunks during purge, and leave actual ciphertext reclamation to a separately authorized GC. Protected children block automatic lineage changes.
+- Local GC retains partially live parity 8+2 stripes for redundancy; crash-safe repacking and remote GC remain unqualified. Details: [IT operations](R038_OPERATIONS_IT.md), [EN operations](R038_OPERATIONS_EN.md) and [RC matrix](RC_CERTIFICATION_MATRIX.md).
+
+## r038 — Cross-account e rebase/GC condivisi
+
+Per ogni plugin autenticato l'identità dell'account sorgente è sola provenienza: il restore verso altro utente richiede autorizzazione indipendente dell'account di destinazione. GitHub crea un nuovo repository su un proprietario target autorizzato; Dropbox verifica l'account del token WRITE per il nuovo file. I restore remoti parziali generici e le combinazioni cloud-to-cloud NON sono certificati.
+
+La destinazione POSIX Rust supporta FULL/INCREMENTAL, purge con rebase, verifica catena completa e GC separata con repack automatico 8+2. Non implica che gli altri plugin catalogati siano adapter eseguibili. Leggere [FEATURE_INVENTORY_R038.md](FEATURE_INVENTORY_R038.md) e [OPERATIONS_R038_EN.md](OPERATIONS_R038_EN.md).
+
+## r039 — Common source transport & cluster contract
+
+Every plugin input can declare server_local, ssh_agentless, managed_agent_pull or managed_agent_push plus ExecutionLimits. This declares a source preparation/dispatch mode, NOT an executable adapter. For AFS a volume-specific vos dump local or pinned SSH plan and managed-agent preview exist; the generic server replica worker currently executes only server_local POSIX/NFS/SMB/SSHFS/GPFS CES filesystem input.
+
+Budget fields: max_concurrent_jobs, threads_per_job, max_transfer_bytes_per_sec, max_host_cpu_percent, max_host_memory_percent, min_free_memory_bytes. Pull and autonomous push must apply stricter server/agent limits. Single-volume AFS dumps cannot be split into threads; concurrent independent volumes may execute on different eligible nodes. Node_local storage is assigned only to its registered owner replica; truly shared storage may be scheduled across eligible replicas with PG-backed leases. Writes after lost lease are not yet fenced and thus not certified. Procedure in [cluster r039 EN](CLUSTER_ORCHESTRATION_R039_EN.md).
+
+## r039+ direct provider byte streams and exact mounted filesystem adapters
+
+For trusted native source adapters, Store::backup_stream(identity,label,top_namespace,logical_path,source,kind,parent,finish) reads a provider Read stream into encrypted age/zstd deduplicated chunks and 8+2 parity. The finalizer MUST confirm successful upstream command/provider completion BEFORE an encrypted manifest can be published; if producer fails only unreferenced encrypted chunks remain subject to separate guarded GC. No plaintext dump staging is required.
+
+The generic executor currently supports exactly 8 filesystem input plugins to POSIX and 6 restore destinations from POSIX, never all catalog entries. For Linux mounted sources, the path must be an exact RO mount with supported type and operator snapshot attestation; for mounted output, destination must be a non-existing immediate child of an exact matching RW mount. The type and permissions of the mount do not prove source snapshot consistency, ACL/xattr/stripe fidelity or shared storage ownership.
+
+AFS uses a separate typed vos volume adapter with existing-token local/pinned SSH dump and age stream backend, and a confirmed new-volume vos restore chain; it MUST NOT be called via a generic POSIX filesystem source. See [AFS and mounted provider operators IT](PLUGIN_EXECUTORS_R039_IT.md) and [EN](PLUGIN_EXECUTORS_R039_EN.md).

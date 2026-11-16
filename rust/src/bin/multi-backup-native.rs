@@ -1,7 +1,6 @@
-//! Standalone native Rust CLI for existing Multi Backup encrypted archives.
-//! This is intentionally separate from the legacy Python backup CLI while
-//! interoperability is tested. Never accepts a silent plaintext archive mode.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins};
+//! Standalone native Rust encrypted backup CLI. Native plugin execution is
+//! the primary development path; Python data migration is optional.
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -12,9 +11,23 @@ fn usage() -> &'static str {
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
-       multi-backup-native plugins probe --plugin gpfs|sshfs --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins database-backup --profile-json DB.json --root STORE --identity AGE_KEY --label NAME [--json]\n\
+       multi-backup-native plugins database-restore-new --profile-json NEW_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target ENGINE:HOST:PORT:NAME [--json]\n\
+       multi-backup-native plugins afs-backup --job-json APPROVED_VOLUME_JOB.json --root STORE --identity AGE_KEY --label NAME [--max-transfer-bps RATE] [--json]\n\
+       multi-backup-native plugins afs-restore-plan --target-json NEW_VOLUME_TARGET.json [--json]\n\
+       multi-backup-native plugins afs-restore-new --target-json NEW_VOLUME_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target CELL:SERVER:/vicepXX:NEWNAME [--max-transfer-bps RATE] [--json]\n\
+       multi-backup-native plugins probe --plugin gpfs|sshfs|nfs|smb|cephfs|glusterfs|lustre --mount PREMOUNTED_DIR [--access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins backup --input posix|nfs|smb|sshfs|gpfs|cephfs|glusterfs|lustre --output posix --source DIR --root STORE --identity AGE_KEY --label NAME [--namespace NAME] [--top-namespace PATH] [--source-snapshot-attested] [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins restore --input posix --output posix|nfs|smb|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--json]\n\
+       multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
+       multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
        multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
-       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--top-namespace PATH]\n\
+       multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--mode full|incremental] [--parent BACKUP_ID] [--top-namespace PATH]\n\
+       multi-backup-native storage info --root DIR --identity IDENTITY --id HASH [--json]\n\
+       multi-backup-native storage verify-chain --root DIR --identity IDENTITY --id HASH [--no-chain] [--json]\n\
+       multi-backup-native storage delete-backup --root DIR --identity IDENTITY --id HASH --confirm-id HASH (automatically rebase dependents)\n\
+       multi-backup-native storage gc-preview --root DIR --identity IDENTITY [--grace-hours 48] [--json]\n\
+       multi-backup-native storage gc-collect --root DIR --identity IDENTITY --confirm ERASE-ORPHANS [--grace-hours 48] [--json]\n\
        multi-backup-native storage retention-preview --root DIR --identity IDENTITY [--days 30] [--keep-last 1] [--json]\n\
        multi-backup-native storage list --root DIR --identity IDENTITY [--json]\n\
        multi-backup-native storage verify --root DIR --identity IDENTITY --id HASH\n\
@@ -70,9 +83,10 @@ fn options(args: &[String]) -> Result<(BTreeMap<&str, &str>, bool, bool), String
             pos += 1;
             continue;
         }
-        if args[pos] == "--dry-run" {
-            if parsed.insert("--dry-run", "true").is_some() {
-                return Err("Duplicate --dry-run flag".into());
+        if ["--dry-run","--source-snapshot-attested","--no-chain","--rebase-dependents","--force"].contains(&args[pos].as_str()) {
+            let flag=args[pos].as_str();
+            if parsed.insert(flag,"true").is_some() {
+                return Err(format!("Duplicate {flag} flag"));
             }
             pos += 1;
             continue;
@@ -110,7 +124,7 @@ fn accepted(args: &BTreeMap<&str, &str>, known: &[&str]) -> Result<(), String> {
 fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
-        println!("multi-backup-native 0.1.0-r019-dev");
+        println!("multi-backup-native 0.1.0-r038-preview");
         return Ok(());
     }
     if args.len() < 2 { return Err(usage().into()); }
@@ -158,14 +172,113 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&item)?);
                 } else {
-                    println!("{:?}: {} -> {} (input={:?}, output={:?}); executable={}",
+                    println!("{:?}: {} -> {} (input={:?}, output={:?}); executable={}; preview_executable={}",
                              item.mode, item.source_plugin, item.destination_plugin,
-                             item.source_stage, item.destination_stage, item.executable);
+                             item.source_stage, item.destination_stage, item.executable,
+                             item.preview_executable);
                     println!("{}", item.reason);
                     for check in &item.required_preflight {
                         println!("preflight: {check}");
                     }
                 }
+            },
+            "database-backup" | "database-restore-new" => {
+                let backup=command=="database-backup";
+                if backup {
+                    accepted(&flags,&["--profile-json","--root","--identity",
+                                     "--label","--max-transfer-bps"])?;
+                }else{
+                    accepted(&flags,&["--profile-json","--root","--identity",
+                                     "--id","--confirm-target","--max-transfer-bps"])?;
+                }
+                let path=Path::new(required(&flags,"--profile-json")?);
+                let md=std::fs::symlink_metadata(path)?;
+                if !md.file_type().is_file()||md.len()>65536 {
+                    return Err("Database profile must be an ordinary small file".into());
+                }
+                let profile:database::Profile=serde_json::from_reader(
+                    std::fs::File::open(path)?)?;
+                let mut limits=ExecutionLimits::default();
+                if let Some(rate)=flags.get("--max-transfer-bps"){
+                    limits.max_transfer_bytes_per_sec=Some(rate.parse()?);
+                }
+                limits.validate()?;
+                let root=Path::new(required(&flags,"--root")?);
+                let key=Path::new(required(&flags,"--identity")?);
+                if backup{
+                    let snap=database::backup(&profile,root,key,
+                        required(&flags,"--label")?,&limits)?;
+                    if json {println!("{}",serde_json::to_string_pretty(&snap)?);}
+                    else {println!("Verified encrypted database backup: {}",snap.id);}
+                }else{
+                    let n=database::restore_new(&profile,root,key,
+                        required(&flags,"--id")?,
+                        required(&flags,"--confirm-target")?,&limits)?;
+                    if json {println!("{}",serde_json::json!({
+                        "new_database":profile.database,
+                        "streamed_bytes":n,
+                        "overwrote_existing":false
+                    }));}
+                    else {println!("Restored {n} bytes into NEW database {}",profile.database);}
+                }
+            },
+            "afs-backup" => {
+                accepted(&flags,&["--job-json","--root","--identity",
+                                   "--label","--max-transfer-bps"])?;
+                let path=Path::new(required(&flags,"--job-json")?);
+                let meta=std::fs::symlink_metadata(path)?;
+                if !meta.file_type().is_file() || meta.len()>65536 {
+                    return Err("Unsafe AFS job configuration file".into());
+                }
+                let job:afs_volume::VolumeJob=serde_json::from_reader(
+                    std::fs::File::open(path)?)?;
+                let mut limits=ExecutionLimits::default();
+                if let Some(value)=flags.get("--max-transfer-bps"){
+                    limits.max_transfer_bytes_per_sec=Some(value.parse()?);
+                }
+                limits.validate()?;
+                let backup=afs_volume::backup_volume_to_store(
+                    &job,Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--label")?,&limits)?;
+                if json {println!("{}",serde_json::to_string_pretty(&backup)?);}
+                else {println!("AFS volume dump encrypted and verified: {}",backup.id);}
+            },
+            "afs-restore-plan" | "afs-restore-new" => {
+                let execute=command=="afs-restore-new";
+                if execute {
+                    accepted(&flags,&["--target-json","--root","--identity","--id",
+                        "--confirm-target","--max-transfer-bps"])?;
+                }else{
+                    accepted(&flags,&["--target-json"])?;
+                }
+                let path=Path::new(required(&flags,"--target-json")?);
+                let meta=std::fs::symlink_metadata(path)?;
+                if !meta.file_type().is_file()||meta.len()>65536{
+                    return Err("Unsafe AFS restore profile".into());
+                }
+                let target:afs_volume::RestoreNewJob=serde_json::from_reader(
+                    std::fs::File::open(path)?)?;
+                let plan=afs_volume::plan_restore_new(&target)?;
+                if execute{
+                    let mut limits=ExecutionLimits::default();
+                    if let Some(value)=flags.get("--max-transfer-bps"){
+                        limits.max_transfer_bytes_per_sec=Some(value.parse()?);
+                    }
+                    limits.validate()?;
+                    let (segments,bytes)=afs_volume::restore_new_chain_from_store(
+                        Path::new(required(&flags,"--root")?),
+                        Path::new(required(&flags,"--identity")?),
+                        required(&flags,"--id")?,&target,
+                        required(&flags,"--confirm-target")?,&limits)?;
+                    if json {println!("{}",serde_json::json!({
+                        "restored_dumps":segments,"restored_dump_bytes":bytes,
+                        "new_volume":target.volume,"overwrites_existing":false
+                    }));}
+                    else {println!("AFS NEW volume created from {segments} verified dumps ({bytes} bytes)");}
+                }else if json {println!("{}",serde_json::to_string_pretty(&plan)?);}
+                else {println!("AFS new-volume restore: {} {:?}\nConfirmation: {}",
+                    plan.executable,plan.arguments,plan.confirmation);}
             },
             "probe" => {
                 accepted(&flags, &["--plugin","--mount","--access"])?;
@@ -179,7 +292,84 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     evidence.plugin,evidence.mountpoint,evidence.fs_type,
                     evidence.rw_mount_option);}
             },
+            "backup" => {
+                accepted(&flags, &["--input","--output","--source","--root",
+                                    "--identity","--label","--namespace","--top-namespace",
+                                    "--source-snapshot-attested","--input-gpfs-access",
+                                    "--mode","--parent"])?;
+                let kind=chunk_store::BackupKind::parse(
+                    flags.get("--mode").copied().unwrap_or("full"))?;
+                let snapshot = plugin_executor::backup_with_mode(
+                    required(&flags,"--input")?,required(&flags,"--output")?,
+                    Path::new(required(&flags,"--source")?),
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--label")?,
+                    flags.get("--namespace").copied().unwrap_or("files"),
+                    flags.get("--top-namespace").copied().unwrap_or(""),
+                    flags.contains_key("--source-snapshot-attested"),
+                    flags.get("--input-gpfs-access").map(|v|plugins::GpfsAccess::parse(v)).transpose()?,
+                    kind,flags.get("--parent").copied())?;
+                if json { println!("{}",serde_json::to_string_pretty(&snapshot)?); }
+                else {println!("Verified encrypted plugin backup {} ({} files)",
+                              snapshot.id,snapshot.entries.len());}
+            },
+            "restore" => {
+                accepted(&flags, &["--input","--output","--root","--identity",
+                                    "--id","--destination","--selection"])?;
+                let count = plugin_executor::restore(
+                    required(&flags,"--input")?,required(&flags,"--output")?,
+                    Path::new(required(&flags,"--root")?),
+                    Path::new(required(&flags,"--identity")?),
+                    required(&flags,"--id")?,
+                    Path::new(required(&flags,"--destination")?),
+                    flags.get("--selection").copied())?;
+                if json { println!("{}",serde_json::json!({"restored_files":count})); }
+                else {println!("Restored {count} verified files to a new directory");}
+            },
             _ => return Err(usage().into()),
+        }
+        return Ok(());
+    }
+    if family == "schedule" {
+        if password_stdin {return Err("Scheduler uses separate age identity paths".into());}
+        accepted(&flags,&["--config","--state","--force","--poll-seconds"])?;
+        let config=Path::new(required(&flags,"--config")?);
+        let state=Path::new(required(&flags,"--state")?);
+        match command {
+            "run"=>{
+                if flags.contains_key("--poll-seconds") {
+                    return Err("Polling interval is valid only in daemon mode".into());
+                }
+                let now=std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                let output=scheduler::run_once(config,state,flags.contains_key("--force"),now)?;
+                println!("{}",serde_json::to_string_pretty(&output)?);
+            },
+            "daemon"=>{
+                if flags.contains_key("--force"){
+                    return Err("--force is only valid for a one-shot manual run".into());
+                }
+                let poll=flags.get("--poll-seconds").copied().unwrap_or("60").parse::<u64>()?;
+                if !(10..=3600).contains(&poll){return Err("Poll seconds must be 10..3600".into());}
+                loop {
+                    let now=std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                    match scheduler::run_once(config,state,false,now){
+                        Ok(events)=>{
+                            for event in events {
+                                if event.executed {
+                                    println!("Scheduler {} completed; backup={:?}",
+                                        event.job_id,event.backup_id);
+                                }
+                            }
+                        },
+                        Err(error)=>eprintln!("Scheduler run failed: {error}"),
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(poll));
+                }
+            },
+            _=>return Err(usage().into())
         }
         return Ok(());
     }
@@ -195,7 +385,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("Initialized immutable age/Zstandard storage; legacy archives untouched");
             }
             "backup" => {
-                accepted(&flags, &["--root","--identity","--label","--sources-json","--top-namespace"])?;
+                accepted(&flags, &["--root","--identity","--label","--sources-json",
+                                    "--top-namespace","--mode","--parent"])?;
                 let identity = Path::new(required(&flags, "--identity")?);
                 let store = chunk_store::Store::open(root, identity)?;
                 let sources_file = std::fs::File::open(required(&flags, "--sources-json")?)?;
@@ -208,8 +399,11 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         namespace: namespace.to_owned(), directory: path.into(),
                     })
                 }).collect::<Result<_,_>>()?;
-                let snapshot = store.backup_in_namespace(identity, required(&flags,"--label")?,
-                    flags.get("--top-namespace").copied().unwrap_or(""), &sources)?;
+                let kind=chunk_store::BackupKind::parse(
+                    flags.get("--mode").copied().unwrap_or("full"))?;
+                let snapshot = store.backup_in_namespace_mode(identity, required(&flags,"--label")?,
+                    flags.get("--top-namespace").copied().unwrap_or(""), &sources,
+                    kind,flags.get("--parent").copied())?;
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             }
             "list" => {
@@ -229,7 +423,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     for backup in &snapshots {
                         println!("{} {} {} ({} logical files)",
                             if backup.protected {"[PROTECTED]"}else{"[UNPROTECTED]"},
-                            backup.id,backup.label,backup.entries.len());
+                            backup.id,format!("{} [{:?}]",backup.label,backup.kind),backup.entries.len());
                     }
                 }
             }
@@ -263,12 +457,45 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("Backup {id}: {}",if changed {"protection removed"}else{"not protected"});
             }
             "delete-backup" => {
-                accepted(&flags,&["--root","--identity","--id","--confirm-id"])?;
+                accepted(&flags,&["--root","--identity","--id","--confirm-id",
+                                  "--rebase-dependents"])?;
                 let key=Path::new(required(&flags,"--identity")?);
                 let id=required(&flags,"--id")?;
-                chunk_store::Store::open(root,key)?.delete_backup(
-                    key,id,required(&flags,"--confirm-id")?)?;
-                println!("Deleted logical manifest {id}; shared ciphertext chunks preserved for safe GC");
+                let store=chunk_store::Store::open(root,key)?;
+                let count=store.delete_backup_rebase(key,id,required(&flags,"--confirm-id")?)?;
+                println!("Safely rebased {count} immediate descendants and purged manifest {id}. No chunks or parity deleted until separate GC.");
+            }
+            "gc-preview" | "gc-collect" => {
+                accepted(&flags,&["--root","--identity","--grace-hours","--confirm"])?;
+                let perform=command=="gc-collect";
+                if perform {
+                    if required(&flags,"--confirm")?!="ERASE-ORPHANS" {
+                        return Err("GC execution requires explicit --confirm ERASE-ORPHANS".into());
+                    }
+                } else if flags.contains_key("--confirm") {
+                    return Err("GC preview must never accept an execution confirmation".into());
+                }
+                let hours=flags.get("--grace-hours").copied().unwrap_or("48").parse()?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let report=chunk_store::Store::open(root,key)?
+                    .garbage_collect(key,hours,perform)?;
+                println!("{}",serde_json::to_string_pretty(&report)?);
+            }
+            "info" => {
+                accepted(&flags,&["--root","--identity","--id"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let store=chunk_store::Store::open(root,key)?;
+                let info=backup_chain::details(&store,key,required(&flags,"--id")?)?;
+                println!("{}",serde_json::to_string_pretty(&info)?);
+            }
+            "verify-chain" => {
+                accepted(&flags,&["--root","--identity","--id","--no-chain"])?;
+                let key=Path::new(required(&flags,"--identity")?);
+                let store=chunk_store::Store::open(root,key)?;
+                let full=!flags.contains_key("--no-chain");
+                let result=backup_chain::verify_chain(&store,key,required(&flags,"--id")?,full)?;
+                println!("{}",serde_json::to_string_pretty(&result)?);
+                if !result.healthy{return Err("Incremental chain integrity check failed".into());}
             }
             "relocate" => {
                 accepted(&flags,&["--root","--identity","--destination","--dry-run"])?;
@@ -507,8 +734,21 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let from = Path::new(required(&flags, "--archive")?);
         match command {
             "github" => {
-                accepted(&flags, &["--archive", "--identity", "--vault", "--target", "--visibility", "--confirm"])?;
+                accepted(&flags, &["--archive", "--identity", "--vault", "--target", "--visibility", "--confirm",
+                                    "--source-account","--target-account"])?;
                 let target = required(&flags, "--target")?;
+                let (target_owner,_)=remote_restore::github_slug(target)?;
+                if let Some(expected)=flags.get("--target-account") {
+                    if !expected.eq_ignore_ascii_case(target_owner){
+                        return Err("GitHub destination account must match new repository owner".into());
+                    }
+                }
+                if let Some(origin)=flags.get("--source-account") {
+                    let _plan=account_restore::AccountRestorePlan::prepare(
+                        "github",origin,target_owner,Vec::new())?;
+                    // The source account is informational. gh login + owner
+                    // permissions authorize writes only to the new account.
+                }
                 let visibility = flags.get("--visibility").copied().unwrap_or("private");
                 if visibility != "private" && visibility != "public" {
                     return Err("Visibility must be private or public".into());
@@ -523,12 +763,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("New GitHub repository restored: {url}");
             },
             "dropbox" => {
-                accepted(&flags, &["--archive", "--identity", "--vault", "--path", "--confirm"])?;
+                accepted(&flags, &["--archive", "--identity", "--vault", "--path", "--confirm",
+                                    "--source-account","--target-account"])?;
                 let path = required(&flags, "--path")?;
+                let target_account=flags.get("--target-account").copied();
+                if let Some(origin)=flags.get("--source-account") {
+                    let destination=target_account.ok_or(
+                        "Cross-user Dropbox restore requires explicit --target-account")?;
+                    let _plan=account_restore::AccountRestorePlan::prepare(
+                        "dropbox",origin,destination,Vec::new())?;
+                }
                 let result = if let Some(secret) = &secret {
-                    remote_restore::dropbox_new_file_from_memory(from, secret, path)?
+                    if let Some(destination)=target_account {
+                        remote_restore::dropbox_new_file_for_account_from_memory(
+                            from,secret,path,destination)?
+                    }else {
+                        remote_restore::dropbox_new_file_from_memory(from,secret,path)?
+                    }
                 } else {
-                    remote_restore::dropbox_new_file(from, Path::new(plain.unwrap()), path)?
+                    if let Some(destination)=target_account {
+                        remote_restore::dropbox_new_file_for_account(
+                            from,Path::new(plain.unwrap()),path,destination)?
+                    }else{
+                        remote_restore::dropbox_new_file(from,Path::new(plain.unwrap()),path)?
+                    }
                 };
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }

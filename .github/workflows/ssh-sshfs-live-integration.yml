@@ -1,0 +1,37 @@
+name: Multi Backup - real SSH SCP SFTP and SSHFS acceptance
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'scripts/test-real-ssh-sshfs.sh'
+      - '.github/workflows/ssh-sshfs-live-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ssh-scp-sftp:
+    name: Real OpenSSH SSH, SCP and SFTP authentication and byte integrity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenSSH client/server and native protocol helpers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-client openssh-server age jq
+      - name: Test real sshd, legacy SCP, SCP-over-SFTP and explicit SFTP
+        run: bash scripts/test-real-ssh-sshfs.sh protocol
+  sshfs-native-recovery:
+    name: Real FUSE SSHFS read-only snapshot to encrypted Rust restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenSSH server, SSHFS, FUSE and Rust age helpers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-client openssh-server sshfs fuse3 age jq
+      - name: Build actual native Rust plugin
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Test actual FUSE SSHFS mounts, encrypted backup and remote restore
+        run: bash scripts/test-real-ssh-sshfs.sh sshfs

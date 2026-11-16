@@ -199,26 +199,26 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Versioned bucket and multipart ETag/checksum", "Use scoped credentials, multipart resume, optional Object Lock and no overwrite by default"),
     PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PLAN, PLAN,
         "ETag/Last-Modified and explicit collection traversal", "Output capability requires write permissions; server's read-only DAV mount is unrelated"),
-    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PLAN, PLAN,
+    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
         "Mounted filesystem plus server snapshot if available", "Support NFSv3, v4.x; do not assume root or atomic snapshots"),
-    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PLAN, NONE,
-        "SMB durable handles or snapshots if available", "Input first; ACL/ADS/Windows path semantics need explicit mapping"),
-    PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PLAN, PLAN,
+    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, NONE,
+        "SMB durable handles or snapshots if available", "Authenticated SMB3 RO input and new-directory-only RW mounted recovery preview; ACL/ADS/Windows path semantics still pending"),
+    PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PREVIEW, PLAN,
         "CephFS snapshots or quiesced mount", "No cross-filesystem atomicity claim; separate CephFS and RBD plugins"),
-    PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PLAN, PLAN,
+    PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PREVIEW, PLAN,
         "Mounted Gluster volume inventory with consistency epoch and preserved GFID/ACL/xattr metadata",
         "Quiesce or coordinate snapshots by volume topology (replica/disperse); no direct brick writes, restores to new isolated directory/volume"),
-    PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PLAN, PLAN,
+    PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PREVIEW, PLAN,
         "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
         "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
-    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES", DataKind::DistributedFilesystem, PLAN, PLAN,
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via CES", DataKind::DistributedFilesystem, PREVIEW, PLAN,
         "NFSv3/v4 or SMB3 CES export on an authorized server; consistency proved separately",
         "Use distro open-source NFS/CIFS client; no IBM native client shipped; CES server licensing, permission and snapshot fidelity remain operator responsibilities")
         .with_gpfs_ces(),
     PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
         "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
         "Kerberos/delegation token, TLS and redirect allowlist; write only new paths, commit encrypted manifest last"),
-    PluginDescriptor::new("afs", "Andrew File System / OpenAFS", DataKind::DistributedFilesystem, PLAN, PLAN,
+    PluginDescriptor::new("afs", "Andrew File System / OpenAFS", DataKind::DistributedFilesystem, PREVIEW, PREVIEW,
         "AFS cell+volume IDs and VLDB inventory; read-only/backup volume snapshot, vos full/incremental dump chain and ACLs",
         "Operator-supplied OpenAFS client/tools under IBM Public License; preserve cell, mountpoints and ACLs; restore new volume only"),
     PluginDescriptor::new("alfresco", "Alfresco Content Services", DataKind::DocumentRepository, PLAN, PLAN,
@@ -249,16 +249,18 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "VADP/CBT snapshot and config inventory", "Restore into a new VM and datastore; license/API checks required"),
     PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PLAN, NONE,
         "VM snapshot/engine API and volume exports", "Engine state, VM identity and disk snapshots are distinct scopes"),
-    PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PLAN, NONE,
-        "Transactional snapshot plus binlog position", "Logical/physical backup requires engine-specific consistent backup and PITR policy"),
-    PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PLAN, NONE,
-        "pg_basebackup/WAL or consistent logical snapshot", "PITR, role/grant restore and version compatibility require explicit acceptance"),
+    PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
+        "Rust MariaDB InnoDB transactional FULL logical dump and create-only restore",
+        "Requires client-installed mariadb-dump/mariadb, private credentials, TLS CA for remote; no binlog PITR, DDL snapshot certification or Oracle MySQL acceptance"),
+    PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PREVIEW, NONE,
+        "Rust PostgreSQL FULL pg_dump custom format and isolated pg_restore",
+        "Requires client-installed pg_dump/pg_restore, private credentials, TLS CA for remote; WAL/PITR and roles/extensions parity still open"),
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PLAN, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
         "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
-    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PLAN, PLAN,
+    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PLAN,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",
         "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport and no overwrite"),
     PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware immutable vault",
@@ -283,6 +285,9 @@ pub struct Plan {
     pub source_stage: Stage,
     pub destination_stage: Stage,
     pub executable: bool,
+    /// Explicit compiled experimental path exists for this pair, but its
+    /// complete provider metadata/consistency semantics are not certified.
+    pub preview_executable: bool,
     pub reason: &'static str,
     pub confirmation_required_before_writes: bool,
     /// Declarative planning only: neither actual locks nor a storage array
@@ -341,6 +346,11 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             AccessGate::OAuthScopeReview =>
                 required_preflight.push("verify OAuth app consent, provider API restrictions and least-privilege drive/tenant scopes"),
             AccessGate::ExternalProtocolOrMountedClient => {}
+        }
+        if plugin.id == "postgresql" || plugin.id == "mysql" {
+            required_preflight.push("require transaction-consistent FULL dump with verified role privileges; native client version must match server compatibility");
+            required_preflight.push("require private credential file, verified TLS for remote databases, and destination NEW database that does not yet exist");
+            required_preflight.push("logical full backup only; WAL/binlog PITR, application quiescing and physical incremental backups are not certified");
         }
         if plugin.id == "afs" {
             required_preflight.push("verify AFS cell, VLDB volume ID, volume type, Kerberos tokens, ACLs and mountpoints; preserve full/incremental dump chain");
@@ -411,10 +421,22 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
     // A generic multi-plugin job requires streaming, verified commit and
     // restore preflight adapters, none of which are ready yet.
     let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready;
+    // Reflect the ACTUAL compiled generic dispatcher, not catalog roles.
+    // AFS uses separate typed volume CLI commands and cannot be generalized
+    // as a mounted-file backup or a POSIX directory restore.
+    let preview_executable = match mode {
+        Mode::Backup => destination.id == "posix" && matches!(source.id,
+            "posix" | "nfs" | "smb" | "gpfs" | "sshfs" |
+            "cephfs" | "glusterfs" | "lustre"),
+        Mode::Restore => source.id == "posix" && matches!(destination.id,
+            "posix" | "nfs" | "smb" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
+    };
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
-        source_stage, destination_stage, executable,
-        reason: if executable { "both adapters are ready" } else {
+        source_stage, destination_stage, executable, preview_executable,
+        reason: if executable { "both adapters are ready" } else if preview_executable {
+            "compiled local or read-only mounted-source preview available; production qualification pending"
+        } else {
             "catalog/planning only: one or both generic adapters are not wired or qualified"
         },
         confirmation_required_before_writes: true,
@@ -477,12 +499,35 @@ mod tests {
         }
     }
     #[test]
+    fn actual_preview_pairs_match_the_native_dispatcher(){
+        for input in ["posix","nfs","smb","gpfs","sshfs",
+                      "cephfs","glusterfs","lustre"]{
+            assert!(plan(Mode::Backup,input,"posix").unwrap().preview_executable);
+        }
+        for output in ["posix","nfs","smb","sshfs","cephfs","glusterfs","lustre"]{
+            assert!(plan(Mode::Restore,"posix",output).unwrap().preview_executable);
+        }
+        assert!(!plan(Mode::Backup,"afs","posix").unwrap().preview_executable,
+            "AFS volume commands are separate, not filesystem dispatcher");
+        assert!(!plan(Mode::Restore,"posix","afs").unwrap().preview_executable);
+        assert!(!plan(Mode::Backup,"github","posix").unwrap().preview_executable,
+            "Dedicated provider code is not generic executable capability");
+    }
+    #[test]
     fn preview_does_not_masquerade_as_qualified_plugin() {
         let p=plan(Mode::Backup, "github", "posix").unwrap();
         assert_eq!(p.source_stage, Stage::Preview);
         assert_eq!(p.destination_stage, Stage::Preview);
         assert!(!p.executable);
         assert_eq!(find("postgresql").unwrap().kind, DataKind::Database);
+        for database in ["postgresql","mysql"] {
+            let d=find(database).unwrap();
+            assert_eq!(d.backup_input,Stage::Preview);
+            assert_eq!(d.restore_output,Stage::Preview);
+            assert_eq!(d.restore_input,Stage::Unsupported);
+            assert!(!plan(Mode::Backup,database,"posix").unwrap().preview_executable,
+                "Dedicated DB commands must not be misrepresented as generic executor");
+        }
         assert_eq!(find("rbd").unwrap().kind, DataKind::BlockDevice);
     }
     #[test]
@@ -515,13 +560,13 @@ mod tests {
         assert!(!plan(Mode::Backup, "posix", vault.id).unwrap().executable);
     }
     #[test]
-    fn glusterfs_remains_planned_in_both_directions() {
+    fn glusterfs_mounted_source_preview_is_not_a_certified_target() {
         let d=find("glusterfs").unwrap();
         assert_eq!(d.kind, DataKind::Files);
-        assert_eq!(d.backup_input, Stage::Planned);
+        assert_eq!(d.backup_input, Stage::Preview);
         assert_eq!(d.backup_output, Stage::Planned);
         assert_eq!(d.restore_input, Stage::Planned);
-        assert_eq!(d.restore_output, Stage::Planned);
+        assert_eq!(d.restore_output, Stage::Preview);
         assert!(d.lvm_modes.is_empty());
         assert!(!plan(Mode::Backup, "glusterfs", "anti-ransomware-vault").unwrap().executable);
         assert!(!plan(Mode::Restore, "anti-ransomware-vault", "glusterfs").unwrap().executable);
@@ -567,10 +612,12 @@ mod tests {
         for id in ["lustre","gpfs","hdfs","afs","alfresco",
                    "google-drive","onedrive","owncloud","nextcloud"] {
             let d = find(id).unwrap();
-            assert_eq!(d.backup_input, Stage::Planned, "{id}");
-            assert_eq!(d.backup_output, Stage::Planned, "{id}");
-            assert_eq!(d.restore_input, Stage::Planned, "{id}");
-            assert_eq!(d.restore_output, Stage::Planned, "{id}");
+            // GPFS CES has a strictly read-only mounted-source preview;
+            // output and all other providers remain declarative only.
+            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_output, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_input, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
@@ -634,10 +681,10 @@ mod tests {
     fn sshfs_source_and_target_are_planned_distinct_from_sftp() {
         let d=find("sshfs").unwrap();
         assert_eq!(d.kind,DataKind::Files);
-        assert_eq!(d.backup_input,Stage::Planned);
+        assert_eq!(d.backup_input,Stage::Preview);
         assert_eq!(d.backup_output,Stage::Planned);
         assert_eq!(d.restore_input,Stage::Planned);
-        assert_eq!(d.restore_output,Stage::Planned);
+        assert_eq!(d.restore_output,Stage::Preview);
         assert_ne!(d.id,find("ssh").unwrap().id);
         let b=plan(Mode::Backup,"sshfs","anti-ransomware-vault").unwrap();
         assert!(b.required_preflight.iter().any(|x|x.contains("SSH host key")));

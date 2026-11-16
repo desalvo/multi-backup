@@ -1,0 +1,95 @@
+# Multi Backup r039: runner dedicato OpenAFS/Kerberos
+
+## Scopo e stato
+
+Questa configurazione predispone una VM effimera per la certificazione OpenAFS reale. Non rappresenta ancora un collaudo superato. Obiettivo: KDC Kerberos, VLDB, volserver, client AFS montato, vero dump full+incrementale, archivio Rust age, nuovo volume restore e confronto byte per byte.
+
+Sistema **preferito**: VM Debian 12 (Bookworm) x86_64 appena creata con kernel standard **6.1.x-amd64**, NON kernel di backports. Alternativa già prevista: Ubuntu 22.04 GA 5.15-generic. Risorse suggerite: 4 vCPU, 8 GiB RAM, 50 GiB disco. Sono dimensionamenti indicativi e la compatibilità OpenAFS è verificata effettivamente con DKMS e modprobe, non data per scontata. Isolare la VM: nessun dato reale o accesso amministrativo alla produzione.
+
+## Preparazione da eseguire sulla VM
+
+~~~bash
+cat /etc/os-release          # Debian 12, versione 12 (bookworm)
+uname -r                     # 6.1.x-amd64
+git clone --branch feature/r039-afs-agent-packages https://github.com/desalvo/multi-backup.git
+cd multi-backup
+sudo bash scripts/bootstrap-openafs-runner-vm.sh
+~~~
+
+Il bootstrap rifiuta il riuso della VM, verifica la versione del sistema e il kernel standard Debian 12 (6.1.x-amd64) oppure Ubuntu 22.04 GA (5.15.x-generic), e installa la corretta libreria ICU Debian (libicu72), impone la conferma DISPOSABLE-OPENAFS-VM, compila/carica il modulo OpenAFS, crea l'utente mb-afs-runner e abilita sudo passwordless solo nell'host sacrificabile. Non eseguire su host esistenti o di produzione.
+
+## Registrazione del runner
+
+Aprire GitHub: desalvo/multi-backup > Settings > Actions > Runners > New self-hosted runner. La pagina mostra un token di registrazione a breve validità. Non copiarlo in Git o nella chat.
+
+~~~bash
+sudo -iu mb-afs-runner
+git clone --branch feature/r039-afs-agent-packages https://github.com/desalvo/multi-backup.git
+cd multi-backup
+bash scripts/register-openafs-runner-once.sh
+~~~
+
+Lo script installa il runner ufficiale actions/runner con asset SHA256 verificato e lo registra come ephemeral con etichetta openafs-ci. Chiede interattivamente il token e avvia run.sh in primo piano. Un solo job; dopo il job distruggere la VM. Ephemeral deregistration NON cancella i keytab o i dati della VM.
+
+## Avvio della certificazione
+
+GitHub richiede che il workflow manuale workflow_dispatch esista su main: quindi è necessario un piccolo dispatcher fiduciario su main, con checkout di un commit SHA approvato e actor autorizzato, senza fondere PR #11. Il workflow OpenAFS in PR #11 non basta da solo. Il job dedicato non deve essere avviato su evento pull_request. Dopo l'avvio dalla pagina Actions, verificare un effettivo PASS per KDC/VLDB, vos dump e restore, token, manifest cifrato e confronto byte-identico.
+
+Il dispatcher principale su main accetta l'OS Debian 12 kernel 6.1-amd64 (oltre a Ubuntu 22.04 GA), ma viene aggiornato solo dopo avere fissato il nuovo SHA della PR. Riportare il nuovo valore esatto expected_sha mostrato nella documentazione o nel workflow (non il precedente SHA 4754e5a5).
+ 
+**Nota pratica Proxmox:** selezionare ISO Debian 12 amd64; non installare headers di un kernel diverso da quello riportato da uname -r; OpenAFS su Debian 12 usa il pacchetto ufficiale openafs-modules-dkms 1.8.9-1+deb12u1, e l'effettiva compilazione è il gate di ingresso. VM sacrificabile, fuori dalla rete di produzione. 
+     
+Non equiparare questa prova a certificazione globale della PR #11: agenti reali, fencing HA, ACL/xattr POSIX e pacchetti firmati sono ancora gate distinti.
+
+
+## CI 43730251286 and reusable Proxmox lab — 15 November 2026
+
+The real Debian 12 job completed Kerberos and the OpenAFS server/client mount, then Ansible failed creating root.afs/root.cell/test with 'Unable to locate viceetcdir directory'. Cause: upstream SHA-pinned collection infers viceetcdir from the cacheinfo manual page, missing in Debian 12 facts. New scripts/patch-openafs-ansible-debian-facts.py adds /etc/openafs only when a REAL /etc/openafs/cacheinfo exists. All volume and vos operations remain real, not simulated.
+
+Keep Debian 12 VM, OpenAFS, Kerberos and Rust on the ISOLATED Proxmox network. GitHub runner remains per-job ephemeral; register fresh each time with a NEW short-lived GitHub token. The registration script reuses verified official runner archive after checking SHA256, uses exclusive flock, creates and removes each runner session/workspace, preserving the VM. The trusted workflow uses a per-job active lease and cleanup; after an abrupt termination inspect the VM and logs before manual lease recovery. Do not grant it production network or administrative credentials.
+
+Previous afs-run-used marker is retired; current job guard uses afs-active. Restore volume name uses GitHub run ID/attempt to avoid overwriting old test volumes. To retry from mb-afs-runner after verifying no runner process is active, git pull --ff-only in ~/multi-backup and run bash scripts/register-openafs-runner-once.sh. New VM bootstrap is NOT required. Still not AFS-certified until real full/incremental/new volume byte comparison is green.
+
+
+## CI 43731741639: true root cause of `viceetcdir` (15 Nov 2026)
+
+The **same** `openafs_volume: Unable to locate viceetcdir directory` remained after fixing Debian install path discovery. Log showed `PASS: real OpenAFS viceetcdir fact already present` while running that check under `sudo`. The pinned upstream volume task is **unprivileged**; facts were created under `become: true` on a runner started with `umask 077`. Root can therefore read the file while the unprivileged volume module cannot; its broad `except Exception` masks EACCES as a missing directory.
+
+The updated pinned upstream `local_install.yaml` is patched at the **boundary between client checkpoint 3 and volume checkpoint 4**: it sets `/etc/ansible/facts.d/openafs.fact` to root-owned, runner-group readable **0640** (not world-readable) and runs a non-root Python assertion checking the fact JSON and actual AFS `cacheinfo` path. The patch refuses unknown upstream playbooks and is tested against the exact upstream commit `11fa2a5b` in static CI.
+
+Preserve the Debian 12 Proxmox VM, KDC, OpenAFS client and kernel, and shared runner binary archive cache. Still register a new ephemeral runner per CI job; the main workflow remains owner-only, SHA-pinned, with `afs-active` lease cleanup. Do not claim a working real volume recovery or certification until the field run reaches green.
+
+
+## CI 43732486690: EACCES on OpenAFS fact parent directories (15 November 2026)
+
+The actual Linux runner/Ansible acceptance failed **at the new diagnostic**, not while building OpenAFS: PermissionError [Errno 13] reading '/etc/ansible/facts.d/openafs.fact' as mb-afs-runner, despite the file being group-readable 0640. The registering process has restrictive umask 077; one or both ancestor directories, '/etc/ansible' and '/etc/ansible/facts.d', may therefore be root-only and prevent path traversal. The earlier upstream openafs_volume module was hiding EACCES behind 'Unable to locate viceetcdir directory'.
+
+The exact upstream `local_install.yaml` patch is now more complete: after checkpoint 3, make both fact directories root-owned/group mb-afs-runner, mode **0710** (group execute/traverse but no listing; other denied); set '/etc/ansible/facts.d/openafs.fact' to root:mb-afs-runner **0640**; also make real '/etc/openafs/cacheinfo' root:mb-afs-runner **0640**, and require a real non-root open/read before touching volumes. No keytab permissions changed, no world read access. The static CI checks the patched pinned playbook. Debian VM stays available with an ephemeral GitHub runner session for every CI job. A genuine AFS full/incremental/Rust recovery PASS is still pending.
+
+
+## 2026-11-15: Real AFS run 43744237757 reached Rust test; RO mountpoint correction
+
+- The genuine Debian 12 run [43744237757](https://github.com/desalvo/multi-backup/actions/runs/43744237757) PASSED SHA/permissions, real Kerberos KDC and AFS token, VLDB/fileserver, root.afs/root.cell/test volumes, and Rust release build. FAILED while writing seed data: `/afs/example.com/test/mb-backup-data.txt: Read-only file system`. The tested AFS volume includes RO and RW copies, and the un-dotted `/afs/example.com` path resolves via RO root.cell/test. This is a test fixture mountpoint error, NOT kernel/DKMS failure.
+- The real acceptance script now establishes a unique source mountpoint under `/afs/.example.com` with explicit `fs mkmount -rw` targeting real volume `test`, logs `fs lsmount`, and writes/compares against that mount. The newly restored volume is also mounted with `-rw` under the cell RW root. Mountpoint collisions refuse overwrite. The temporary source mountpoint is removed on exit; real test contents and restored volumes remain available for inspection.
+- The isolated Proxmox Debian 12 VM remains reusable, with a fresh ephemeral GitHub runner and run lease; full+incremental encrypted backup and restore remain **NOT YET field-certified** until actual live PASS.
+
+
+## Real OpenAFS CI #43745205761: authenticated admin missing i/a on RW root.cell
+
+- CI #43745205761 passed real KDC+admin rxkad token, VLDB/volserver, Ansible volumes and Rust release; it FAILED at `fs mkmount -rw /afs/.example.com/mb-source-<run>-<attempt>`: `You don't have the required access rights`. This is a genuine OpenAFS ACL problem. The previous failed RO-path write has already been corrected.
+- `fs mkmount` explicitly requires BOTH `i` (insert) and `a` (administer) permissions on the ACL of the parent directory. The Ansible local install config currently grants broad read ACL on root.cell; while the admin has implicit a via system:administrators, it may not have insert. Within THIS isolated `example.com` test cell ONLY, the acceptance script prints parent ACL and `fs getcalleraccess`, adds `system:administrators all` to `/afs/.example.com` (preserves other ACL entries, no world-write), prints effective rights and then creates the unique -rw source mountpoint. This is not an authorization model for a production AFS cell.
+- Proxmox Debian 12 VM and tools retained; the GitHub runner remains ephemeral/one-job, SHA-pinned main-only dispatcher. A true encrypted full/incremental Rust restore with byte-identical check remains UNCERTIFIED pending live PASS.
+
+
+## OpenAFS field CI 43745989687: wrong `fs listacl` switch (15 Nov 2026)
+- The real KDC/OpenAFS provisioning and Rust release build succeeded. The acceptance script stopped at diagnostics, BEFORE the ACL change or RW mount: `fs: Unrecognized or ambiguous switch '-dir'; type 'fs help listacl' for detailed help`.
+- Fix both `fs listacl -dir` invocations to **`fs listacl -path`**, the actual documented OpenAFS CLI syntax. Retain `fs setacl -dir` (correct) and `fs getcalleraccess -path` (correct). Add static-lint rejection of invalid `listacl -dir`; no relaxation of restricted lab cell guard or security checks.
+- Reusable Debian 12 VM and ephemeral runner policy preserved. Lab real AFS full/incremental/restore still NOT certified.
+
+
+## Field OpenAFS CI 43746542514: genuine full + incremental PASS; vos progress breaks JSON restore result
+
+- [Workflow run 43746542514](https://github.com/desalvo/multi-backup/actions/runs/43746542514) **failed overall** but completed the genuine Kerberos/OpenAFS lab, RW source mount, ACL repair, Rust release build, true age/zstd encrypted full backup with integrity verification, incremental dump and full-chain verification. `--confirm-target wrong` was rejected as designed.
+- Restore was started for a fresh target volume; its child `vos restore` printed `Volume does not exist; Will perform a full restore` to **stdout**. The outer Rust CLI used `--json` and wrote JSON to the same stream, yielding `jq: parse error: Invalid numeric literal`. The CLI command returned exit 0, but we **cannot call restore certified** because the field test stopped before checking restored count, existence, byte identity and duplicate-reject.
+- Rust `afs_volume::restore_new_chain_from_store` now captures the child `vos`/SSH stdout in a piped background drain and streams its messages to **stderr** while the parent CLI retains clean machine-readable stdout. The reader is joined/checked after the restore process exits, without unbounded capture or deadlock with live encrypted-dump stdin streaming. Adds a Rust test that verifies the relay and excludes simulated vos from real field CI. The static AFS workflow additionally compiles/tests the helper. No source archive, restored volume or credential is overwritten.
+- Persistent isolated Debian 12 Proxmox VM remains reusable. GitHub runner still one-shot ephemeral; trusted main SHA pin/lease cleanup unchanged. Next live test is required for end-to-end full+incremental→restore byte-for-byte acceptance and negative tests.

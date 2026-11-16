@@ -1,0 +1,40 @@
+name: Multi Backup - live PostgreSQL agent and HA acceptance
+on:
+  push:
+    branches: [main, "feature/**"]
+    paths:
+      - "rust-server/**"
+      - ".github/workflows/agent-cluster-live-pg.yml"
+  pull_request:
+    paths:
+      - "rust-server/**"
+      - ".github/workflows/agent-cluster-live-pg.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  agent-ha-real-postgres:
+    name: Real PG16 agent trust and two-replica lease fencing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mb_live
+          POSTGRES_PASSWORD: local_ci_only
+          POSTGRES_DB: mb_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mb_live -d mb_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise real database enrollment, nonces, replica leases and quarantine
+        env:
+          MULTI_BACKUP_TEST_PG_DSN: postgresql://mb_live:local_ci_only@127.0.0.1:5432/mb_ci?sslmode=disable
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust-server/Cargo.toml real_pg_ -- --ignored --test-threads=1 --nocapture

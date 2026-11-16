@@ -498,14 +498,17 @@ class PluginTests(unittest.TestCase):
         self.assertIn('  publications-smoke:',ci)
         self.assertIn(
             '    needs: [production-gate, macos-smoke, publications-smoke, '
-            'rust-server-validation, rust-desktop-smoke, rust-macos-native-preview, '
+            'rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, rust-macos-native-preview, '
             'rust-windows-native-preview, rust-linux-rpm-native-preview, '
             'rust-linux-debian-native-preview]', ci)
         self.assertIn(
-            '    needs: [production-gate, rust-server-validation, rust-desktop-smoke, '
+            '    needs: [production-gate, rust-server-validation, kubernetes-real-cluster, rust-desktop-smoke, '
             'rust-macos-native-preview, rust-windows-native-preview, '
             'rust-linux-rpm-native-preview, rust-linux-debian-native-preview, '
             'publications-smoke]', ci)
+        self.assertIn('  kubernetes-real-cluster:',ci)
+        self.assertIn('kind create cluster --name multi-backup-ci',ci)
+        self.assertIn('bash tests/kubernetes/test-kind-cluster.sh',ci)
         self.assertIn('  rust-linux-debian-native-preview:',ci)
         self.assertIn('package-rust-debian-preview.sh',ci)
         self.assertIn('linux-deb',native)

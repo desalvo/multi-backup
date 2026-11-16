@@ -1,0 +1,25 @@
+name: Multi Backup - public-only GPFS and CephFS safety lint
+# Private IBM/Ceph lab runners MUST NOT register in this public repository.
+# The real hardware workflow template lives under scripts/gpfs-lab/PRIVATE_WORKFLOW_TEMPLATE.yml
+on:
+  pull_request:
+    paths:
+      - 'scripts/gpfs-lab/**'
+      - 'scripts/test-real-cephfs-gpfs-ces-field-r042.sh'
+      - 'scripts/test-gpfs-lab-kit-r042.sh'
+      - '.github/workflows/cephfs-gpfs-real-field-r042.yml'
+      - 'docs/GPFS_DEVELOPER_LAB_R042_IT.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  provider-field-guards:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect field lab scripts and reject dangerous runner dispatch
+        run: |
+          set -euo pipefail
+          bash scripts/test-gpfs-lab-kit-r042.sh
+          echo 'Real GPFS CES/CephFS E2E is only permitted in an isolated PRIVATE repository workflow.' >> "$GITHUB_STEP_SUMMARY"
