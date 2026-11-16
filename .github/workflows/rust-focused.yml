@@ -1,13 +1,12 @@
 name: Rust focused validation
 
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - "rust/**"
       - "rust-desktop/**"
       - "rust-server/**"
-      - "Dockerfile"
-      - ".github/workflows/rust-focused.yml"
 
 permissions:
   contents: read
@@ -29,10 +28,11 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          base: ${{ github.event.before }}
+          ref: ${{ github.sha }}
           filters: |
             core:
               - 'rust/**'
-              - '.github/workflows/rust-focused.yml'
             server:
               - 'rust-server/**'
               - 'rust/src/lib.rs'

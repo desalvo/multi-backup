@@ -1,6 +1,7 @@
 name: Multi Backup - actual authenticated WebDAV davfs2 Rust backup
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - "rust/src/plugin_executor.rs"
       - "rust/src/mount_probe.rs"
@@ -10,7 +11,6 @@ on:
       - "rust/Cargo.toml"
       - "rust/Cargo.lock"
       - "scripts/test-real-webdav-r046.sh"
-      - ".github/workflows/webdav-live-r046.yml"
   workflow_dispatch:
 permissions:
   contents: read

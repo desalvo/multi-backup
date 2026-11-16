@@ -1,9 +1,9 @@
 name: Multi Backup - live PostgreSQL agent and HA acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - "rust-server/**"
-      - ".github/workflows/agent-cluster-live-pg.yml"
   workflow_dispatch:
 permissions:
   contents: read

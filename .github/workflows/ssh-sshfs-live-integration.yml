@@ -1,6 +1,7 @@
 name: Multi Backup - real SSH SCP SFTP and SSHFS acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/remote_restore.rs'
       - 'rust/src/plugin_executor.rs'
@@ -10,7 +11,6 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-real-ssh-sshfs.sh'
-      - '.github/workflows/ssh-sshfs-live-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read

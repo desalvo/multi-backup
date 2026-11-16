@@ -15,3 +15,7 @@ After a PR source-code change, require a NEW full CI result on the exact final c
 Use GitHub Actions rerun failed jobs if only a runner issue occurred with identical source, to avoid rebuilding successful checks.
 Workflow dispatch on a newly added workflow may require merging its definition into the default branch; labels work while it remains in a draft PR.
 No percentage cost reduction is claimed without actual GitHub billing/runtime measurements.
+
+## r052 — important GitHub path-filter correction
+
+On `pull_request`, GitHub evaluates path filters against the WHOLE PR diff; this made long PRs replay expensive live tests on unrelated commits even after r051. On `push` to `feature/**`, path filters evaluate ONLY FILES CHANGED BY THAT PUSH. All automatically triggered real provider checks and the fast Rust component checker now use `push` on feature branches (not duplicate `pull_request`). Changes restricted to workflow definitions run only the lightweight static policy check. Real Ceph/independent MinIO remain explicitly requested via PR labels or workflow_dispatch. Full Production CI on PR remains gated by `full-ci` label or ready_for_review; main source push and stable tags remain full. Fast Rust dorny/paths-filter compares `github.event.before` against `github.sha` for the exact push span; never rely on the cumulative PR diff. Correctness and release security are unchanged.

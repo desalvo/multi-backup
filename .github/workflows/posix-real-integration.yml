@@ -1,6 +1,7 @@
 name: Multi Backup - real POSIX native filesystem acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/chunk_store.rs'
       - 'rust/src/plugin_executor.rs'
@@ -11,7 +12,6 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-posix-real-roundtrip.sh'
-      - '.github/workflows/posix-real-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read

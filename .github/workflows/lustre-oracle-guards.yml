@@ -1,6 +1,7 @@
 name: Multi Backup - Lustre and Oracle safe provider guards
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/plugin_executor.rs'
       - 'rust/src/mount_probe.rs'
@@ -12,7 +13,6 @@ on:
       - 'scripts/test-lustre-oracle-guards.sh'
       - 'scripts/test-real-lustre-roundtrip.sh'
       - 'scripts/test-oracle-rman-lab.sh'
-      - '.github/workflows/lustre-oracle-guards.yml'
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,6 +1,7 @@
 name: Multi Backup - genuine NFS Samba and GlusterFS Rust recovery acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/plugin_executor.rs'
       - 'rust/src/mount_probe.rs'
@@ -10,7 +11,6 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-real-network-filesystems-r042.sh'
-      - '.github/workflows/network-filesystems-live-r042.yml'
   workflow_dispatch:
 permissions:
   contents: read

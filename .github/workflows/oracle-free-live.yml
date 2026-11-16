@@ -1,6 +1,7 @@
 name: Multi Backup - real Oracle Free RMAN encrypted PDB backup-piece acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/database.rs'
       - 'rust/src/archive.rs'
@@ -8,7 +9,6 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'scripts/test-oracle-free-container.sh'
-      - '.github/workflows/oracle-free-live.yml'
   workflow_dispatch:
 permissions:
   contents: read

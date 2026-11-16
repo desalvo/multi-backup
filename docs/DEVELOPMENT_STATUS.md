@@ -677,3 +677,7 @@ L'operatore ha installato e verificato su tutti e tre i nodi RHEL 9.8 **kernel-d
 - Ramo feature/r049-ceph-rgw-real-cluster-s3-certification e PR #21:
   nessun merge/RC prima dei test Ceph e RustFS e delle verifiche
   rimanenti di production gate.
+
+## r052 — CI minutes optimization (16 Nov 2026)
+
+CI trigger policy corrected to use actual changed files in feature push events, not the cumulative pull request diff. Fast component selection now compares the pushed SHA range. Heavy real protocol/database/Oracle checks run automatically only on relevant push modifications; Ceph RGW and duplicate independent MinIO run only on explicit PR labels / workflow_dispatch. Full Production CI for draft PR is opt-in and required on the final SHA before RC, but still runs for code on main and v* tags. Lightweight static CI policy validation replaces expensive automatic workflow-self-change acceptance runs. Current Ceph RGW genuine 3 MON/3 OSD qualification remains FAIL after timeout, do not mark certified or retry without diagnosis. RustFS/MinIO real S3 WORM last tested successfully. Details: docs/CI_MINUTES_POLICY_R051_IT.md. No release or merge performed.

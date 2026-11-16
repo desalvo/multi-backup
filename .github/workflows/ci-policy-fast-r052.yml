@@ -1,0 +1,38 @@
+name: Multi Backup - CI trigger policy (lightweight)
+on:
+  push:
+    branches: ["feature/**"]
+    paths:
+      - '.github/workflows/**'
+      - 'tests/test_ci_cost_policy.py'
+      - 'docs/CI_MINUTES_POLICY_R051_IT.md'
+  pull_request:
+    types: [ready_for_review, labeled]
+permissions:
+  contents: read
+concurrency:
+  group: ci-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  ci-policy:
+    name: Validate workflow syntax and prevent expensive trigger regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate CI policy and YAML without Rust/containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'PyYAML>=6,<7'
+          python3 -m unittest discover -s tests -p test_ci_cost_policy.py -v
+          python3 - <<'PY'
+          from pathlib import Path
+          import yaml
+          files = sorted(Path(".github/workflows").glob("*.yml"))
+          assert files
+          for file in files:
+              obj = yaml.safe_load(file.read_text(encoding="utf-8"))
+              assert isinstance(obj, dict) and "jobs" in obj, file
+          print("PASS workflow YAML syntax for", len(files), "workflows")
+          PY

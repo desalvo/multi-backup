@@ -1,6 +1,7 @@
 name: Multi Backup - real database WAL and binlog PITR acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/database.rs'
       - 'rust/src/archive.rs'
@@ -10,7 +11,6 @@ on:
       - 'rust/Cargo.lock'
       - 'scripts/test-postgresql-wal-pitr.sh'
       - 'scripts/test-mariadb-binlog-pitr.sh'
-      - '.github/workflows/database-pitr-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read

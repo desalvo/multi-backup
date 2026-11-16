@@ -1,6 +1,7 @@
 name: Multi Backup - real PostgreSQL and MariaDB encrypted restore
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/database.rs'
       - 'rust/src/archive.rs'
@@ -8,7 +9,6 @@ on:
       - 'rust/src/bin/multi-backup-native.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
-      - '.github/workflows/database-live-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read

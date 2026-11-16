@@ -1,6 +1,7 @@
 name: Multi Backup - real MariaDB Galera cluster and PITR acceptance
 on:
-  pull_request:
+  push:
+    branches: ["feature/**"]
     paths:
       - 'rust/src/database.rs'
       - 'rust/src/archive.rs'
@@ -10,7 +11,6 @@ on:
       - 'rust/Cargo.lock'
       - 'ci/galera/**'
       - 'scripts/test-mariadb-galera-pitr.sh'
-      - '.github/workflows/database-galera-integration.yml'
   workflow_dispatch:
 permissions:
   contents: read
