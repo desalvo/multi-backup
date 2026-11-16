@@ -8,8 +8,8 @@ dall'ultimo collaudo realmente eseguito, non dalla sola presenza delle API.**
 | Backend | Config JSON `provider` | Object Lock COMPLIANCE secondo vendor | Versioni S3 | Backup/verify/restore Rust | CI con server reale | Qualifica Multi Backup |
 |---|---|---|---|---|---|---|
 | MinIO S3 | `minio` | Sì | Sì | Sì | **PASS** (run 43813760616 e full CI 43813760546) | Profilo MinIO mono-server collaudato |
-| Ceph RGW S3 | `ceph-rgw` | Supporto dipendente da versione/configurazione Ceph | Sì | Implementato | **NOT PASS**: prima prova r049 fallita installando risorse CSI non necessarie; fix in verifica | Non certificato |
-| RustFS S3 | `rustfs` | Sì secondo documentazione RustFS | Sì | Integrato nel motore Rust | **NOT RUN / pending** finché CI r050 non è verde | Non certificato |
+| Ceph RGW S3 | ceph-rgw | Dipendente da release/config e prova reale | Sì | Motore S3 Rust predisposto | **FAIL** [43846329965](https://github.com/desalvo/multi-backup/actions/runs/43846329965): mismatch pod OSD/worker/dispositivo; prova successiva [43848726571](https://github.com/desalvo/multi-backup/actions/runs/43848726571) avviata | NON certificato fino a PASS reale con 3 host CRUSH, Object Lock, verify/restore |
+| RustFS S3 | rustfs | Sì nel profilo RustFS 1.0.3 verificato | Sì | Backup age, verify e restore nativi | **PASS REAL** [43819587169](https://github.com/desalvo/multi-backup/actions/runs/43819587169), [43837819453](https://github.com/desalvo/multi-backup/actions/runs/43837819453), [43844964347](https://github.com/desalvo/multi-backup/actions/runs/43844964347) | Server singolo S3 Object Lock COMPLIANCE collaudato; HA/root threat NON certificati |
 | Vault Linux locale | n/d | WORM non basato su S3 | n/d | r046 append-only locale | Test separati | Non equiparabile a Object Lock remoto |
 
 Il motore Rust applica **identici requisiti fail-closed** a MinIO, Ceph e
