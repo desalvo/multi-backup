@@ -7,6 +7,11 @@ on:
       - 'tests/test_ceph_osd_crush_alignment.py'
       - 'scripts/ci/ceph-osd-node-align.py'
       - 'tests/test_ceph_osd_node_alignment.py'
+      - 'scripts/ci/check-private-db-exposure.py'
+      - 'tests/test_db_network_isolation_r081.py'
+      - 'packaging/ha/**'
+      - 'packaging/linux/server.env.example'
+      - 'k8s/multi-backup-cluster-r039.preview.yaml'
       - '.github/workflows/**'
       - 'tests/test_ci_cost_policy.py'
       - 'docs/CI_MINUTES_POLICY_R051_IT.md'
@@ -34,6 +39,8 @@ jobs:
           python3 -m unittest discover -s tests -p test_ceph_osd_node_alignment.py -v
           python3 -m unittest discover -s tests -p test_rust_release_collection.py -v
           python3 scripts/check-production-gate.py
+          python3 scripts/ci/check-private-db-exposure.py
+          python3 -m unittest discover -s tests -p test_db_network_isolation_r081.py -v
           python3 - <<'PY'
           from pathlib import Path
           import yaml
