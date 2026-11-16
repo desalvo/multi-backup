@@ -970,3 +970,14 @@ One-line English commit summary: Exercise PostgreSQL-backed monitoring and every
 - The r173 fix requires **exact SHA** rerun of the full packaging matrix and pass of every required packaging job. Until the new CI passes, packaging/RC readiness remains open. Physical 3-host Patroni failover and remote TLS agent field acceptance remain open.
 
 One-line English commit summary: Fix stale hardcoded agent revision assertions so native DEB/RPM/PKG packaging validates current Rust preview versions.
+
+
+## r174 — complete software RC1, keep macOS notarization optional ONLY for prerelease (16 Nov 2026)
+
+- **Production CI is now fully green** after the r173 fix: [#43932195582](https://github.com/desalvo/multi-backup/actions/runs/43932195582), final run attempt #2, 32 successful required jobs, 3 intentionally skipped publication/legacy jobs, no failed/cancelled jobs; all **27 Rust-native GUI/agent artifact families** exist, including Darwin arm64/x86_64 DMG and agent PKG, Windows x64, Debian 12/13 amd64+arm64, Rocky/Alma EL8/9/10.
+- Operator explicitly accepted **non-notarized macOS apps in RC only**, not stable. `docs/RELEASE_CANDIDATE_R174_IT.md` declares Gatekeeper limitations, SHA validation and scope. Stable signing policy is unchanged.
+- New `scripts/ci/validate-rc-evidence.py` and negative fixture unit suite `tests/test_rc_evidence_r174.py` pin source commit r173 and CI run #43932195582, require all 32 mandatory jobs, require permitted 3 skip jobs, and check all 27 authentic Rust artifacts from the existing collector. No repeated source test or package compilation.
+- `.github/workflows/rc-candidate-r174.yml` calls **existing distinct** live native Prometheus HTTPS, real SNMPv3 authPriv and real Patroni/etcd netns partition/fencing suites once on the RC policy commit, aggregates them with exact source evidence, collects previously built native Rust outputs and only then publishes immutable `v0.1.0-rc.1` **prerelease**. It cannot promote stable, main or legacy code.
+- All 33 plugin stages remain unchanged: do not invent `Ready` for provider plans. Physical three-host network/DR, remote agent TLS field, root-resistant vault and stable signing still require external infrastructure evidence.
+
+One-line English commit summary: Release gated Rust-native RC1 from proven one-SHA artifacts while qualifying monitoring and Patroni netns without requiring notarization in prerelease.

@@ -1,5 +1,6 @@
 name: Multi Backup - real three-stack Patroni network partition acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/r060-baremetal-server-cluster-vault"]
     paths:

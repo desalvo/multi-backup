@@ -917,3 +917,11 @@ One-line English commit summary: Verify native Rust egui GUI startup and renderi
 ### r170 — continue from CI r168 base
 
 The existing PG16 ignored acceptance test now includes real database-backed `monitor.read` API status/agent-count checks (token denial, revocation and identity nonleakage) on actual Axum handler. No extra duplicate PG job. egui REST schema summary is unit-tested; literal backslash-n display bug fixed; the existing GUI Xvfb smoke loops through 10 pages and About in one process. Rust-focused desktop job now runs `cargo test --all-targets`. The single-SHA gate was updated to watch relevant source/test files. Confirm green CI exact head before marking extended acceptance PASS. See `docs/RC_READINESS_R170_IT.md` for exact 33-plugin x4 direction readiness; zero newly promoted Ready without real provider qualification. Physical 3-host HA still needs a private ephemeral SSH-runner lab and operator authorization; no vendor systems or credentials available.
+
+
+### r174 RC1 qualification and notarization exception
+
+- User explicitly allows **RC** unnotarized macOS artifacts; stable signing/notarization controls remain mandatory.
+- Production CI https://github.com/desalvo/multi-backup/actions/runs/43932195582 source `1f1a726a3ffed7b46a7498b99891bfb935570865` is **fully green** after rerun of only cancelled native agent macOS arm64 PKG job: 32 mandatory successes, 3 intentional skips, 27 complete Rust artifacts.
+- Dedicated `rc-candidate-r174.yml` reuses live Prometheus HTTPS, Net-SNMPv3 authPriv and Patroni netns workflow suites with `workflow_call`, authenticates pinned production run/artifact JSON using `scripts/ci/validate-rc-evidence.py`, runs negative test fixtures, collects only 27 Rust binary artifact groups from that exact completed run and publishes `v0.1.0-rc.1` as a **prerelease with clear limitations** when all RC jobs PASS. Source SHA is pinned and no executable source diff accepted from it.
+- This RC is a **full application software preview**, not proof of all 33 plugin implementations, independent three-physical-host HA, remote TLS agent field, vault resistant to shared root, notarization or stable production readiness. See `docs/RELEASE_CANDIDATE_R174_IT.md`.

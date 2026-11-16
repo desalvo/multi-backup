@@ -1,0 +1,164 @@
+name: Multi Backup - RC1 notarization-optional qualified Rust bundle
+on:
+  push:
+    branches: ["ci/r168-software-field-gates"]
+    paths:
+      - ".github/workflows/rc-candidate-r174.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: multi-backup-rc1-source-1f1a726a
+  cancel-in-progress: false
+
+# Only RC1 (not stable) may ship ad-hoc macOS binaries. Pin an actual
+# successful source CI run and verify all 32 production/packaging jobs.
+# The tests below reuse existing independent suites exactly once.
+jobs:
+  prometheus:
+    name: Native HTTPS Prometheus telemetry and TLS negatives
+    uses: ./.github/workflows/prometheus-https-native-r132.yml
+
+  snmp:
+    name: Native Rust status through real SNMPv3 authPriv
+    uses: ./.github/workflows/snmp-v3-real-r118.yml
+
+  patroni-netns:
+    name: Actual Patroni PG16 TLS etcd network partition and fencing
+    uses: ./.github/workflows/patroni-netns-real-ha-r149.yml
+
+  provenance:
+    name: Prove exact immutable RC source SHA and full native matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      RC_SOURCE_SHA: 1f1a726a3ffed7b46a7498b99891bfb935570865
+      RC_RUN_ID: "43932195582"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce source code identity to qualified production SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = desalvo/multi-backup
+          test "$GITHUB_REF" = refs/heads/ci/r168-software-field-gates
+          git cat-file -e "$RC_SOURCE_SHA^{commit}"
+          git diff --name-only "$RC_SOURCE_SHA" "$GITHUB_SHA" > "$RUNNER_TEMP/changes"
+          # Candidate workflow policy/docs/tests ONLY: never publish a binary
+          # compiled from an unqualified modified Rust, packaging or Python file.
+          if grep -Ev '^([.]github/workflows/(rc-candidate-r174[.]yml|prometheus-https-native-r132[.]yml|snmp-v3-real-r118[.]yml|patroni-netns-real-ha-r149[.]yml)|scripts/ci/validate-rc-evidence[.]py|tests/test_rc_evidence_r174[.]py|docs/.*)$' "$RUNNER_TEMP/changes";then
+            echo "RC1 source mismatch: changed executable or packaging code" >&2
+            exit 1
+          fi
+      - name: Fetch GitHub's actual immutable production evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_RUN_ID" > "$RUNNER_TEMP/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+      - name: Positive and negative evidence tests, then authoritative RC gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rc_evidence_r174.py -v
+          python3 scripts/ci/validate-rc-evidence.py \
+            --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.json" \
+            --artifacts "$RUNNER_TEMP/artifacts.json" \
+            --source-sha "$RC_SOURCE_SHA"
+          echo 'PASS: 32 required Production CI jobs and all 27 Rust artifact groups, fixed SHA' >> "$GITHUB_STEP_SUMMARY"
+
+  rc1:
+    name: Publish integrity-checked v0.1.0-rc.1 as a PRE-RELEASE only
+    needs: [provenance, prometheus, snmp, patroni-netns]
+    if: >-
+      github.repository == 'desalvo/multi-backup' &&
+      github.ref == 'refs/heads/ci/r168-software-field-gates'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RC_SOURCE_SHA: 1f1a726a3ffed7b46a7498b99891bfb935570865
+      RC_RUN_ID: "43932195582"
+      RC_TAG: v0.1.0-rc.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download only verified GUI artifacts from exact PASS run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 43932195582
+          pattern: rust-only-*
+          path: collected/gui
+      - name: Download only verified Rust agent artifacts from same run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 43932195582
+          pattern: rust-agent-*
+          path: collected/agents
+      - name: Reuse strict Rust-only release collector without rebuilding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/collect-rust-release.py \
+            --gui collected/gui --agents collected/agents --out release
+          test "$(find release -maxdepth 1 -name '*.dmg' | wc -l)" -eq 2
+          test "$(find release -maxdepth 1 -name '*.pkg' | wc -l)" -eq 2
+          test "$(find release -maxdepth 1 -name '*.exe' | wc -l)" -ge 2
+          test "$(find release -maxdepth 1 -name '*.rpm' | wc -l)" -ge 12
+          test "$(find release -maxdepth 1 -name '*.deb' | wc -l)" -eq 8
+      - name: Package accurate RC scope, checksum every binary, record provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp docs/RELEASE_CANDIDATE_R174_IT.md release/README-RC-IT.md
+          (cd release && sha256sum -- * > SHA256SUMS)
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          folder=Path('release')
+          rows=[{"name":p.name,"bytes":p.stat().st_size,
+                 "sha256":hashlib.sha256(p.read_bytes()).hexdigest()}
+                for p in sorted(folder.iterdir()) if p.is_file()]
+          (folder/'release-manifest.json').write_text(
+              json.dumps({"schema":1,"channel":"rc","version":"0.1.0-rc.1",
+                  "source_commit":"1f1a726a3ffed7b46a7498b99891bfb935570865",
+                  "production_run":43932195582,"production_required_jobs":32,
+                  "native_matrix_groups":27,
+                  "macos_notarized":False,"stable_certified":False,
+                  "all_plugins_ready":False,"physical_3_host_ha_certified":False,
+                  "assets":rows},indent=2)+'\n',encoding='utf-8')
+          PY
+          grep -Fq "source_commit" release/release-manifest.json
+          echo "PASS: isolated RC bundle with SHA256SUMS and full provenance" >> "$GITHUB_STEP_SUMMARY"
+      - name: Reject existing tag/release; publish new RC1 immutable preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RC_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1;then
+            echo "RC1 release already exists; never silently overwrite published artifacts" >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RC_TAG" >/dev/null 2>&1;then
+            echo "RC1 git tag already exists; refuse ambiguous provenance" >&2
+            exit 1
+          fi
+          gh release create "$RC_TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RC_SOURCE_SHA" \
+            --title "Multi Backup 0.1.0 RC1 - native Rust field-test preview" \
+            --notes-file docs/RELEASE_CANDIDATE_R174_IT.md \
+            --prerelease --latest=false
+          gh release view "$RC_TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,targetCommitish \
+            --jq '"RC published: "+.url+" prerelease="+(.isPrerelease|tostring)+" source="+.targetCommitish' >> "$GITHUB_STEP_SUMMARY"
