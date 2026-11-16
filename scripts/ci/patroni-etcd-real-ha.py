@@ -108,6 +108,37 @@ def primaries(root, live=(0, 1, 2)):
     return [index for index in live if role(root, index, "primary")]
 
 
+def dcs_sync_candidate(root, leader):
+    """Require Patroni DCS acknowledged sync candidate, not PG-only sync_state.
+
+    A newly connected PostgreSQL standby can appear 'sync' before Patroni
+    publishes /sync in etcd. Killing the leader in this race correctly denies
+    auto-promotion; the HA acceptance must NOT misinterpret that as failover.
+    """
+    import json
+    ctx = ssl.create_default_context(cafile=str(root / "ca.crt"))
+    url = f"https://{ADDRESSES[leader]}:{RESTPORTS[leader]}/cluster"
+    try:
+        with urllib.request.urlopen(url, context=ctx, timeout=3) as reply:
+            if reply.status != 200:
+                return None
+            view = json.load(reply)
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return None
+    if not isinstance(view, dict):
+        return None
+    members = view.get("members") or []
+    sync_nodes = [m.get("name") for m in members if m.get("role") == "sync_standby"
+                  and m.get("state") == "running"]
+    if len(sync_nodes) != 1:
+        return None
+    candidate = sync_nodes[0]
+    for number in range(3):
+        if candidate == f"mb-node{number + 1}" and number != leader:
+            return number
+    return None
+
+
 def pg(root, index, sql, *, expect_ok=True):
     env = os.environ.copy()
     env.update({"PGPASSWORD": DB_PASSWORD, "PGSSLMODE": "verify-full",
@@ -303,8 +334,18 @@ def main():
                 patroni[i] = start(root / f"patroni-{i}.log", "patroni", str(path))
                 processes[f"patroni{i}"] = patroni[i]
             initial = wait_primary(root, (0, 1, 2), processes, 130)
+            candidate = wait_for("DCS registered synchronous failover candidate",
+                lambda: dcs_sync_candidate(root, initial), processes, 50)
+            print(f"Patroni sync candidate acknowledged in DCS: mb-node{candidate+1}",
+                  flush=True)
             pg(root, initial, "CREATE TABLE ha_witness(id integer PRIMARY KEY, payload text NOT NULL);")
             pg(root, initial, "INSERT INTO ha_witness VALUES (1,'acknowledged-before-failover');")
+            # Ensure DCS still owns the candidate after the committed write;
+            # a transient pg_stat_replication 'sync' does not prove safe
+            # promotion on a Patroni 3.2.2 loop interval.
+            if dcs_sync_candidate(root, initial) != candidate:
+                raise RuntimeError("DCS sync candidate changed; refuse unsafe leader kill")
+            print("Witness committed on DCS-confirmed synchronous primary", flush=True)
             # Crash the original leader and its database, simulating node loss.
             patroni[initial].kill()
             patroni[initial].wait(timeout=6)
