@@ -1,0 +1,17 @@
+[Unit]
+Description=Multi Backup read-only Net-SNMP monitoring
+After=network-online.target multi-backup-server.service
+Wants=network-online.target
+ConditionPathExists=/etc/multi-backup/snmpd.conf
+[Service]
+Type=simple
+EnvironmentFile=-/etc/multi-backup/server.env
+ExecStart=/usr/sbin/snmpd -f -Lo -C -c /etc/multi-backup/snmpd.conf
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target
