@@ -12,6 +12,8 @@ pub struct MountEvidence {
     /// Kernel mount rw flag only, never an ACL or remote permission check.
     pub rw_mount_option: bool,
     pub source_redacted: bool,
+    #[serde(skip_serializing)]
+    source_is_https_webdav: bool,
 }
 #[cfg(target_os="linux")]
 fn decode_mount_field(value:&str)->Option<String>{
@@ -48,6 +50,7 @@ fn parse_mountinfo(raw:&str)->Vec<MountEvidence>{
             fs_type:right[0].to_string(),
             rw_mount_option:left[5].split(',').any(|v|v=="rw"),
             source_redacted:true,
+            source_is_https_webdav:right[1].starts_with("https://"),
         });
     }
     entries
@@ -85,7 +88,7 @@ pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
             ("gpfs",Some(GpfsAccess::CesNfs))=>&["nfs","nfs4"],
             ("gpfs",Some(GpfsAccess::CesSmb))=>&["cifs","smb3"],
             ("sshfs",None)=>&["fuse.sshfs"],
-            ("webdav",None)=>&["fuse.davfs"],
+            ("webdav",None)=>&["fuse.davfs","fuse"],
             ("nfs",None)=>&["nfs","nfs4"],
             ("smb",None)=>&["cifs","smb3"],
             // Native CephFS and the operator-installed FUSE client. Neither
@@ -98,6 +101,8 @@ pub fn probe(plugin:&str,mountpoint:&Path,access:Option<GpfsAccess>)
         };
         let mut entry=parse_mountinfo(&mountinfo).into_iter().find(|item|
             item.mountpoint==location && allowed.contains(&item.fs_type.as_str())
+              && (plugin!="webdav" || item.fs_type=="fuse.davfs"
+                  || item.source_is_https_webdav)
         ).ok_or("Exact mountpoint is not a matching network/FUSE filesystem")?;
         entry.plugin=plugin.to_owned();
         Ok(entry)
@@ -120,6 +125,13 @@ mod tests{
         assert_eq!(v[1].fs_type,"fuse.sshfs");
         assert!(!v[1].rw_mount_option);
         assert!(v[0].source_redacted);
+        // Ubuntu davfs2 can expose the generic "fuse" kernel type, not
+        // "fuse.davfs"; require an HTTPS WebDAV source on that fallback.
+        let more=parse_mountinfo("33 20 0:43 / /mnt/dav ro,nodev - fuse https://localhost:18919/ ro\n34 20 0:44 / /mnt/unsafe ro - fuse /tmp/fake ro");
+        assert_eq!(more.len(),2);
+        assert!(more[0].source_is_https_webdav);
+        assert!(!more[1].source_is_https_webdav);
+
     }
     #[test]
     fn reject_bad_plugin_and_protocol_selection(){
