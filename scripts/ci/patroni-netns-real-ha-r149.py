@@ -61,8 +61,19 @@ class Lab:
                 probe=sudo("ip","netns","exec",ns,
                            "ping","-c","1","-W","2",peer,check=False)
                 if probe.returncode:
-                    raise RuntimeError(f"Preflight veth {i+1}->{j+1} no ICMP: "
-                        + probe.stderr[-120:])
+                    diagnostics={
+                        "probe_stdout":probe.stdout[-400:],
+                        "probe_stderr":probe.stderr[-400:],
+                        "source_routes":sudo("ip","-n",ns,"route",check=False).stdout[-400:],
+                        "source_arp":sudo("ip","-n",ns,"neigh",check=False).stdout[-400:],
+                        "dest_link":sudo("ip","-n",self.names[j],"addr","show",
+                                         check=False).stdout[-400:],
+                        "bridge":sudo("ip","-d","link","show",self.bridge,
+                                      check=False).stdout[-400:],
+                        "host_forward":sudo("iptables","-S","FORWARD",
+                                            check=False).stdout[-700:]
+                    }
+                    raise RuntimeError(f"Preflight veth {i+1}->{j+1} ICMP fails: {diagnostics}")
         print("PROOF: all six directed namespace-to-namespace ICMP probes passed",
               flush=True)
         print("PROOF: three real network namespaces with separate veth stacks",flush=True)

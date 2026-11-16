@@ -1,0 +1,1 @@
+Network-only diagnostics for why GitHub Ubuntu runner bridge/veth cross-netns ICMP fails before etcd quorum.
