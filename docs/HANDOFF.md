@@ -946,3 +946,8 @@ The existing PG16 ignored acceptance test now includes real database-backed `mon
 ## r176 branch handoff
 
 Branch `feature/r176-native-rc2-updates-fencing` based on r175 PR #30. See `docs/RC2_READINESS_R176_IT.md` for exact changed code, test scope, and remaining blockers. RC1 published source unchanged; do not claim new RC2 or stable readiness until the new SHA passes Rust, real PostgreSQL, real MinIO and Mac/Windows runtime validation. Full OS-install auto-update and physical 3-host HA remain unverified.
+
+
+### r177 — Windows native renderer compatibility and release prerequisite
+
+Real RC1 native Mac windows arm64 + x86_64 PASS, but Windows real GUI window exited 1 on Windows-2025 runner despite prior self-test passing (full workflow #43951219161 FAIL). r177 uses Windows-only WGPU renderer and adds a **current-source** Windows runner build + all-pages graphical smoke with stdout/stderr diagnostic. Never mark the published RC1 Windows executable repaired; it is immutable and still Glow-only. Qualify new source SHA, rebuild Windows installer, publish RC2 only after production gate and Windows runtime success. Native Win GUI test may require interactive runner with GPU support if hosted runner forbids graphical window; do not waive it or fabricate a PASS.

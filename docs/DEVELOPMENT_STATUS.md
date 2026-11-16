@@ -1007,3 +1007,12 @@ One-line English commit summary: Record published native Rust RC1 with 31 verifi
 ## r176 — RC-aware updater, native GUI runtime, queue safety and WORM confirmation
 
 See `docs/RC2_READINESS_R176_IT.md`. Release RC1 is immutable and already published; all new functionality is pending CI on r176 SHA. One-line English commit summary: Add RC-aware native update and rollback groundwork, independent GUI runtime checks, PostgreSQL remote queue safety and WORM manifest readback.
+
+
+## r177 — Native Windows hardware-neutral renderer qualification (16 Nov 2026)
+
+- r176 core/GUI Rust all-target suites PASS #43951219206, live PostgreSQL lease/agent acceptance PASS #43951219113, real RustFS S3 WORM #43951219262 PASS, real MinIO Object Lock #43951357852 PASS.
+- RC1 published macOS GUI window tests arm64 and Intel x86_64 PASS #43951219161; Windows RC1 OpenGL/Glow GUI window **FAIL code 1** on hosted Windows-2025 runner. Do not suppress or reclassify this outcome.
+- New r177 **candidate** switches Windows Rust desktop to native WGPU (DirectX12 capable) while leaving Mac/Linux proven Glow; tests current WGPU build on real Windows-2025 runner, exercising all ten tabs and About, emitting stderr on actual window failure. The published RC1 Windows exe is unchanged; this backend fix must qualify a *new* RC to affect downloadable binaries.
+- Until actual Windows WGPU window CI passes, Mac/Windows GUI cross-platform remains partial. Protected vault under compromised local root, remote distributed dispatcher and privileged system-wide auto-update/rollback remain outstanding; no false global Ready.
+- One-line English commit summary: Add native DirectX/WGPU Windows renderer with real-window CI diagnostics while preserving verified macOS/Linux Glow backend.

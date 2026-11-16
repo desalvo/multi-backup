@@ -2185,14 +2185,22 @@ fn main() -> eframe::Result {
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
     let options = eframe::NativeOptions {
+        #[cfg(windows)]
+        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("Multi Backup · {VERSION}"))
             .with_inner_size([1320.0, 890.0])
             .with_min_inner_size([860.0, 620.0]),
         ..Default::default()
     };
-    eframe::run_native("Multi Backup", options,
-        Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))))
+    // Do not turn graphical-runner failure into a fake green smoke.
+    // Real backend errors are reported and returned to the caller.
+    let result=eframe::run_native("Multi Backup", options,
+        Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))));
+    if let Err(ref failure)=result {
+        eprintln!("Native GUI startup failed: {failure}");
+    }
+    result
 }
 
 #[cfg(test)]

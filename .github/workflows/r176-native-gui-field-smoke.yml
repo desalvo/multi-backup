@@ -95,3 +95,39 @@ jobs:
           $p.Refresh()
           if ($p.ExitCode -ne 0) { throw "GUI failed with exit code $($p.ExitCode)" }
           'PASS: Windows RC1 Rust desktop opened and closed' | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+
+  windows-wgpu:
+    name: Current r176 Rust Windows DX12/WGPU native GUI smoke
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test and compile real Windows native WGPU frontend
+        shell: pwsh
+        run: |
+          cargo test --manifest-path rust-desktop/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw 'Windows WGPU GUI unit suite failed' }
+          cargo build --manifest-path rust-desktop/Cargo.toml --release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows WGPU GUI build failed' }
+      - name: Launch current r176 native Windows GUI window and verify all pages
+        shell: pwsh
+        run: |
+          $binary='rust-desktop/target/release/multi-backup-desktop.exe'
+          if (!(Test-Path $binary)) { throw 'Compiled Windows GUI missing' }
+          & $binary --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'GUI self-test failed' }
+          $out=Join-Path $env:RUNNER_TEMP 'r176-win-smoke-out.txt'
+          $err=Join-Path $env:RUNNER_TEMP 'r176-win-smoke-err.txt'
+          $p=Start-Process -FilePath $binary -ArgumentList '--smoke' -PassThru -Wait -RedirectStandardOutput $out -RedirectStandardError $err
+          Get-Content $out -ErrorAction SilentlyContinue | Select-Object -Last 40
+          Get-Content $err -ErrorAction SilentlyContinue | Select-Object -Last 40
+          if ($p.ExitCode -ne 0) {
+            throw "Current Windows WGPU GUI real window failed: $($p.ExitCode)"
+          }
+          $output=Get-Content -Path $out -Raw -ErrorAction SilentlyContinue
+          foreach ($page in @('Dashboard','Backup','Archivi','Ripristina','Storage chunk','Plugin','Server e agenti','Vault e chiavi','Aggiornamenti','Impostazioni','About')) {
+            if (!$output.Contains("RUST_GUI_PAGE_SMOKE=$page")) {
+              throw "Native Windows GUI missing rendered page $page"
+            }
+          }
+          'PASS: Windows DX12 WGPU native GUI rendered all 10 pages and About' | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
