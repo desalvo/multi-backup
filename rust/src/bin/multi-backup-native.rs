@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::Path, process};
@@ -10,6 +10,8 @@ fn usage() -> &'static str {
      Usage:\n\
        multi-backup-native --version\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)
+\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins database-backup --profile-json DB.json --root STORE --identity AGE_KEY --label NAME [--json]\n\
        multi-backup-native plugins database-restore-new --profile-json NEW_TARGET.json --root STORE --identity AGE_KEY --id BACKUP_ID --confirm-target ENGINE:HOST:PORT:NAME [--json]\n\
@@ -221,6 +223,23 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if family == "plugins" {
         if password_stdin { return Err("Plugin catalog does not accept passwords".into()); }
         match command {
+            "virtualization-inventory" => {
+                accepted(&flags,&["--config-json"])?;
+                let cfg=virtualization_inventory::Config::load(
+                    Path::new(required(&flags,"--config-json")?))?;
+                let info=virtualization_inventory::inventory(&cfg)?;
+                if json {
+                    println!("{}",serde_json::to_string_pretty(&info)?);
+                } else {
+                    println!("{}: {} inventoried native resources (READ-ONLY, backup and restore NOT certified)",
+                        info.provider,info.items.len());
+                    for item in info.items {
+                        println!("{}\t{}\t{}\t{}",
+                            item.kind,item.id,item.name,
+                            item.power_state.unwrap_or_else(||"n/a".into()));
+                    }
+                }
+            },
             "list" => {
                 accepted(&flags, &["--role", "--mode"])?;
                 let mode = plugins::Mode::parse(flags.get("--mode").copied().unwrap_or("backup"))?;

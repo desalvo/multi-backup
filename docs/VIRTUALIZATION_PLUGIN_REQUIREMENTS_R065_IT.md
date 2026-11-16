@@ -36,3 +36,7 @@ Riferimenti di verifica: https://developer.broadcom.com/xapis/virtual-disk-api/l
 ## r069 — catalogo separato PVE/PBS senza false funzionalità
 
 Nel catalogo Rust il plugin `proxmox` rappresenta **soltanto PVE** (VM QEMU e CT LXC nativi); `pbs` rappresenta **soltanto Proxmox Backup Server** (datastore, gruppi di snapshot e archivi). L'ID PVE storico resta invariato per compatibilità con le configurazioni esistenti. Entrambi rimangono `Planned` e il dispatcher non può eseguire backup o restore generici: ciò evita di far interpretare l'inventario dei provider come un adapter certificato. L'accesso a PVE non autorizza implicitamente PBS e viceversa. CT VMware/oVirt restano disabilitati.
+
+## r073 — read-only native Rust PVE/PBS inventory (16 Nov 2026)
+
+New `rust/src/virtualization_inventory.rs` supports explicit read-only PVE QEMU/LXC guest discovery and PBS datastore listing over verified HTTPS and scoped API token from owner-only (0600) JSON config. Redirects refused; response bounded to 1 MiB; token redacted from all output. CLI: `multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY.json --json`. The descriptor for both providers remains **PLANNED, NON-EXECUTABLE**: this API inventory is NOT a VM/CT backup, snapshot, restore, or live-account certification. Offline unit tests verify native guest types, fail-closed protocols and duplicate identities. No hypervisor field run without disposable infrastructure and explicit credentials.

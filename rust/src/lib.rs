@@ -19,6 +19,7 @@ pub mod vault;
 pub mod immutable_vault;
 pub mod s3_vault;
 pub mod plugins;
+pub mod virtualization_inventory;
 pub mod plugin_executor;
 pub mod backup_policy;
 pub mod backup_chain;
