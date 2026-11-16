@@ -864,3 +864,12 @@ One-line English commit summary: Reject mismatched replica admission limits at s
 - Integrated into current Rust RC development line, not main or a release tag; full final Production Gate remains mandatory.
 
 One-line English commit summary: Integrate tested PVE native backup-media inventory with strict per-guest verification provenance.
+
+
+## r161 — native GUI secure provider inventory panels (PVE/PBS/VMware/oVirt)
+
+- The real Rust egui Plugin page now offers owner-only JSON API configuration paths (never persisted in native settings) and read-only actions: PVE/PBS inventory, native PVE per-VMID backup media listing, PBS datastore/namespace snapshot list and VMware/oVirt native VM inventory. Uses actual typed Rust adapters, verified HTTPS and bounded response; no subprocess, shell, destructive VM actions or hidden automatic backup claims.
+- Async worker keeps UI responsive and writes only sanitized/redacted, at most 12k characters, into local inventory preview; a separate success message explicitly says not archived/restored/verified by Multi Backup. Native GUI tests reject persistence of API config path and other credentials, and guard all unavailable operations.
+- PVE per-VMID backup media parser and direct CLI came from r159 and have separate [Rust core CI 43904400603](https://github.com/desalvo/multi-backup/actions/runs/43904400603) PASS. A real physical PVE/PBS/VMware/oVirt lab and create-only VM/CT restore are still unqualified; compile and native GUI runtime acceptance must pass on this branch before merge.
+
+One-line English commit summary: Expose typed read-only PVE/PBS and VMware/oVirt inventories in native Rust GUI without persisting API secrets.

@@ -1,7 +1,7 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
-use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain};
+use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain, virtualization_inventory, hypervisor_inventory};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc::{self, Receiver}, Arc},
@@ -60,6 +60,7 @@ enum Event {
     Failure(String),
     UpdateInfo(updater::ReleaseInfo),
     ChunkCatalog(Vec<chunk_store::LogicalBackup>),
+    ProviderInventory(String),
 }
 #[derive(Default)]
 struct Fields {
@@ -103,6 +104,11 @@ struct Fields {
     plugin_gpfs_access: String,
     plugin_snapshot_attested: bool,
     plugin_search: String,
+    plugin_api_config: String,
+    plugin_pve_node: String,
+    plugin_pve_storage: String,
+    plugin_pve_guest_id: String,
+    plugin_pbs_namespace: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -300,6 +306,7 @@ struct NativeApp {
     chunk_selected: String,
     /// (action, immutable backup id) captured when confirmation opens.
     chunk_confirmation: Option<(String,String)>,
+    provider_inventory_result: String,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -377,6 +384,7 @@ impl NativeApp {
             chunk_backups: Vec::new(),
             chunk_selected: String::new(),
             chunk_confirmation: None,
+            provider_inventory_result: String::new(),
         }
     }
     fn rescan(&mut self) {
@@ -579,6 +587,7 @@ impl NativeApp {
                         self.status = format!("Errore: {}", s.chars().take(320).collect::<String>());
                         self.active = false; completed = true;
                     }
+                    Event::ProviderInventory(text) => self.provider_inventory_result = text,
                     Event::ChunkCatalog(backups) => {
                         if !backups.iter().any(|b| b.id == self.chunk_selected) {
                             self.chunk_selected = backups.first()
@@ -833,6 +842,87 @@ impl NativeApp {
         ui.label(RichText::new(&self.status).color(INK));
         self.draw_progress(ui);
     }
+    /// Provider account/API credentials are never entered in the GUI or saved
+    /// to native settings: the independently owner-only JSON config file is
+    /// loaded through the core Rust adapter in a bounded read-only worker.
+    fn run_provider_inventory(&mut self,action:&str){
+        if self.active{return;}
+        if !matches!(action,"pve-inventory"|"pve-backup-media"|
+                          "pbs-snapshots"|"hypervisor-inventory"){
+            self.status="Azione provider sconosciuta; sola lettura consentita".into();
+            return;
+        }
+        let config=self.fields.plugin_api_config.trim().to_owned();
+        if config.is_empty(){
+            self.status="Seleziona un file JSON privato 0600 per l'API del provider".into();
+            return;
+        }
+        let node=self.fields.plugin_pve_node.trim().to_owned();
+        let store=self.fields.plugin_pve_storage.trim().to_owned();
+        let guest=self.fields.plugin_pve_guest_id.trim().to_owned();
+        let namespace=self.fields.plugin_pbs_namespace.trim().to_owned();
+        let action=action.to_owned();
+        let (tx,rx)=mpsc::channel();
+        self.receiver=Some(rx);
+        self.active=true;
+        self.provider_inventory_result.clear();
+        self.started=Instant::now();
+        self.last_activity=Instant::now();
+        self.status=format!("Inventario {}: interrogazione HTTPS read-only",action);
+        thread::spawn(move||{
+            let result:Result<String,String>=(||{
+                let value=match action.as_str(){
+                    "hypervisor-inventory"=>{
+                        let cfg=hypervisor_inventory::Config::load(Path::new(&config))
+                            .map_err(|e|e.to_string())?;
+                        let result=hypervisor_inventory::inventory(&cfg)
+                            .map_err(|e|e.to_string())?;
+                        serde_json::to_value(&result).map_err(|e|e.to_string())?
+                    },
+                    "pve-inventory"=>{
+                        let cfg=virtualization_inventory::Config::load(Path::new(&config))
+                            .map_err(|e|e.to_string())?;
+                        let result=virtualization_inventory::inventory(&cfg)
+                            .map_err(|e|e.to_string())?;
+                        serde_json::to_value(&result).map_err(|e|e.to_string())?
+                    },
+                    "pve-backup-media"=>{
+                        let vmid=guest.parse::<u32>().map_err(|_|
+                            "Inserire un ID VM/CT numerico valido")?;
+                        let cfg=virtualization_inventory::Config::load(Path::new(&config))
+                            .map_err(|e|e.to_string())?;
+                        let result=virtualization_inventory::pve_backup_media(
+                            &cfg,&node,&store,vmid).map_err(|e|e.to_string())?;
+                        serde_json::to_value(&result).map_err(|e|e.to_string())?
+                    },
+                    "pbs-snapshots"=>{
+                        let cfg=virtualization_inventory::Config::load(Path::new(&config))
+                            .map_err(|e|e.to_string())?;
+                        let result=virtualization_inventory::pbs_snapshots(
+                            &cfg,&store,&namespace).map_err(|e|e.to_string())?;
+                        serde_json::to_value(&result).map_err(|e|e.to_string())?
+                    },
+                    _=>return Err("Azione provider non consentita".into())
+                };
+                let body=serde_json::to_string_pretty(&value)
+                    .map_err(|e|e.to_string())?;
+                let mut visible: String=body.chars().take(12_000).collect();
+                if body.chars().count()>12_000{
+                    visible.push_str("\n[Anteprima troncata: usare il CLI Rust JSON per l'inventario completo]");
+                }
+                Ok(visible)
+            })();
+            match result{
+                Ok(body)=>{
+                    let _=tx.send(Event::ProviderInventory(body));
+                    let _=tx.send(Event::Success(
+                        "Inventario HTTPS completato in sola lettura. Nessun backup o restore certificato.".into()));
+                },
+                Err(reason)=>{let _=tx.send(Event::Failure(
+                    format!("Inventario read-only rifiutato: {reason}")));}
+            }
+        });
+    }
     fn plugins(&mut self, ui: &mut egui::Ui) {
         ui.heading("Catalogo plugin Rust");
         ui.label("Input = origine del backup; Output = destinazione dell'archivio. "
@@ -850,6 +940,41 @@ impl NativeApp {
             .to_owned() + "Nessun comando di backup viene avviato soltanto selezionando un provider.")
             .small().color(MUTED));
         ui.separator();
+        egui::CollapsingHeader::new("Inventari remoti sicuri (PVE/PBS/VMware/oVirt)")
+            .default_open(false).show(ui,|ui|{
+                ui.label("Solo lettura; nessuna operazione distruttiva. File di configurazione API JSON privato (0600), senza password memorizzate nella GUI.");
+                ui.label("Configurazione provider (percorso assoluto JSON):");
+                ui.text_edit_singleline(&mut self.fields.plugin_api_config);
+                ui.label("PVE: nodo (es. pve1). PBS/PVE: storage o datastore:");
+                ui.horizontal(|ui|{
+                    ui.text_edit_singleline(&mut self.fields.plugin_pve_node);
+                    ui.text_edit_singleline(&mut self.fields.plugin_pve_storage);
+                });
+                ui.horizontal(|ui|{
+                    ui.label("VMID PVE:");ui.text_edit_singleline(&mut self.fields.plugin_pve_guest_id);
+                    ui.label("Namespace PBS:");ui.text_edit_singleline(&mut self.fields.plugin_pbs_namespace);
+                });
+                ui.horizontal_wrapped(|ui|{
+                    for (action,label) in [
+                        ("pve-inventory","Inventario PVE/PBS"),
+                        ("pve-backup-media","Archivi di backup PVE"),
+                        ("pbs-snapshots","Snapshot PBS"),
+                        ("hypervisor-inventory","VMware/oVirt VM")
+                    ]{
+                        if ui.add_enabled(!self.active,egui::Button::new(label)).clicked(){
+                            self.run_provider_inventory(action);
+                        }
+                    }
+                });
+                ui.label(RichText::new("Un UPID riuscito e una verifica dichiarata dal provider non dimostrano che Multi Backup abbia cifrato l'archivio o verificato il restore.")
+                    .color(MUTED).small());
+                if !self.provider_inventory_result.is_empty(){
+                    egui::ScrollArea::vertical().max_height(250.0).show(ui,|ui|{
+                        ui.label(RichText::new(&self.provider_inventory_result)
+                            .monospace().small().color(INK));
+                    });
+                }
+            });
         egui::ScrollArea::vertical().max_height(700.0).show(ui,|ui|{
             for descriptor in visible {
                 egui::CollapsingHeader::new(format!("{} — {}",descriptor.id,descriptor.title))
@@ -1964,6 +2089,16 @@ mod provider_gui_tests{
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode()&0o777,0o600);
         }
         std::fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn private_api_config_is_not_written_to_native_preferences(){
+        let mut fields=Fields::default();
+        fields.max_runs="5".into();
+        fields.plugin_api_config="/private/not-to-be-saved/pve.json".into();
+        fields.plugin_pve_guest_id="101".into();
+        let prefs=build_native_prefs(&fields,"github","stable").unwrap();
+        assert!(!prefs.to_string().contains("not-to-be-saved"));
+        assert!(!prefs.to_string().contains("plugin_pve_guest_id"));
     }
     #[test]
     fn bad_provider_or_limits_cannot_be_persisted(){
