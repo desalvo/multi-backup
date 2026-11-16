@@ -102,8 +102,12 @@ if "$NATIVE" s3-vault verify --config "$TMP/rustfs.json" --id "$ID" --identity "
 fi
 "$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
   --identity "$TMP/key.age" --destination "$TMP/restore"
-cmp "$TMP/source/nested/hello.txt" "$TMP/restore/nested/hello.txt"
-cmp "$TMP/source/binary.bin" "$TMP/restore/binary.bin"
+# Native archive::create intentionally prefixes source members with
+# multi-backup/s3-vault/<snapshot-id>; verify that exact namespace.
+RESTORE_FILES="$TMP/restore/multi-backup/s3-vault/$ID"
+test -d "$RESTORE_FILES"
+cmp "$TMP/source/nested/hello.txt" "$RESTORE_FILES/nested/hello.txt"
+cmp "$TMP/source/binary.bin" "$RESTORE_FILES/binary.bin"
 if "$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
   --identity "$TMP/key.age" --destination "$TMP/restore" >/dev/null 2>&1;then
   echo "FAIL overwrite accepted" >&2;exit 1
