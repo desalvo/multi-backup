@@ -1,0 +1,85 @@
+name: Multi Backup - bare-metal Rust server RPM DEB arm64 amd64
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Use smoke for 4 representative arch builds; full for all 12 combinations"
+        type: choice
+        required: true
+        default: smoke
+        options: [smoke, full]
+permissions:
+  contents: read
+concurrency:
+  group: multi-backup-baremetal-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  packaging:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-baremetal-ci'
+    name: "${{ matrix.distribution }} ${{ matrix.version }} / ${{ matrix.arch }} native server"
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - {distribution: debian, version: 12, arch: amd64, runner: ubuntu-24.04, image: 'debian:bookworm', format: deb, level: smoke}
+          - {distribution: debian, version: 12, arch: arm64, runner: ubuntu-24.04-arm, image: 'debian:bookworm', format: deb, level: smoke}
+          - {distribution: rocky, version: 9, arch: x86_64, runner: ubuntu-24.04, image: 'rockylinux/rockylinux:9', format: rpm, level: smoke}
+          - {distribution: alma, version: 9, arch: aarch64, runner: ubuntu-24.04-arm, image: 'almalinux:9', format: rpm, level: smoke}
+          - {distribution: debian, version: 13, arch: amd64, runner: ubuntu-24.04, image: 'debian:trixie', format: deb, level: full}
+          - {distribution: debian, version: 13, arch: arm64, runner: ubuntu-24.04-arm, image: 'debian:trixie', format: deb, level: full}
+          - {distribution: rocky, version: 9, arch: aarch64, runner: ubuntu-24.04-arm, image: 'rockylinux/rockylinux:9', format: rpm, level: full}
+          - {distribution: rocky, version: 10, arch: x86_64, runner: ubuntu-24.04, image: 'rockylinux/rockylinux:10', format: rpm, level: full}
+          - {distribution: rocky, version: 10, arch: aarch64, runner: ubuntu-24.04-arm, image: 'rockylinux/rockylinux:10', format: rpm, level: full}
+          - {distribution: alma, version: 9, arch: x86_64, runner: ubuntu-24.04, image: 'almalinux:9', format: rpm, level: full}
+          - {distribution: alma, version: 10, arch: x86_64, runner: ubuntu-24.04, image: 'almalinux:10', format: rpm, level: full}
+          - {distribution: alma, version: 10, arch: aarch64, runner: ubuntu-24.04-arm, image: 'almalinux:10', format: rpm, level: full}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install distro-native compiler and packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.format }}" = deb ];then
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              ca-certificates curl build-essential git pkg-config libssl-dev \
+              cmake clang perl dpkg-dev file age postgresql-client
+          else
+            dnf install -y ca-certificates curl-minimal gcc gcc-c++ make tar git \
+              pkgconf-pkg-config openssl-devel cmake clang perl rpm-build \
+              findutils shadow-utils
+          fi
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --profile minimal
+      - name: Compile server and package for actual distro and CPU
+        shell: bash
+        env:
+          SERVER_PACKAGE_FORMAT: ${{ matrix.format }}
+        run: |
+          set -euo pipefail
+          source "$HOME/.cargo/env"
+          cargo build --manifest-path rust-server/Cargo.toml --release \
+            --bin multi-backup-server
+          rust-server/target/release/multi-backup-server --version | grep -F native-preview
+          bash scripts/package-rust-server-unix.sh
+          bash -n scripts/configure-baremetal-snmp.sh
+          bash -n scripts/db-disaster-restore.sh
+          if [ "$SERVER_PACKAGE_FORMAT" = rpm ];then
+            rpm -qp --queryformat '%{NAME} %{ARCH}\n' packages/multi-backup-server-*.rpm
+          else
+            dpkg-deb --field packages/multi-backup-server_*.deb Package Architecture
+          fi
+          sha256sum packages/* > packages/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baremetal-server-${{ matrix.distribution }}-${{ matrix.version }}-${{ matrix.arch }}
+          path: packages/*
+          retention-days: 5
+          if-no-files-found: error
