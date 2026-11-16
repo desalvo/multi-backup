@@ -611,3 +611,7 @@ Current VMware and oVirt plugin scope is VM-only. Do NOT build a container-agent
 - Narrowed real PostgreSQL HA acceptance workflow triggers to DB/monitoring/agent modules; Rust focused compile covers unrelated server Rust files. Do not repeat full CI on every small patch.
 - Latest upstream Ceph run 43832467180 is **FAIL despite 3 MON quorum, 3 OSD UP+IN and RGW running**, because the three OSDs are reported under a single kind worker/CRUSH host. The multi-node placement attestation is mandatory; a green MinIO/RustFS result is not Ceph certification. Need truly isolated per-worker OSD devices or a PVC-backed Ceph lab.
 - The stack of draft PRs (#10–14, #20–22) remains unmerged; no RC tag or new stable assets. For exact gate evidence see `docs/RC_READINESS_R067_IT.md`.
+
+## r068 — Patroni HAProxy TLS primary check fix
+
+Corrected HAProxy health probes to use TLS `check-ssl` and verify the private Patroni CA and per-node SNI/hostname on port 8008; previously the health check was plain HTTP while Patroni REST is HTTPS, so a healthy primary could be permanently DOWN. The check uses `/primary` (leader lock and writable PostgreSQL) rather than `/health`, and preserves TLS pass-through on the application PostgreSQL connection, bound to localhost:6432. A cheap targeted CI syntax check will use the actual distro HAProxy binary; full 3-node Patroni failover certification is still pending.

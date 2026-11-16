@@ -49,7 +49,7 @@ ss -lntup | grep -E ':(5432|6432|2379|2380|8008)'
 # da una RETE ESTERNA: 5432, 2379, 2380, 8008 devono essere irraggiungibili
 ```
 
-Per l'endpoint applicativo locale configurare `packaging/ha/haproxy-postgres.cfg.example`. Se il primario cambia, HAProxy indirizza nuove connessioni soltanto al Patroni primary riconosciuto (health check HTTP /primary). Le connessioni già aperte vengono interrotte e il server Rust deve riprovare operazioni idempotenti. Ogni PostgreSQL presenta un certificato verificabile da `db-ha.internal` (nome che risolve a loopback per il client attraverso il proxy), con CA configurata in `MULTI_BACKUP_CLUSTER_TLS_CA_FILE`.
+Per l'endpoint applicativo locale configurare `packaging/ha/haproxy-postgres.cfg.example`. Se il primario cambia, HAProxy indirizza nuove connessioni soltanto al Patroni primary riconosciuto (health check **HTTPS /primary** con `check-ssl`, SNI e certificato validato dalla CA privata; mai `/health` o `/leader`). La configurazione originale con controllo HTTP in chiaro su :8008 era incompatibile con `restapi.certfile` e avrebbe marcato DOWN tutti i nodi sani. Le connessioni già aperte vengono interrotte e il server Rust deve riprovare operazioni idempotenti. Ogni PostgreSQL presenta un certificato verificabile da `db-ha.internal` (nome che risolve a loopback per il client attraverso il proxy), con CA configurata in `MULTI_BACKUP_CLUSTER_TLS_CA_FILE`.
 
 ## 4. Schema, backup DB interno e disaster recovery
 

@@ -11,12 +11,24 @@ defaults
     timeout client 60s
     timeout server 60s
     retries 2
+# Listen ONLY on loopback. Front-side PostgreSQL TLS is initiated by
+# the Rust postgres-native-tls client and is passed transparently to the
+# elected primary on :5432 (we do NOT TLS-terminate database traffic).
+#
+# Patroni REST is HTTPS in patroni-node.yaml.example. Therefore health checks
+# MUST use TLS and validate each Patroni node certificate. Plain HTTP checks
+# would cause all backends to be marked DOWN despite a healthy cluster.
+#
+# Expected SANs on REST certificates: mb-node1.internal, mb-node2.internal,
+# mb-node3.internal, signed by patroni-ca.pem. The REST endpoint /primary
+# returns 200 only for the writeable primary holding the leader lock.
+# No fallback to /health, /leader or a raw PostgreSQL TCP check is permitted.
 listen multi-backup-postgres-primary
     bind 127.0.0.1:6432
     mode tcp
     option httpchk GET /primary
     http-check expect status 200
     default-server inter 2s fall 3 rise 2 on-marked-down shutdown-sessions
-    server mb-node1 10.70.0.11:5432 check port 8008
-    server mb-node2 10.70.0.12:5432 check port 8008
-    server mb-node3 10.70.0.13:5432 check port 8008
+    server mb-node1 10.70.0.11:5432 check port 8008 check-ssl check-sni mb-node1.internal verify required ca-file /etc/multi-backup/secrets/patroni-ca.pem verifyhost mb-node1.internal
+    server mb-node2 10.70.0.12:5432 check port 8008 check-ssl check-sni mb-node2.internal verify required ca-file /etc/multi-backup/secrets/patroni-ca.pem verifyhost mb-node2.internal
+    server mb-node3 10.70.0.13:5432 check port 8008 check-ssl check-sni mb-node3.internal verify required ca-file /etc/multi-backup/secrets/patroni-ca.pem verifyhost mb-node3.internal

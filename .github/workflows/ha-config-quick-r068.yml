@@ -1,0 +1,35 @@
+name: Multi Backup - cheap Patroni HAProxy TLS health-check config
+on:
+  push:
+    branches: ["feature/**"]
+    paths:
+      - 'packaging/ha/**'
+      - 'tests/test_ha_patrontls_config.py'
+      - '.github/workflows/ha-config-quick-r068.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ha-config-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ha-config:
+    name: Check PostgreSQL private-only and TLS Patroni primary probes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate HAProxy syntax and native safety assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_ha_patrontls_config.py -v
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends haproxy
+          dir="$(mktemp -d)"
+          trap 'rm -rf -- "$dir"' EXIT
+          openssl req -newkey rsa:2048 -nodes -x509 -days 1 \
+            -subj '/CN=CI Patroni CA' -keyout "$dir/ca.key" -out "$dir/ca.crt" >/dev/null 2>&1
+          sed "s|/etc/multi-backup/secrets/patroni-ca.pem|$dir/ca.crt|g" \
+            packaging/ha/haproxy-postgres.cfg.example > "$dir/haproxy.cfg"
+          haproxy -c -f "$dir/haproxy.cfg"
