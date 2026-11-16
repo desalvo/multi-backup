@@ -1,0 +1,1 @@
+One-shot real 3 Patroni PG16 + three mTLS etcd servers; require DCS sync_standby state=streaming verified by Patroni GET /sync before crash and then failover, rejoin, quorum fencing. No TLS relaxation.
