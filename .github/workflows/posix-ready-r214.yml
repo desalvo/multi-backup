@@ -1,13 +1,6 @@
 name: Multi Backup r214 - scoped POSIX READY native end-to-end gate
 on:
-  push:
-    branches: ["feature/r214-ready-posix-rc-gate"]
-    paths:
-      - "rust/src/plugins.rs"
-      - "rust/src/plugin_executor.rs"
-      - "rust/src/chunk_store.rs"
-      - "rust/tests/plugin_dispatch_roundtrip.rs"
-      - ".github/workflows/posix-ready-r214.yml"
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
