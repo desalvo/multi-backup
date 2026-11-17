@@ -86,6 +86,9 @@ kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash -lc '
     dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
     dnf -y install age
   fi
+  if [ "${MB_FSMETA_LAB:-0}" = 1 ]; then
+    dnf -y install bsdtar acl attr
+  fi
   command -v ceph-fuse && command -v age-keygen && command -v jq
 '
 # Auth material never leaves the disposable cluster, even in logs/artifacts.
@@ -100,5 +103,10 @@ if [ "${MB_RBD_LAB:-0}" = 1 ];then
   kubectl -n rook-ceph cp "$ROOT/tests/cephfs/rook-real-rbd-r195.sh" \
     mb-ci-cephfs-client:/tmp/rbd-acceptance.sh
   kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash /tmp/rbd-acceptance.sh
+fi
+if [ "${MB_FSMETA_LAB:-0}" = 1 ];then
+  kubectl -n rook-ceph cp "$ROOT/tests/cephfs/rook-real-metadata-r196.sh" \
+    mb-ci-cephfs-client:/tmp/metadata-acceptance.sh
+  kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash /tmp/metadata-acceptance.sh
 fi
 echo 'PASS: real 3 OSD CephFS MDS, actual client mounts, Rust encrypted full and ciphertext output'
