@@ -30,6 +30,7 @@ pub mod scheduler;
 pub mod mount_probe;
 pub mod mounted_output;
 pub mod webdav_output;
+pub mod cloud_dav;
 pub mod ssh_input;
 pub mod afs_volume;
 pub mod database;
