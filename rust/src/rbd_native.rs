@@ -56,7 +56,7 @@ fn pinned(s:&Snapshot)->Result<()>{
     let snaps=value.as_array().ok_or("RBD snapshot API was not an array")?;
     if snaps.iter().filter(|x|
         x["id"].as_u64()==Some(s.snapshot_id)&&
-        x["name"].as_str()==Some(&s.snapshot)).count()!=1{
+        x["name"].as_str()==Some(s.snapshot.as_str())).count()!=1{
         return Err("RBD immutable snapshot ID changed or missing".into());
     }
     Ok(())
