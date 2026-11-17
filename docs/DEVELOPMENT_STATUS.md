@@ -1092,3 +1092,24 @@ One-line English commit summary: Pin real WebDAV TLS field host to IPv4 loopback
 - Tests must run on the exact new SHA and complete before RC2 promotion. No release/merge from this change alone.
 
 One-line English commit summary: Fix real CephFS client CephX compatibility and WebDAV trust-chain fixtures without relaxing security.
+
+
+## r194 — native Oracle RMAN-media adapter and Oracle Free CI
+A dedicated Rust Oracle RMAN media provider now rejects non-.bkp and symlinked/empty inputs, encrypts a full verified set in age chunk storage and supports create-only restoration of the pieces. The existing **real Oracle Free RMAN PDB** workflow is updated to exercise the native Rust plugin in both directions, ensure a wrong age key fails, and finish with RMAN RESTORE VALIDATE using only recovered pieces. CI must pass on the exact branch SHA before counting as qualified. The adapter does not yet directly orchestrate RMAN backup, restore a live PDB, perform SCN/redo PITR or preserve advanced Oracle metadata. There is no broad RC2 promotion or physical HA certification by this change.
+
+One-line English commit summary: Add fail-closed native Rust Oracle RMAN media backup and create-only restore with real Oracle Free acceptance.
+
+
+## r195 — native Ceph RBD immutable snapshot provider (CI qualification)
+Implemented a Rust rbd CLI adapter (not raw shell) for a separately approved snapshot with pinned numeric ID, size and SHA256. Uses age chunks, insists on verified source export, restores only into a NEW RBD image with explicit confirmation and exports the result remotely for independent byte verification; refuses overwrite. One actual 3-MON/3-OSD Rook CI cluster is reused to run CephFS and RBD; no false PASS until exact-SHA CI is green. Consistent snapshots for running VM disks, CephFS/RBD cross-service atomicity and host physical loss remain OPEN. One-line English commit summary: Add genuine pinned RBD snapshot encrypted backup and new-image restore to existing three-OSD field acceptance.
+
+
+## r196 — concurrent CephFS .snap and ACL/xattr encrypted metadata path
+New Rust fs_metadata_archive provider streams an ACL/xattr/owner/mtime capable PAX archive from an exact externally attested RO filesystem mount into age chunks without local plaintext staging. Restore uses verified archive into a private RW-mount staging area and Linux renameat2 RENAME_NOREPLACE; never replace existing paths. Genuine Rook/CephFS CI now creates a .snap subtree, mutates the live tree concurrently, mounts the immutable subtree via native ceph-fuse -r, captures ACL/xattrs through libarchive, and verifies restored file bytes, named UID ACL and user xattr. This is **pending exact-SHA CI**; physical-host resilience and coordinated CephFS+RBD/VM snapshots remain unqualified.
+
+One-line English commit summary: Add real CephFS concurrent snapshot ACL/xattr-preserving native Rust PAX backups with create-only recovery tests.
+
+## r196.4 — actual CephFS ACL/xattr lab failure and strict prerequisite correction
+Run [#44000523851](https://github.com/desalvo/multi-backup/actions/runs/44000523851) failed immediately after the proven CephFS/RBD phases because the metadata tools were installed conditionally on MB_FSMETA_LAB inside the client container, but this variable existed only on the GitHub runner. The real metadata acceptance script's silent command -v guard then exited without diagnosis. The pinned client installs bsdtar, acl, attr unconditionally; now missing tools report an explicit error, and Rust rejects symlinks/special file entries before passing source trees to libarchive. No PASS until the new exact-SHA lab finishes fully and verifies ACL/xattr after restore.
+
+One-line English commit summary: Install real CephFS metadata tools in the pod and fail closed on symlinked snapshot entries with clear CI diagnostics.

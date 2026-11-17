@@ -1,11 +1,15 @@
 name: Multi Backup - real CephFS 3-node CI filesystem and encrypted backup output
 on:
   push:
-    branches: ["feature/r182-cephfs-lustre-oracle-field-ci"]
+    branches: ["feature/r182-cephfs-lustre-oracle-field-ci","feature/r194-oracle-rman-media-and-provider-gates"]
     paths:
       - '.github/workflows/cephfs-kind-real-r182.yml'
       - 'scripts/ci/cephfs-kind-real-r182.sh'
       - 'tests/cephfs/rook-real-client-r182.sh'
+      - 'tests/cephfs/rook-real-rbd-r195.sh'
+      - 'rust/src/rbd_native.rs'
+      - 'rust/src/fs_metadata_archive.rs'
+      - 'tests/cephfs/rook-real-metadata-r196.sh'
       - 'scripts/ci/ceph-rgw-kind-cluster.sh'
   workflow_dispatch:
 permissions:
@@ -52,11 +56,13 @@ jobs:
       - name: Genuine Rook-Ceph RGW + CephFS client read/write and age-encrypted roundtrip
         env:
           MB_CEPHFS_LAB: "1"
+          MB_RBD_LAB: "1"
+          MB_FSMETA_LAB: "1"
           RUNNER_ENVIRONMENT: github-hosted
         run: bash scripts/ci/ceph-rgw-kind-cluster.sh
       - name: Report certification boundary
         if: success()
         run: |
-          echo 'PASS real Rook-Ceph three OSD, live CephFS MDS and two FUSE mounts, encrypted Rust B-In/B-Out and create-only recovery.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PASS real CephFS encrypted Rust B-In/B-Out plus pinned RBD snapshot export and NEW image import/readback in same genuine 3-OSD cluster.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Also reused existing real Ceph RGW S3 WORM suite on the same disposable cluster.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'NOT CERTIFIED: production CephFS snapshots, ACL/xattrs, physical fault tolerance or long-term cluster operation.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ACL/xattr and concurrent CephFS .snap subtree tested by separate genuine FUSE/PAX step; still no physical-host failure certification, cross-provider atomic group snapshot, or production fencing.' >> "$GITHUB_STEP_SUMMARY"

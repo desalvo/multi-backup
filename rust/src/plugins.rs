@@ -240,9 +240,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("nextcloud", "Nextcloud", DataKind::Files, PLAN, PLAN,
         "Nextcloud WebDAV/OCS file ID, ETag, sharing, versions and chunked upload",
         "External WebDAV/OCS protocol integration; validate server version and atomic verified commits; never overwrite"),
-    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, PLAN,
+    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PREVIEW, PREVIEW,
         "RBD image snapshots+diff export",
-        "B-In RBD snapshot export and B-Out new empty image import are explicitly planned only: require image ID, pool owner, Ceph auth and source consistency; NEVER overwrite a mapped or existing image"),
+        "Dedicated native RBD immutable snapshot B-In accepts exact numeric snapshot ID, length and independent SHA256. Restore creates a NEW RBD image, verifies complete remote export. Snapshot quiesce, VM/CT consistency, diff chains, namespaces and production fencing remain OPEN"),
     PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
         "Initiator/target IQN and LUN WWID with storage snapshot",
         "Read only a stable quiesced block snapshot; supports raw LUN or LVM (local, clustered-local, shared-exclusive, HA-exclusive, clustered-shared); restore to fresh isolated VG/LUN only").with_san_lvm(),
@@ -272,9 +272,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PREVIEW, NONE,
         "Rust PostgreSQL FULL pg_dump custom format and isolated pg_restore",
         "Requires client-installed pg_dump/pg_restore, private credentials, TLS CA for remote; WAL/PITR and roles/extensions parity still open"),
-    PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PLAN, NONE,
+    PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PREVIEW, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
-        "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
+        "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries").with_restore_output_stage(PLAN),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PLAN,
         "Pinned SSH host key, exact remote-file digest and length, no shell escape",
         "Native authenticated SSH B-In streams one digest-and-length-pinned file into age-encrypted chunks; SCP/SFTP directory operations and B-Out remain planned")
@@ -520,10 +520,9 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if matches!(entry.id,"s3"|"ssh") {
-                // Native pinned-object backup source does NOT confer a
-                // generic restore-to-S3 capability; keep this direction
-                // planned until a write adapter is qualified.
+            if matches!(entry.id,"s3"|"ssh"|"oracle") {
+                // A dedicated native source/media adapter does not grant a
+                // database/cloud restore target; those roles remain planned.
                 assert_eq!(entry.backup_input,Stage::Preview);
                 assert_eq!(entry.restore_output,Stage::Planned);
             } else {
@@ -548,7 +547,7 @@ mod tests {
     fn requested_proxmox_and_rbd_output_roles_are_only_declarative(){
         for id in ["rbd","proxmox"]{
             let p=plan(Mode::Backup,"posix",id).unwrap();
-            assert_eq!(p.destination_stage,Stage::Planned);
+            assert_eq!(p.destination_stage,if id=="rbd"{Stage::Preview}else{Stage::Planned});
             assert!(!p.executable && !p.preview_executable);
             assert!(p.confirmation_required_before_writes);
             assert!(p.required_preflight.iter().any(|s|s.contains("create") ||
@@ -843,7 +842,7 @@ mod tests {
     fn oracle_rman_is_database_input_not_generic_output() {
         let d=find("oracle").unwrap();
         assert_eq!(d.kind,DataKind::Database);
-        assert_eq!(d.backup_input,Stage::Planned);
+        assert_eq!(d.backup_input,Stage::Preview);
         assert_eq!(d.backup_output,Stage::Unsupported);
         assert_eq!(d.restore_output,Stage::Planned);
         assert_eq!(d.restore_input,Stage::Unsupported);

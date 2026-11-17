@@ -4,6 +4,7 @@ on:
     branches: ["feature/**"]
     paths:
       - 'rust/src/database.rs'
+      - 'rust/src/oracle_rman.rs'
       - 'rust/src/archive.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
@@ -34,4 +35,5 @@ jobs:
         if: success()
         run: |
           echo 'PASS: real Oracle Database Free PDB RMAN backup, Rust encrypted backup-piece storage/recovery, and RMAN restore VALIDATE.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'NOT CERTIFIED: Oracle provider-native adapter, isolated physical database restore, full CDB, archived redo/PITR, production licensing.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PASS dedicated native Oracle RMAN media import and create-only restore with real PDB RMAN RESTORE VALIDATE.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED: orchestrated Oracle database physical restore, full CDB, archived redo/PITR, production licensing.' >> "$GITHUB_STEP_SUMMARY"
