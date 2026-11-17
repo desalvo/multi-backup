@@ -1,5 +1,6 @@
 name: Multi Backup - real CephFS 3-node CI filesystem and encrypted backup output
 on:
+  workflow_call:
   push:
     branches: ["feature/r182-cephfs-lustre-oracle-field-ci","feature/r194-oracle-rman-media-and-provider-gates"]
     paths:

@@ -1,5 +1,6 @@
 name: Multi Backup - real Oracle Free RMAN encrypted PDB backup-piece acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/**"]
     paths:
@@ -13,7 +14,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: mb-oracle-free-physical-pitr-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   oracle-free-live-rman:

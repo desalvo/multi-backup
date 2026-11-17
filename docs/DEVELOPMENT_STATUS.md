@@ -1204,3 +1204,21 @@ One-line English commit summary: Prepare isolated oVirt and VMware nested KVM la
 - No release, main merge or artifact promotion until all mandatory gates pass.
 
 One-line English commit summary: Qualify scoped POSIX data and PostgreSQL16 logical recovery as Ready and enforce one-source RC preflight across Rust, DB, GUI and Kubernetes.
+
+## r215 — expand nine narrowly scoped Ready paths, exact-SHA real-provider RC gate (2026-11-18)
+
+- Branch feature/r215-scoped-provider-ready-and-rc, stacked above **r214 full CI PASS** run 44187545286 and r213 VMware/oVirt. Draft PR #52; no main merge, tag or official release.
+- 33 catalog plugins. Exactly 9 intended READY only in explicitly declared roles: posix (regular file bytes), s3 (MinIO pinned one versioned object B-In), cephfs (snapshot-attested mounted regular file content B-In + new-directory restore), rbd (pinned full snapshot -> separate NEW RBD image readback), iscsi (kernel RO pinned LUN -> new local loopback TGT LUN), mysql (single MariaDB11.4/MySQL8.4 database full InnoDB logical create-only recovery), postgresql (PG16 single DB logical), oracle (ONLY pre-created RMAN media pieces age/new directory; not auto DB restore), anti-ransomware-vault (MinIO genuine COMPLIANCE ciphertext/manifest versioning, distinct writer/recovery principals, no root-immune claim).
+- Each READY has a public ready_scope with unsupported capability exclusions. 24 other provider IDs remain Preview/Planned/Unsupported. This is NOT complete vendor certification. Native GUI displays the scope.
+- Generic plugin execution stays exclusively compiled POSIX↔POSIX, preventing database/RBD/iSCSI/S3/vault READY role combinations from becoming unsafe arbitrary copy/restore workflows.
+- New scripts/ci/rc-preflight-r215.py validates exact 9 role matrices/33 catalog IDs and same GitHub source SHA/run ID; six field-lab outcomes are mandatory and non-skippable: MySQL8.4, 3OSD CephFS+RBD, kernel TGT iSCSI, Oracle Free RMAN PDB/CDB/PITR, two-principal S3 MinIO WORM.
+- New reusable workflows: scoped-ready-r215.yml (native compiled unit and age test), plus workflow_call on original real-provider workflows for the six field labs (no duplicate scripts). New rc-preflight-r215.yml inherits r214 full software test, SQL live, security audits and adds all six authentic field gates. If every job SUCCESS, builds ONLY same-SHA Linux CLI/agent *CI pre-RC artifact* and machine-readable attested boundaries. No actual publication or Mac/Win binaries.
+- CI first identified outdated Oracle parser expectations in old plugin unit tests (fixed in b779246... and 07c2d3a...) and Oracle/SQL reusable job concurrency collision (fixed in ef0461... / 6a94dd...), neither was ignored.
+- Most recent gate for branch source 07c2d3af137fd4f56bfd71a056c2aa16e84455ed: https://github.com/desalvo/multi-backup/actions/runs/44201723457. Use real run conclusion; when appended it was RUNNING, not yet certified.
+- Remaining provider blockers: genuine VMware vCenter/ESXi VADP+CBT and VM boot; oVirt Engine VM full recovery boot, PVE/PBS VM+CT restore; 3 separate physical HA hosts/fencing; remote SAN multipath/CHAP; GTID/PITR full orchestration, Oracle RAC/ASM/TDE; full filesystem metadata/ACL on generic exports; multi-vendor S3 Object Lock and root/physical ransomware protections.
+- Remaining official cross-platform RC blockers: Mac Silicon+Intel native installer same SHA and verified GUI, Windows installer and actual Windows launch, complete Debian/RPM package installation, signed/provenance/checksums and distribution channels. r174/r175 publisher pinned to old SHA must NOT be invoked as r215.
+- Handoff source of truth: docs/RC_READINESS_R215_IT.md, .github/workflows/rc-preflight-r215.yml, docs/HANDOFF.md and docs/DEVELOPMENT_STATUS.md.
+
+One-line English commit summary: Expand qualified provider READY scopes to nine with five authentic same-SHA field labs and fail-closed pre-RC gates.
+
+- Sixth independent real same-SHA lab added: official MinIO version-pinned single S3 object B-In, independently supplied SHA256, age encrypted store and restore, wrong SHA/version denied. The separate MinIO two-principal IAM WORM lab does not substitute for this test. Workflow run #44202462665 is the exact code SHA 76b34f781b12072ee7682ca4ba442613a55fef33; do not mark success before all six vendor labs complete.
