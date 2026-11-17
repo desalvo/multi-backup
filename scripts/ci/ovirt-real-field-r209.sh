@@ -30,12 +30,13 @@ ID=$(jq -er .id "$W/receipt.json")
 "$NATIVE" storage restore --root "$W/store" --identity "$W/age-key" \
  --id "$ID" --destination "$W/new-disk-recovery" >/dev/null
 DISK_ID=$(jq -er .disk_id "$PROFILE")
-RAW=$(find "$W/new-disk-recovery" -type f -name "$DISK_ID.qcow2" -print -quit)
+FORMAT=$(jq -er '.expected_format|select(.=="raw" or .=="qcow2")' "$PROFILE")
+RAW=$(find "$W/new-disk-recovery" -type f -name "$DISK_ID.$FORMAT" -print -quit)
 test -n "$RAW"
 test "$(stat -c '%s' "$RAW")" = "$(jq -er .expected_bytes "$PROFILE")"
 test "$(sha256sum "$RAW" | awk '{print $1}')" = "$(jq -er .expected_sha256 "$PROFILE")"
-qemu-img info --output=json "$RAW" | jq -e '.format=="qcow2"'
-qemu-img check "$RAW"
+qemu-img info --output=json "$RAW" | jq -e --arg format "$FORMAT" '.format==$format'
+if test "$FORMAT" = qcow2;then qemu-img check "$RAW";fi
 if "$NATIVE" storage restore --root "$W/store" --identity "$W/age-key" \
  --id "$ID" --destination "$W/new-disk-recovery" >/dev/null 2>&1;then
  echo 'FAIL oVirt offline recovery overwrote existing disk path' >&2;exit 1
