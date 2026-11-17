@@ -956,7 +956,7 @@ mod tests {
         let r=plan(Mode::Restore,"anti-ransomware-vault","oracle").unwrap();
         assert!(!r.executable && !r.preview_executable);
         assert!(plan(Mode::Backup,"posix","oracle").is_err());
-        assert!(!d.notes.contains("orchestrate Oracle DB restore"),"Never pretend to run RMAN restore");
+        assert!(d.notes.contains("does NOT orchestrate Oracle DB restore"),"Never pretend to automate RMAN database restoration");
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {
