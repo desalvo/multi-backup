@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      MB_LUSTRE_AGE_STATIC_DIR: ${{ runner.temp }}/mb-age-static
+      MB_LUSTRE_AGE_STATIC_DIR: /tmp/mb-lustre-age-static
     steps:
       - uses: actions/checkout@v4
       - name: Require genuine KVM, static Rust and safe test scripts
