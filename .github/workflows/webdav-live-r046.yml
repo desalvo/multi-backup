@@ -7,6 +7,7 @@ on:
       - "rust/src/mount_probe.rs"
       - "rust/src/chunk_store.rs"
       - "rust/src/archive.rs"
+      - "rust/src/mounted_output.rs"
       - "rust/Cargo.toml"
       - "rust/Cargo.lock"
       - "scripts/test-real-webdav-r046.sh"
