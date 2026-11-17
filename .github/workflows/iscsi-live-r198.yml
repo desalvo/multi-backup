@@ -1,9 +1,10 @@
 name: Multi Backup - real iSCSI target initiator pinned snapshot test
 on:
   push:
-    branches: ["feature/r198-iscsi-snapshot-native-field"]
+    branches: ["feature/r198-iscsi-snapshot-native-field","feature/r201-iscsi-new-lun-bout-lab"]
     paths:
       - "rust/src/iscsi_snapshot.rs"
+      - "rust/src/iscsi_new_lun.rs"
       - "scripts/ci/iscsi-live-r198.sh"
       - ".github/workflows/iscsi-live-r198.yml"
   workflow_dispatch:
@@ -29,11 +30,12 @@ jobs:
       - name: Compile actual Rust plugin and run negative unit tests
         run: |
           cargo test --manifest-path rust/Cargo.toml --lib iscsi_snapshot
+          cargo test --manifest-path rust/Cargo.toml --lib iscsi_new_lun
           cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
       - name: Real network iSCSI kernel LUN and encrypted copy
         run: bash scripts/ci/iscsi-live-r198.sh
       - name: Record strict certification boundaries
         if: success()
         run: |
-          echo "PASS real iSCSI target and kernel initiator, pinned RO LUN encrypted B-In and NEW offline image restore." >> "$GITHUB_STEP_SUMMARY"
-          echo "NOT CERTIFIED: iSCSI B-Out to fresh SAN LUN, target fencing, production multipath, LVM/guest consistency, physical HA." >> "$GITHUB_STEP_SUMMARY"
+          echo "PASS real iSCSI target+initiator B-In and NEW locally provisioned TGT LUN B-Out, byte-for-byte readback and overwrite refusal." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED: remote SAN LUN create, CHAP/multipath, physical-host fencing and live guest/LVM consistency." >> "$GITHUB_STEP_SUMMARY"
