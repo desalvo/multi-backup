@@ -5,6 +5,8 @@ on:
     paths:
       - "rust/src/iscsi_snapshot.rs"
       - "rust/src/iscsi_new_lun.rs"
+      - "rust/src/bin/multi-backup-native.rs"
+      - "rust/src/lib.rs"
       - "scripts/ci/iscsi-live-r198.sh"
       - ".github/workflows/iscsi-live-r198.yml"
   workflow_dispatch:
