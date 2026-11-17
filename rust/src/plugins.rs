@@ -285,7 +285,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware append-only vault PREVIEW",
         DataKind::ProtectedVault, NONE, PREVIEW,
         "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
-        "Compiled dedicated Rust vault-store backup and verified create-only restore, GUI and authenticated server API; no delete or overwrite API. External WORM is NOT enforced or certified by this application"),
+        "Local immutable_vault remains ONLY app-level append-only and is NOT root-resistant. Dedicated vault-worm requires genuine external S3 Object Lock COMPLIANCE, versioned immutable manifest+objects, pinned receipt version and verified age restore. External root/host and credentials remain separate attack surfaces; physical independence not certified"),
 ];
 
 pub fn find(id: &str) -> Option<&'static PluginDescriptor> {
