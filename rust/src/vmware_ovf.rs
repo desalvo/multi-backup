@@ -300,7 +300,7 @@ fn safe_extract(archive:&Path,dest:&Path)->Result<PathBuf>{
         }
         let path=item.path()?;
         let name=path.to_str().ok_or("VMware archive name encoding")?.to_owned();
-        if !component(name)||!["ovf","vmdk","mf","nvram"].iter().any(|ext|
+        if !component(&name)||!["ovf","vmdk","mf","nvram"].iter().any(|ext|
               name.ends_with(&format!(".{ext}"))){
             return Err("VMware tar traversal or unexpected member".into())
         }
