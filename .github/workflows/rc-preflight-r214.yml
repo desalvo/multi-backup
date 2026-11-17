@@ -8,6 +8,11 @@ on:
       - "rust-server/**"
       - "scripts/ci/rc-preflight-r214.py"
       - "tests/test_rc_preflight_r214.py"
+      - "tests/test_rc_security_r214.py"
+      - "scripts/ci/ha-three-physical-redfish-r204.py"
+      - "scripts/labs/provision-hypervisor-r213.py"
+      - "requirements.txt"
+      - "requirements-docs.txt"
       - ".github/workflows/rc-preflight-r214.yml"
       - ".github/workflows/posix-ready-r214.yml"
       - ".github/workflows/software-readiness-r168.yml"
@@ -53,6 +58,7 @@ jobs:
       - name: Check Python syntax correctness, injection and dependency vulnerabilities
         run: |
           set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rc_security_r214.py -v
           ruff check --select E4,E9,F63,F7,F82 --extend-select E722 .
           bandit -q -r . -x ./tests,./.git -ll
           python3 -m pip_audit -r requirements.txt
