@@ -77,3 +77,19 @@ Rimangono valide le evidenze puntuali in `docs/PROVIDER_FIELD_CERTIFICATION_R211
 - VMware: offline OVF rust adapter in collaudo, field fisico non eseguito; VADP/CBT non implementato.
 
 **One-line English commit summary:** Add pinned-TLS VMware OVF encrypted full backup and new-VM restore with split principals, official simulator acceptance and protected real-vCenter field gates.
+
+## r212.2 — import OFFLINE indipendente, compatibilità dell'API simulata
+L'API `vcsim` upstream govmomi **non implementa** `ExportVm`/lease NFC, quindi la CI simulator non può certificare un export vCenter. In compenso `plugins vmware-ovf-package-backup` accetta una directory privata già esportata con OVF, VMDK e manifest, e richiede un'impronta **indipendente** esadecimale SHA-256 calcolata sui nomi ordinati, delimitatore NUL, lunghezza file LE64 e SHA256 del contenuto per ciascun membro. Verifica la stessa impronta PRIMA e DOPO il trasferimento age, rifiuta i membri non regolari/unsafe e non pubblica un backup se i file cambiano. La ricevuta dichiara sempre `source_provenance_attested=false`: questa strada NON attesta l'origine da una VM VMware reale. Il vero `govc export.ovf` su vCenter resta nel workflow manuale sul provider autenticato e nel test del codice di export.
+
+La CI `vmware-govc-vcsim-r212.yml` compila `govc` e `vcsim` dallo stesso tag ufficiale `v0.56.2`, imposta una CA reale di test, genera un piccolo VMDK streamOptimized con `qemu-img` e OVF associato, verifica fingerprint falso, salvataggio age, restore importazione nuova VM su simulator, collisione, age key errata, ruoli e diniego sul backup della VM accesa. Il test automatico non sostituisce boot/content su vero ESXi.
+
+### Comando input pacchetto OFFLINE
+```bash
+multi-backup-native plugins vmware-ovf-package-backup \
+  --root /var/lib/multi-backup/encrypted-store \
+  --identity /etc/multi-backup/age-private.key \
+  --stage-root /var/lib/multi-backup/encrypted-stage \
+  --source-ovf-dir /var/lib/multi-backup/encrypted-stage/pre-exported-vm \
+  --source-moref vm-42 --expected-fingerprint ACTUAL_SHA256_64_HEX \
+  --label "Offline OVF import without source provenance" --json
+```
