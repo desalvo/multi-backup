@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, iscsi_snapshot, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, iscsi_snapshot, pve_media, pbs_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -29,6 +29,10 @@ fn usage() -> &'static str {
        multi-backup-native plugins pve-backup-media --config-json OWNER_ONLY_PVE.json --node NODE --storage STORE --guest-id VMID [--json] (read-only provider backup volume metadata; NOT Multi Backup verified)\n\
        multi-backup-native plugins metadata-snapshot-backup --input cephfs|lustre|nfs|smb|glusterfs|sshfs --source EXACT_RO_SNAPSHOT_MOUNT --root STORE --identity AGE_KEY --label LABEL --source-snapshot-attested [--json] (ACL/xattr/PAX stream encrypted)\n\
        multi-backup-native plugins metadata-snapshot-restore --output PROVIDER --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--json] (ACL/xattr create-only same-mount restore)\n\
+       multi-backup-native plugins pve-media-backup --config-json PVE.json --node NODE --storage STORE --guest-kind qemu|lxc --guest-id ID --upid UPID --volid STORAGE:backup/FILE --sha256 HASH --bytes SIZE --root STORE --identity KEY --label NAME [--json] (PVE node-local verified vzdump to age chunks)\n\
+       multi-backup-native plugins pve-media-restore-offline --root STORE --identity KEY --id HASH --destination NEW_DIR [--json]\n\
+       multi-backup-native plugins pbs-disk-backup --snapshot-json PBS.json --root STORE --identity KEY --label NAME [--json] (official PBS client VM image to age chunks)\n\
+       multi-backup-native plugins pbs-disk-restore-offline --root STORE --identity KEY --id HASH --destination NEW_DIR [--json]\n\
        multi-backup-native plugins iscsi-snapshot-backup --snapshot-json OWNER_ONLY.json --root STORE --identity AGE_KEY --label LABEL [--json] (read-only attested iSCSI LUN to age chunks)\n\
        multi-backup-native plugins iscsi-restore-image --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--json] (offline raw image only; never writes to a LUN)\n\
        multi-backup-native plugins rbd-snapshot-backup --snapshot-json PRIVATE.json --root STORE --identity AGE_KEY --label LABEL [--json]\n\
@@ -187,6 +191,60 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--destination")?))?;
         if json{println!("{}",serde_json::to_string_pretty(&result)?);}
         else{println!("Restored ACL/xattr metadata archive to fresh mount: {}",result.backup_id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="pve-media-backup" {
+        if password_stdin{return Err("PVE requires owner-only config and age identity".into());}
+        accepted(&flags,&["--config-json","--node","--storage","--guest-kind",
+          "--guest-id","--upid","--volid","--sha256","--bytes","--root","--identity","--label"])?;
+        let cfg=virtualization_inventory::Config::load(
+            Path::new(required(&flags,"--config-json")?))?;
+        let id:u32=required(&flags,"--guest-id")?.parse()?;
+        let bytes:u64=required(&flags,"--bytes")?.parse()?;
+        let r=pve_media::backup(&cfg,required(&flags,"--node")?,
+            required(&flags,"--storage")?,required(&flags,"--guest-kind")?,
+            id,required(&flags,"--upid")?,required(&flags,"--volid")?,
+            required(&flags,"--sha256")?,bytes,
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--label")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("PVE vzdump encrypted media verified: {}",r.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="pve-media-restore-offline" {
+        if password_stdin{return Err("PVE offline restore needs age identity".into());}
+        accepted(&flags,&["--root","--identity","--id","--destination"])?;
+        let r=pve_media::restore_offline(
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--id")?,
+            Path::new(required(&flags,"--destination")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("PVE verified archive recovered offline: {}",r.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="pbs-disk-backup" {
+        if password_stdin{return Err("PBS requires external owner-only scoped secret file".into());}
+        accepted(&flags,&["--snapshot-json","--root","--identity","--label"])?;
+        let source=pbs_native::Source::load(
+            Path::new(required(&flags,"--snapshot-json")?))?;
+        let r=pbs_native::backup(&source,Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),required(&flags,"--label")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("PBS native disk stream encrypted and verified: {}",r.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="pbs-disk-restore-offline" {
+        if password_stdin{return Err("PBS offline recovery accepts an age identity".into());}
+        accepted(&flags,&["--root","--identity","--id","--destination"])?;
+        let r=pbs_native::restore_offline(
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--id")?,
+            Path::new(required(&flags,"--destination")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("PBS disk image restored offline: {}",r.id);}
         return Ok(());
     }
     if family=="plugins" && command=="iscsi-snapshot-backup" {
