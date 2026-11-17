@@ -45,7 +45,13 @@ def digest(p):
     return sha.hexdigest()
 
 def read(args, *, full=False):
-    cfg_path = file_safe(args.config)
+    if args.action == "plan":
+        # Checked-in example config is a relative path; plan is read-only.
+        cfg_path = Path(args.config)
+        if cfg_path.is_symlink() or not cfg_path.is_file():
+            fail("read-only plan config must be an existing regular file")
+    else:
+        cfg_path = file_safe(args.config, owner_only=True)
     cfg = json.loads(cfg_path.read_text())
     expected = {"network", "engine_image", "host_image", "engine_user_data",
                 "host_user_data", "esxi_iso", "sha256", "enable_esxi"}
