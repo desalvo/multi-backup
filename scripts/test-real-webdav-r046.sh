@@ -151,9 +151,43 @@ jq -e '.create_only and .encrypted and (.verified_members == .source_members)' "
 test -f "$RW/new-webdav.tar.gz.age.sha256"
 sync
 # Independently read over HTTPS, bypassing FUSE/davfs2 cache.
-curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
-  https://localhost:18920/new-webdav.tar.gz.age -o "$WORK/https-downloaded.tar.gz.age"
+# davfs2 may ACK write+fsync locally before its background upload is
+# visible to the server. Do not mistake a local FUSE readback for a remote
+# durability assertion. Poll the AUTHENTIC HTTPS endpoint with bounded time
+# and check full bytes, instead of disabling the verification.
+remote_ready=0
+for attempt in $(seq 1 60);do
+  if curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+       https://localhost:18920/new-webdav.tar.gz.age \
+       -o "$WORK/https-downloaded.tar.gz.age" &&
+     cmp -s "$RW/new-webdav.tar.gz.age" "$WORK/https-downloaded.tar.gz.age";then
+    remote_ready=1
+    break
+  fi
+  sleep 2
+done
+test "$remote_ready" = 1 || {
+  echo "FAIL: WebDAV server did not durably expose the full encrypted archive" >&2
+  exit 1
+}
 cmp "$RW/new-webdav.tar.gz.age" "$WORK/https-downloaded.tar.gz.age"
+# The checksum marker must also be visible via independent HTTPS, not only
+# the FUSE cache. A partially published remote backup is never a CI PASS.
+sidecar_ready=0
+for attempt in $(seq 1 60);do
+  if curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+       https://localhost:18920/new-webdav.tar.gz.age.sha256 \
+       -o "$WORK/https-downloaded.sha256" &&
+     cmp -s "$RW/new-webdav.tar.gz.age.sha256" "$WORK/https-downloaded.sha256";then
+    sidecar_ready=1
+    break
+  fi
+  sleep 2
+done
+test "$sidecar_ready" = 1 || {
+  echo "FAIL: WebDAV remote SHA256 completion marker absent or divergent" >&2
+  exit 1
+}
 "$CLI" plugins mounted-restore --input webdav --mount "$RW" \
   --filename new-webdav.tar.gz.age --identity "$IDENTITY" \
   --destination "$WORK/restored-from-webdav"

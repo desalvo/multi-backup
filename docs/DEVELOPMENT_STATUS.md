@@ -1048,3 +1048,10 @@ Created genuine CephFS Rook MDS/OSD/Kubernetes FUSE client E2E and genuine Lustr
 ## r183 — Real WebDAV and SSHFS mounted B-Out acceptance
 
 Existing authenticated TLS rclone WebDAV/davfs2 live workflow extended with a genuine second writable server/mount, create-only age remote B-Out, independently fetched HTTPS ciphertext, age restore, RO denial and overwrite checks. Existing OpenSSH/SSHFS live workflow extended with real SSHFS RW age B-Out/readback/restore, no-overwrite. No claim before exact-SHA CI. See docs/PLUGIN_FIELD_READINESS_R182_IT.md. One-line English commit summary: Qualify genuine WebDAV and SSHFS encrypted output against writable authenticated remote services.
+
+
+## r187 — Scoped real Lustre and SSHFS PASS; WebDAV DAVFS2 writeback verification
+
+Verified real QEMU Rocky9 Lustre Rust encrypted B-In/B-Out and bytewise create-only recovery (#43993244568 PASS), and authenticated SSHFS RW B-Out (#43992703261 PASS); Oracle Free PDB RMAN pieces (#43992293341 PASS), AFS genuine cell (#43747477666 PASS with identical adapter). WebDAV davfs2 could not use hardlink rename; native WebDAV B-Out now writes ciphertext-only through O_EXCL and its SHA256 marker LAST; CI verifies independently over HTTPS with bounded retries because FUSE writeback can be deferred. Do not call WebDAV independent durability PASS before the next CI completes. CephFS Rook 3-OSD field still running. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.
+
+One-line English commit summary: Add fail-closed DAVFS2 ciphertext publication and real HTTP verification after proven Lustre/SSHFS acceptance.
