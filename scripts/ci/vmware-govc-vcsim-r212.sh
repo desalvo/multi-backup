@@ -16,8 +16,9 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$TMP/staging" "$TMP/store"
 chmod 0700 "$TMP" "$TMP/staging" "$TMP/store"
-go install github.com/vmware/govmomi/govc@v0.56.2
-go install github.com/vmware/govmomi/vcsim@v0.56.2
+git clone --quiet --depth 1 --branch v0.56.2 https://github.com/vmware/govmomi "$TMP/govmomi"
+(cd "$TMP/govmomi/govc" && go build -o "$GOBIN/govc" .)
+(cd "$TMP/govmomi/vcsim" && go build -o "$GOBIN/vcsim" .)
 test -x "$GOBIN/govc" && test -x "$GOBIN/vcsim"
 openssl req -newkey rsa:2048 -sha256 -nodes -x509 -days 2 \
  -subj "/CN=Multi Backup temporary CA" -addext "basicConstraints=critical,CA:TRUE" \
