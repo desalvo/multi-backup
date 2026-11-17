@@ -1102,3 +1102,9 @@ One-line English commit summary: Add fail-closed native Rust Oracle RMAN media b
 
 ## r195 — native Ceph RBD immutable snapshot provider (CI qualification)
 Implemented a Rust rbd CLI adapter (not raw shell) for a separately approved snapshot with pinned numeric ID, size and SHA256. Uses age chunks, insists on verified source export, restores only into a NEW RBD image with explicit confirmation and exports the result remotely for independent byte verification; refuses overwrite. One actual 3-MON/3-OSD Rook CI cluster is reused to run CephFS and RBD; no false PASS until exact-SHA CI is green. Consistent snapshots for running VM disks, CephFS/RBD cross-service atomicity and host physical loss remain OPEN. One-line English commit summary: Add genuine pinned RBD snapshot encrypted backup and new-image restore to existing three-OSD field acceptance.
+
+
+## r196 — concurrent CephFS .snap and ACL/xattr encrypted metadata path
+New Rust fs_metadata_archive provider streams an ACL/xattr/owner/mtime capable PAX archive from an exact externally attested RO filesystem mount into age chunks without local plaintext staging. Restore uses verified archive into a private RW-mount staging area and Linux renameat2 RENAME_NOREPLACE; never replace existing paths. Genuine Rook/CephFS CI now creates a .snap subtree, mutates the live tree concurrently, mounts the immutable subtree via native ceph-fuse -r, captures ACL/xattrs through libarchive, and verifies restored file bytes, named UID ACL and user xattr. This is **pending exact-SHA CI**; physical-host resilience and coordinated CephFS+RBD/VM snapshots remain unqualified.
+
+One-line English commit summary: Add real CephFS concurrent snapshot ACL/xattr-preserving native Rust PAX backups with create-only recovery tests.
