@@ -971,3 +971,46 @@ On stacked r179 branch, new `ssh_input.rs`, `plugins ssh-backup` and dedicated O
 ### r181 followup
 
 RBD/PVE B-Out upgraded from Unsupported to Planned ONLY, no runtime executor. Real SSH B-In #43989432365 failed (exit=255 due OpenSSH option split); fixed in next SHA by using `UserKnownHostsFile=<abs path>` as one `-o` option. See r179 provider readiness doc. Do not mark SSH B-In CI PASS until rerun.
+
+
+## r182 field-CI lab handoff
+
+Branch feature/r182-cephfs-lustre-oracle-field-ci stacked on PR #33. New CephFS kind workflow uses existing real 3 MON/3 OSD Rook RGW cluster + MDS CephFS and isolated Ubuntu client pod; actual Rust age encrypted B-In and B-Out via fuse.ceph-fuse. New Lustre workflow uses pinned LTVM genuine Rocky9 guest, compile same SHA static Rust and pass SHA256-verified binaries over ephemeral bridge; actual Rust Lustre B-In/B-Out and restore. Oracle Free workflow rerun with additional wrong-age-key negative on real RMAN pieces. Historical real AFS certified #43747477666 unchanged adapter module+test script. Only mark green when exact-SHA runs succeed, not on scripted lab existence. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.
+
+
+## r183 remote mounted output CI handoff
+
+New real WebDAV RW (TLS Basic Auth, independent GET bypassing davfs2 cache) and real SSHFS RW encrypted B-Out acceptance tests extend existing provider CI without mocks or duplicate servers. Check exact-SHA workflows webdav-live-r046.yml and ssh-sshfs-live-integration.yml; if unsupported remote FUSE rename/link returns errors, do not suppress; fix actual no-overwrite staging. docs/PLUGIN_FIELD_READINESS_R182_IT.md updated.
+
+
+## r187 provider lab status handoff
+
+Rust exact-source Lustre Rocky9 QEMU real FULL -> age -> restore and mounted B-Out PASSED (#43993244568). Real SSHFS RW age B-Out PASSED (#43992703261). Oracle Free RMAN PDB piece VALIDATE PASSED (#43992293341), AFS actual KDC cell PASSED earlier (#43747477666 with same module/blob). CephFS true Rook MDS/FUSE lab #43992291655 still running at last check. WebDAV #43993669335 failed only independent HTTPS immediate readback due davfs2 deferred writeback; r187 adds bounded independent remote GET tests for both ciphertext and sidecar. WebDAV adapter uses O_EXCL, encrypted-only stage and sidecar last, no deletion/retry. Require new exact-SHA WebDAV CI before promotion. No RC2/main merge and no universal Stage::Ready.
+
+
+## r188 S3 Ceph RGW B-In field handoff
+
+Added pinned-version S3 B-In to scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh (genuine 3-OSD/3-MON Ceph). Run only with approved existing Ceph CI gate, once, on exact SHA, after ongoing CephFS lab job finishes. It asserts older version despite newer current object, independent SHA256, age-chunk restore, negative wrong-hash. Do not claim PASS before actual run; no main merge or RC publishing.
+
+
+## r189 WebDAV transport handoff
+
+FUSE/davfs2 mounted B-Out was false-positive: writes acknowledged locally but independent HTTPS GET remained empty for >120s (#43994077483 FAIL). Do not mark mount-based WebDAV output durable. Added \`rust/src/webdav_output.rs\` native direct HTTPS WebDAV provider, conditional \`PUT If-None-Match: *\`, required independent GET of encrypted file and sidecar, sidecar commit last, safe fresh-target remote restore. Password only \`MULTI_BACKUP_WEBDAV_PASSWORD\`. Extended real WebDAV CI script to exercise direct native API, negative duplicate and restore. Await exact SHA CI, don't claim PASS until green. See r182 field readiness.
+
+
+## r190 CephFS lab failure and retry
+#43992291655 on SHA 6cbddea3: cluster actually healthy (3 MON quorum, 3 OSD up/in, 1 MDS+standby), but new script `cephfs-kind-real-r182.sh` assumed mdsmap dict and retried until failure. Updated recursive CephFS JSON parser supports list/dict and still rejects inactive MDS. Rerun once on exact new SHA, including latest genuine Ceph RGW versioned B-In. CI PASS not yet attained; source remains Preview.
+
+
+## r191 — WebDAV OS trust-store TLS (strict verification)
+
+First native HTTPS WebDAV test [#43994967648](https://github.com/desalvo/multi-backup/actions/runs/43994967648) **FAILED CLOSED** at \`HEAD\` before any remote write. The native ureq 2.x \`tls\` feature trusts bundled Mozilla roots by default and does not see the disposable CA installed by \`update-ca-certificates\`. Enable the supported ureq \`native-certs\` feature, retaining TLS certificate validation and zero redirects. Transport failures now report ONLY the safe error kind, not URL credentials or token; no \`danger_accept_invalid_certs\` or insecure HTTP fallback. Retest the real TLS WebDAV provider on new SHA before any PASS. Independent PUT/GET and checksum-last remain mandatory.
+
+One-line English commit summary: Honor system-trusted CA certificates for native WebDAV HTTPS without relaxing TLS verification.
+
+
+## r192 — WebDAV native IPv4 lab preflight
+
+The new direct HTTP/WebDAV adapter compiled successfully, but CI [#43995446149](https://github.com/desalvo/multi-backup/actions/runs/43995446149) still failed closed at HEAD with \`ureq::Transport::ConnectionFailed\` (before any writes). The disposable HTTPS server is explicitly bound to \`127.0.0.1\`, while the URL used \`localhost\` and may select IPv6 ::1; the server certificate includes IP SAN 127.0.0.1. The lab now targets the explicit HTTPS **IPv4 loopback** and logs the safe ureq transport reason. TLS remains validated with OS-installed CA, no insecure fallbacks. Await real HTTPS conditional PUT/GET CI PASS before promotion. The registered WebDAV mounted B-In remains separately proven on davfs2 RO.
+
+One-line English commit summary: Pin real WebDAV TLS field host to IPv4 loopback while retaining certificate validation and safe diagnostics.

@@ -3,7 +3,7 @@
 //! This does NOT mount remote storage, grant a WORM guarantee or overwrite.
 use crate::{archive,mount_probe,plugins::{self,GpfsAccess,Mode}};
 use serde::Serialize;
-use std::{fs,path::{Path,PathBuf}};
+use std::{fs::{self,File,OpenOptions},io::{self,Write},path::{Path,PathBuf}};
 type Result<T>=std::result::Result<T,Box<dyn std::error::Error+Send+Sync>>;
 
 const MOUNTED: &[&str]=&[
@@ -42,6 +42,55 @@ fn exact_mount(plugin:&str, root:&Path,access:Option<GpfsAccess>,write:bool)->Re
     }
     Ok(fs::canonicalize(root)?)
 }
+/// Some standards-compliant WebDAV clients (davfs2) do not implement POSIX
+/// hard-link/rename-noreplace used by tempfile::persist_noclobber. Stage only
+/// already-encrypted bytes LOCALLY, then write the new remote ciphertext
+/// through O_EXCL. The sidecar is always created LAST, so incomplete objects
+/// cannot be read as finished archives. On any error leave the unverified
+/// remote object for explicit operator reconciliation; never delete data.
+/// This mode is NOT an atomic multi-object publish or a WORM guarantee.
+fn copy_ciphertext_create_only(source:&Path,destination:&Path)->Result<()>{
+    let src=fs::symlink_metadata(source)?;
+    if !src.file_type().is_file()||src.file_type().is_symlink() {
+        return Err("Only verified ordinary age ciphertext files can be copied to DAV".into());
+    }
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err("Remote encrypted object already exists".into());
+    }
+    let mut input=File::open(source)?;
+    let mut output=OpenOptions::new().write(true).create_new(true).open(destination)?;
+    let copied=io::copy(&mut input,&mut output)?;
+    if copied!=src.len(){
+        return Err("Remote ciphertext copy stopped before full source length".into());
+    }
+    output.flush()?;
+    output.sync_all()?;
+    drop(output);
+    Ok(())
+}
+fn webdav_archive_create_only(
+    source:&Path,destination:&Path,recipient:&str
+)->Result<usize>{
+    let staging=tempfile::Builder::new().prefix("mb-encrypted-dav-")
+        .tempdir()?;
+    let name=destination.file_name()
+        .ok_or("Missing WebDAV ciphertext filename")?;
+    let local=staging.path().join(name);
+    // archive::create publishes age ciphertext and SHA256 only after encryption
+    // has completed. Never stage raw source files in the clear.
+    let members=archive::create(source,&local,recipient,"multi-backup/mounted-output")?;
+    let local_sidecar=PathBuf::from(format!("{}.sha256",local.display()));
+    let remote_sidecar=PathBuf::from(format!("{}.sha256",destination.display()));
+    if fs::symlink_metadata(destination).is_ok() ||
+       fs::symlink_metadata(&remote_sidecar).is_ok() {
+        return Err("Refusing existing WebDAV ciphertext or checksum marker".into());
+    }
+    copy_ciphertext_create_only(&local,destination)?;
+    // Manifest-last commit marker. Existing failed uploads are intentionally
+    // never overwritten or silently removed in case a different writer owns them.
+    copy_ciphertext_create_only(&local_sidecar,&remote_sidecar)?;
+    Ok(members)
+}
 /// One full encrypted backup archive into the exact writable mountpoint.
 /// Age encryption finishes and SHA256 sidecar publishes before an authenticated
 /// readback decrypt+tar verification. Root writer is never given file deletion.
@@ -72,7 +121,11 @@ pub fn backup_to_mount(plugin:&str,source:&Path,root:&Path,
        fs::symlink_metadata(&sidecar).is_ok(){
         return Err("Mounted encrypted output already exists; no overwrite".into());
     }
-    let created=archive::create(&source,&archive_path,recipient,"multi-backup/mounted-output")?;
+    let created=if plugin=="webdav" {
+        webdav_archive_create_only(&source,&archive_path,recipient)?
+    }else{
+        archive::create(&source,&archive_path,recipient,"multi-backup/mounted-output")?
+    };
     // The remote filesystem must return the ciphertext and attest the
     // decryptable member count; a successful write syscall is not enough.
     let verified=archive::verify(&archive_path,identity)?;
@@ -122,6 +175,23 @@ mod tests{
             assert!(exact_mount(plugin,tmp.path(),mode,false).is_err());
         }
         assert!(exact_mount("posix",tmp.path(),None,true).is_err());
+    }
+    #[test] fn webdav_encrypted_transfer_is_create_only_and_never_follows_links(){
+        let d=tempfile::tempdir().unwrap();
+        let src=d.path().join("source.tar.gz.age");
+        let dst=d.path().join("dest.tar.gz.age");
+        fs::write(&src,b"ciphertext-only-unit-fixture").unwrap();
+        copy_ciphertext_create_only(&src,&dst).unwrap();
+        assert_eq!(fs::read(&src).unwrap(),fs::read(&dst).unwrap());
+        assert!(copy_ciphertext_create_only(&src,&dst).is_err());
+        assert_eq!(fs::read(&dst).unwrap(),b"ciphertext-only-unit-fixture");
+        #[cfg(unix)] {
+            use std::os::unix::fs::symlink;
+            let link=d.path().join("link.tar.gz.age");
+            symlink(&src,&link).unwrap();
+            assert!(copy_ciphertext_create_only(&link,&d.path().join("unsafe")).is_err());
+            assert!(copy_ciphertext_create_only(&src,&link).is_err());
+        }
     }
     #[test] fn fake_mounted_archive_does_not_write_any_backup(){
         let d=tempfile::tempdir().unwrap();

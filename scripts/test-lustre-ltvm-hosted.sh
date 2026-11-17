@@ -41,5 +41,10 @@ sg ltvm -c 'LTVM_NO_UPDATE=1 ./ltvm llmount co1-single'
 # No unreviewed shell code from a network source is passed to the guest.
 GUEST_B64=$(base64 -w0 "$REPO_ROOT/tests/lustre/ltvm-guest-smoke.sh")
 sg ltvm -c "LTVM_NO_UPDATE=1 ./ltvm vm exec co1-single bash -lc 'printf %s $GUEST_B64 | base64 -d | bash'"
+if [ "${MB_LUSTRE_RUST_E2E:-0}" = 1 ]; then
+  # Same genuine QEMU guest and MDT/OST; test Rust encrypted I/O instead
+  # of declaring a Lustre mount smoke sufficient to qualify a plugin.
+  bash "$REPO_ROOT/scripts/ci/lustre-ltvm-rust-r182.sh" "$REPO_ROOT"
+fi
 echo 'PASS real QEMU Lustre kernel, server, client, OST striping and RO mount smoke.'
 echo 'NOT TESTED: coordinated filesystem snapshots or native Rust encrypted Lustre restore/metadata fidelity.'

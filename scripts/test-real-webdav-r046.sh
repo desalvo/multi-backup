@@ -10,21 +10,43 @@ WORK=$(mktemp -d "$HOME/.mb-webdav-r046.XXXXXXXX")
 RO="$WORK/ro"; ROOT="$WORK/export"; STORE="$WORK/age-store"; IDENTITY="$WORK/age-identity"
 mkdir -p "$RO" "$ROOT/nested"
 SERVER_PID=""
+WRITE_PID=""
 cleanup() {
   set +e
+  if test -n "${RW:-}" && mountpoint -q "$RW"; then sudo umount "$RW"; fi
   if mountpoint -q "$RO"; then sudo umount "$RO"; fi
   if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null || :; wait "$SERVER_PID" 2>/dev/null || :; fi
+  if [ -n "$WRITE_PID" ]; then kill "$WRITE_PID" 2>/dev/null || :; wait "$WRITE_PID" 2>/dev/null || :; fi
   sudo rm -rf -- "$WORK"
 }
 trap cleanup EXIT
 printf "WebDAV original content\n" > "$ROOT/nested/data.txt"
 dd if=/dev/urandom of="$ROOT/test.bin" bs=1M count=2 status=none
 HASH=$(sha256sum "$ROOT/test.bin" | awk '{print $1}')
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
-  -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 \
-  -keyout "$WORK/webdav.key" -out "$WORK/webdav.crt" >/dev/null 2>&1
-chmod 0600 "$WORK/webdav.key"
-sudo install -m 0644 "$WORK/webdav.crt" /usr/local/share/ca-certificates/mb-webdav-r046.crt
+# A self-signed HTTPS *leaf* is not a valid CA: rustls rejects it even
+# when OpenSSL/curl sometimes accept it as a directly trusted certificate.
+# Create a throwaway CA and a separate CA:FALSE TLS server leaf.
+openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 2 \
+  -subj '/CN=Multi Backup disposable WebDAV test CA' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+  -keyout "$WORK/ca.key" -out "$WORK/ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -sha256 -nodes \
+  -subj /CN=localhost -keyout "$WORK/webdav.key" \
+  -out "$WORK/webdav.csr" >/dev/null 2>&1
+cat > "$WORK/server.ext" <<'CERT'
+subjectAltName=DNS:localhost,IP:127.0.0.1
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+CERT
+openssl x509 -req -in "$WORK/webdav.csr" \
+  -CA "$WORK/ca.crt" -CAkey "$WORK/ca.key" -CAcreateserial \
+  -days 1 -sha256 -extfile "$WORK/server.ext" \
+  -out "$WORK/webdav.crt" >/dev/null 2>&1
+chmod 0600 "$WORK/ca.key" "$WORK/webdav.key"
+openssl verify -purpose sslserver -CAfile "$WORK/ca.crt" "$WORK/webdav.crt"
+sudo install -m 0644 "$WORK/ca.crt" /usr/local/share/ca-certificates/mb-webdav-r046.crt
 sudo update-ca-certificates >/dev/null
 PASSWORD=$(openssl rand -hex 20)
 htpasswd -nbB mbci "$PASSWORD" > "$WORK/htpasswd"
@@ -108,5 +130,87 @@ if "$CLI" plugins restore --input posix --output webdav --root "$STORE" \
   --identity "$IDENTITY" --id "$SNAPSHOT" --destination "$RO/not-supported" >/dev/null 2>&1; then
   echo "FAIL unimplemented WebDAV output allowed" >&2; exit 1
 fi
+# r183: independent genuine HTTPS/Basic Auth RW WebDAV server and
+# actual davfs2 RW mounted B-Out with exact ciphertext downloaded over HTTP.
+# No production DAV endpoint or personal cloud account involved.
+RW="$WORK/rw"
+mkdir -p "$RW" "$WORK/local-output/nested"
+printf 'real authenticated RW WebDAV age output\n' > "$WORK/local-output/nested/source.txt"
+AUTH_PASS="$(sudo awk '$1=="https://localhost:18919/" {print $3}' /etc/davfs2/secrets | tail -1)"
+test -n "$AUTH_PASS"
+rclone serve webdav "$ROOT" --addr 127.0.0.1:18920 \
+  --cert "$WORK/webdav.crt" --key "$WORK/webdav.key" \
+  --htpasswd "$WORK/htpasswd" --min-tls-version tls1.2 \
+  > "$WORK/write-server.log" 2>&1 &
+WRITE_PID=$!
+for n in $(seq 1 30);do
+  if curl -fsS -u "mbci:$AUTH_PASS" https://localhost:18920/nested/data.txt >/dev/null 2>&1;then break;fi
+  sleep 1
+done
+curl -fsS -u "mbci:$AUTH_PASS" https://localhost:18920/nested/data.txt >/dev/null
+printf '%s %s %s\n' 'https://localhost:18920/' mbci "$AUTH_PASS" | sudo tee -a /etc/davfs2/secrets >/dev/null
+sudo chmod 0600 /etc/davfs2/secrets
+sudo mount -t davfs -o "rw,uid=$(id -u),gid=$(id -g),file_mode=0600,dir_mode=0700" https://localhost:18920/ "$RW"
+# davfs2 mounted with sudo is root-owned unless the CI user's UID/GID are
+# explicit; a hidden tempfile must be writable without running the Rust
+# backup process as root.
+test -w "$RW" && touch "$RW/.mb-write-probe"
+rm -f -- "$RW/.mb-write-probe"
+"$CLI" plugins probe --plugin webdav --mount "$RW" --json \
+  | jq -e '.rw_mount_option == true and (.fs_type == "fuse.davfs" or .fs_type == "fuse")'
+# Native HTTPS API B-Out is intentionally distinct from the mounted
+# davfs2 B-Out: the latter ACKed cached writes without remote durability.
+# We require actual HTTP PUT (If-None-Match: *) and an independent HTTPS GET
+# for BOTH ciphertext and completion marker before returning success.
+if "$CLI" plugins mounted-backup --output webdav --mount "$RO" \
+  --source "$WORK/local-output" --filename should-not-write.tar.gz.age \
+  --recipient "$RECEIVER" --identity "$IDENTITY" >/dev/null 2>&1;then
+  echo 'FAIL: read-only WebDAV mount accepted B-Out' >&2;exit 1
+fi
+python3 - "$WORK/webdav-output.json" <<'PY'
+import json,os,sys
+path=sys.argv[1]
+with open(path,"x",encoding="utf-8") as target:
+    json.dump({"endpoint":"https://127.0.0.1:18920/","username":"mbci"},target)
+os.chmod(path,0o600)
+PY
+export MULTI_BACKUP_WEBDAV_PASSWORD="$AUTH_PASS"
+"$CLI" plugins webdav-http-backup \
+  --config "$WORK/webdav-output.json" \
+  --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
+  --recipient "$RECEIVER" --identity "$IDENTITY" \
+  --json > "$WORK/webdav-http-out.json"
+jq -e '.create_only and .encrypted and .independent_https_readback and (.verified_members > 0)' "$WORK/webdav-http-out.json"
+# Verify the HTTP endpoint *again*, independent of the Rust verification;
+# still no WebDAV FUSE cache or client-side mount in the proof.
+curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+  https://localhost:18920/new-webdav.tar.gz.age \
+  -o "$WORK/downloaded-ciphertext.tar.gz.age"
+curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+  https://localhost:18920/new-webdav.tar.gz.age.sha256 \
+  -o "$WORK/remote-completion.sha256"
+ACTUAL_HASH="$(sha256sum "$WORK/downloaded-ciphertext.tar.gz.age" | awk '{print $1}')"
+test "$ACTUAL_HASH" = "$(jq -r .sha256 "$WORK/webdav-http-out.json")"
+test "$ACTUAL_HASH" = "$(awk 'NR==1{print $1}' "$WORK/remote-completion.sha256")"
+"$CLI" plugins webdav-http-restore --config "$WORK/webdav-output.json" \
+  --filename new-webdav.tar.gz.age --identity "$IDENTITY" \
+  --destination "$WORK/restored-from-webdav" --json > "$WORK/webdav-recover.json"
+jq -e '.restored_members>0' "$WORK/webdav-recover.json"
+cmp "$WORK/local-output/nested/source.txt" \
+  "$WORK/restored-from-webdav/multi-backup/webdav-native/nested/source.txt"
+if "$CLI" plugins webdav-http-backup \
+  --config "$WORK/webdav-output.json" \
+  --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
+  --recipient "$RECEIVER" --identity "$IDENTITY" >/dev/null 2>&1;then
+  echo 'FAIL: WebDAV native API overwrote existing encrypted object' >&2;exit 1
+fi
+if "$CLI" plugins webdav-http-restore --config "$WORK/webdav-output.json" \
+  --filename new-webdav.tar.gz.age --identity "$IDENTITY" \
+  --destination "$WORK/restored-from-webdav" >/dev/null 2>&1;then
+  echo 'FAIL: WebDAV native restore overwrote existing local directory' >&2;exit 1
+fi
+unset MULTI_BACKUP_WEBDAV_PASSWORD AUTH_PASS
+echo 'PASS genuine TLS-authenticated WebDAV API ciphertext create-only B-Out, independent GET, sha256 marker and age restore'
+
 echo "PASS authentic TLS+basic-auth rclone WebDAV server, real read-only davfs2 mount, Rust encrypted backup/verify/byte-for-byte local restore"
-echo "NOT CERTIFIED real server-side snapshots, cache ETag fidelity, full metadata, WebDAV output/remote restore"
+echo "NOT CERTIFIED remote ETag/ACL metadata, large transfers and provider-specific WebDAV locking/HA; mounted davfs2 RW is not a durable B-Out"

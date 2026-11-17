@@ -1,0 +1,62 @@
+name: Multi Backup - real CephFS 3-node CI filesystem and encrypted backup output
+on:
+  push:
+    branches: ["feature/r182-cephfs-lustre-oracle-field-ci"]
+    paths:
+      - '.github/workflows/cephfs-kind-real-r182.yml'
+      - 'scripts/ci/cephfs-kind-real-r182.sh'
+      - 'tests/cephfs/rook-real-client-r182.sh'
+      - 'scripts/ci/ceph-rgw-kind-cluster.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: real-cephfs-r182-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-cephfs:
+    name: Rook/Ceph 3 MON / 3 OSD + genuine CephFS MDS FUSE + Rust age recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - name: Strict dedicated GitHub-hosted runner and real lab prerequisites
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -d /run/udev/data
+          test -c /dev/fuse
+          for file in scripts/ci/ceph-rgw-kind-cluster.sh scripts/ci/cephfs-kind-real-r182.sh tests/cephfs/rook-real-client-r182.sh; do
+            bash -n "$file"
+          done
+      - name: Install pinned Kubernetes lab tooling
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 4 --silent --show-error -o /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          curl --fail --location --retry 4 --silent --show-error -o /tmp/kubectl https://dl.k8s.io/release/v1.32.3/bin/linux/amd64/kubectl
+          chmod 0755 /tmp/kind /tmp/kubectl
+          sudo mv /tmp/kind /tmp/kubectl /usr/local/bin/
+          kind version
+          kubectl version --client
+      - name: Install real source and S3 WORM acceptance dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq udev fuse3
+          python3 -m pip install 'awscli>=1.42,<2'
+          python3 -m unittest discover -s tests -p test_ceph_rgw_ci_attestation.py -v
+          python3 -m unittest discover -s tests -p test_ceph_osd_crush_alignment.py -v
+          python3 -m unittest discover -s tests -p test_ceph_osd_node_alignment.py -v
+      - name: Compile THIS EXACT branch Rust executable, no source/artifact substitution
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Genuine Rook-Ceph RGW + CephFS client read/write and age-encrypted roundtrip
+        env:
+          MB_CEPHFS_LAB: "1"
+          RUNNER_ENVIRONMENT: github-hosted
+        run: bash scripts/ci/ceph-rgw-kind-cluster.sh
+      - name: Report certification boundary
+        if: success()
+        run: |
+          echo 'PASS real Rook-Ceph three OSD, live CephFS MDS and two FUSE mounts, encrypted Rust B-In/B-Out and create-only recovery.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Also reused existing real Ceph RGW S3 WORM suite on the same disposable cluster.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED: production CephFS snapshots, ACL/xattrs, physical fault tolerance or long-term cluster operation.' >> "$GITHUB_STEP_SUMMARY"

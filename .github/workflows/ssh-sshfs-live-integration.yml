@@ -33,7 +33,7 @@ jobs:
       - name: Test real SSH/SCP/SFTP and pinned SSH encrypted B-In
         run: bash scripts/test-real-ssh-sshfs.sh protocol
   sshfs-native-recovery:
-    name: Real FUSE SSHFS read-only snapshot to encrypted Rust restore
+    name: Real FUSE SSHFS read-only input, create-only RW ciphertext output and Rust recovery
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -44,5 +44,5 @@ jobs:
           sudo apt-get install -y openssh-client openssh-server sshfs fuse3 age jq
       - name: Build actual native Rust plugin
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
-      - name: Test actual FUSE SSHFS mounts, encrypted backup and remote restore
+      - name: Test genuine SSHFS input/restore and encrypted B-Out with age readback
         run: bash scripts/test-real-ssh-sshfs.sh sshfs

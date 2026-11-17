@@ -353,6 +353,13 @@ fi
 export CEPH_REAL_CLUSTER_ATTESTED=true
 bash "$ROOT/scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh" "$TEMP"
 echo "PASS: real multi-node Ceph RGW S3 native Rust WORM acceptance"
+
+if [ "${MB_CEPHFS_LAB:-0}" = 1 ]; then
+  # Reuse THIS exact 3-MON/3-OSD disposable kind Rook/Ceph lab instead of
+  # creating a second mock lab or spending twice the CI time.
+  bash "$ROOT/scripts/ci/cephfs-kind-real-r182.sh" "$TEMP"
+fi
+
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "### Genuine 3-node Ceph RGW S3 acceptance"
