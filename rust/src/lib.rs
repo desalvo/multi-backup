@@ -36,6 +36,8 @@ pub mod database;
 pub mod oracle_rman;
 pub mod rbd_native;
 pub mod iscsi_snapshot;
+#[cfg(target_os="linux")]
+pub mod iscsi_new_lun;
 pub mod fs_metadata_archive;
 pub mod agent_protocol;
 pub mod execution_policy;
