@@ -1,0 +1,58 @@
+name: Multi Backup - oVirt genuine READY VM backup IMAGEIO read-only field gate
+on:
+  push:
+    branches: ["feature/r209-worm-vault-db-patroni-ovirt"]
+    paths:
+      - "rust/src/ovirt_imageio.rs"
+      - "scripts/ci/ovirt-real-field-r209.sh"
+      - ".github/workflows/ovirt-real-field-r209.yml"
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Enter YES_READ_ONLY_DISPOSABLE_OVIRT_BACKUP"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mb-ovirt-genuine-field-lab
+  cancel-in-progress: false
+jobs:
+  hosted-safety:
+    name: Compile native oVirt and verify unapproved runner cannot invoke provider backup
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native Rust oVirt client strict-ID/TLS/length guard
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib ovirt_imageio
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+          bash -n scripts/ci/ovirt-real-field-r209.sh
+          if MB_OVIRT_APPROVAL=YES_READ_ONLY_DISPOSABLE_OVIRT_BACKUP bash scripts/ci/ovirt-real-field-r209.sh >/tmp/ovirt-denied.log 2>&1; then
+            echo 'FAIL unapproved ordinary runner permitted oVirt field backup' >&2
+            exit 1
+          fi
+  genuine-ovirt:
+    name: Real oVirt Engine, existing READY backup/IMAGEIO and offline verified qcow2
+    needs: hosted-safety
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, multi-backup-ovirt-field]
+    environment: multi-backup-ovirt-readonly-lab
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native client on actual isolated oVirt test runner
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -u)" -ne 0
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Transfer real READY VM backup disk, new local qcow2 and integrity check
+        env:
+          MB_OVIRT_APPROVAL: ${{ inputs.confirmation }}
+        run: bash scripts/ci/ovirt-real-field-r209.sh
+      - name: Set exact qualification scope
+        if: success()
+        run: |
+          echo "PASS real oVirt Engine READY backup, exact imageio download, verified encrypted age restore and qcow2 disk." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED VM creation, multiple disks, OVA/OVF metadata or boot." >> "$GITHUB_STEP_SUMMARY"
