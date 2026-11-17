@@ -1058,3 +1058,17 @@ One-line English commit summary: Add role-scoped VMware offline OVF encrypted ba
 - Read full deployment/operator and gating instructions `docs/OVIRT_VMWARE_LABS_R213_IT.md`. Neither oVirt nor VMware is universally READY; actual API versions, VM multi-disk content, VM restore and boot remain unqualified, as do three physically independent HA nodes.
 
 One-line English commit summary: Prepare isolated oVirt and VMware nested KVM laboratories with verified TLS IMAGEIO protocol tests and protected create-only provisioning gates.
+
+## r214 — scoped POSIX and PostgreSQL16 Ready + exact-SHA RC preflight (2026-11-17)
+
+- Branch feature/r214-ready-posix-rc-gate is stacked on r213, NOT merged to main and NOT published as release/tag.
+- Native Rust catalog: 33 plugin IDs, exactly **2 narrowly scoped READY**: POSIX quiesced ordinary regular-file CONTENT-only age backup/restore into new directory (all four roles), PostgreSQL16 single-database FULL logical age backup with create-only restore (input and dedicated restore-output roles ONLY). None of the other 31 provider IDs is Ready.
+- Machine-readable ready_scope guarantees POSIX excludes ACL/xattr, uid/gid, modes, timestamps, hardlinks/symlinks/empty dirs and live consistency; PostgreSQL excludes global roles/ACL, physical PITR/Patroni DCS orchestration and HA. Separate database logical restore is dedicated CLI, NOT a generic filesystem plugin.
+- Generic executable flag now requires two actual Ready roles AND compiled allowlisted POSIX/posix dispatcher; dedicated provider previews cannot acquire generic write rights from stage alone.
+- POSIX encrypted roundtrip unit/integration includes wrong age key, overwrites, symlinks, fake NFS and parity repair. Real PostgreSQL16/MariaDB11 encrypted restore workflow reused from database-live-integration.yml via workflow_call on exact SHA.
+- New rc-preflight-r214.yml fans out full Rust/server/PG agents/GUI/Kubernetes OCI acceptance, actual POSIX age + SQL container suites, Python RC false-READY tests, and only if all positive creates source-matched Linux CLI/agent pre-RC artifact with SHA256SUMS and machine-readable limitations. Never publishes a GitHub Release, stable or tag. Older r174/r175 RC publisher is pinned to old source commit and must NOT be reused.
+- Actual first CI found a test type ambiguity (fixed at 1d1f1fa) and Python RC policy stage-values shadowing (fixed at c86cb817). Follow only the latest exact-SHA Actions run, not superseded failures/cancellations.
+- Operator instructions: docs/RC_READINESS_R214_IT.md. Real full VMware ESXi/VADP, oVirt VM, PVE/PBS and three physical host HA still not accepted and MUST remain Preview.
+- No release, main merge or artifact promotion until all mandatory gates pass.
+
+One-line English commit summary: Qualify scoped POSIX data and PostgreSQL16 logical recovery as Ready and enforce one-source RC preflight across Rust, DB, GUI and Kubernetes.

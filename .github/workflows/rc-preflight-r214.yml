@@ -1,0 +1,140 @@
+name: Multi Backup r214 - single-SHA RC preflight and native candidate
+on:
+  push:
+    branches: ["feature/r214-ready-posix-rc-gate"]
+    paths:
+      - "rust/**"
+      - "rust-desktop/**"
+      - "rust-server/**"
+      - "scripts/ci/rc-preflight-r214.py"
+      - "tests/test_rc_preflight_r214.py"
+      - "tests/test_rc_security_r214.py"
+      - "scripts/ci/ha-three-physical-redfish-r204.py"
+      - "scripts/labs/provision-hypervisor-r213.py"
+      - "requirements.txt"
+      - "requirements-docs.txt"
+      - ".github/workflows/rc-preflight-r214.yml"
+      - ".github/workflows/posix-ready-r214.yml"
+      - ".github/workflows/software-readiness-r168.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: mb-r214-rc-source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ready-posix:
+    name: Current-SHA POSIX Ready operation and fail-closed test gate
+    uses: ./.github/workflows/posix-ready-r214.yml
+
+  full-software:
+    name: Current-SHA Rust/server/PG agents/GUI/K8s full acceptance
+    uses: ./.github/workflows/software-readiness-r168.yml
+
+  real-database-roundtrip:
+    name: Current-SHA real PostgreSQL16 and MariaDB11 encrypted backup/restore
+    uses: ./.github/workflows/database-live-integration.yml
+
+  rc-security-policy:
+    name: RC preflight policy negatives and limited publish rights
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate untrusted catalog and false-certification denial
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rc_preflight_r214.py -v
+          python3 -m py_compile scripts/ci/rc-preflight-r214.py
+      - name: Install mandatory release static and dependency-security auditors
+        run: |
+          set -euo pipefail
+          python3 -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3'
+      - name: Check Python syntax correctness, injection and dependency vulnerabilities
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rc_security_r214.py -v
+          ruff check --select E4,E9,F63,F7,F82 --extend-select E722 .
+          bandit -q -r . -x ./tests,./.git -ll
+          python3 -m pip_audit -r requirements.txt
+          python3 -m pip_audit -r requirements-docs.txt
+          echo 'PASS r214 Python static correctness, Bandit medium/high security and both pip-audit dependency manifests' >> "$GITHUB_STEP_SUMMARY"
+      - name: No publication authorization in this workflow
+        run: |
+          test "${{ github.event_name }}" != "release"
+          echo "RC preflight is nonpublishing; no main merge, tag, release or stable channel mutation" >> "$GITHUB_STEP_SUMMARY"
+
+  current-sha-linux-candidate:
+    name: Exact-commit signed-by-age Linux native preview bundle (NOT published RC)
+    needs: [ready-posix, full-software, real-database-roundtrip, rc-security-policy]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Enforce positive same-source production preflight, never accept skipped suites
+        env:
+          POSIX_RESULT: ${{ needs.ready-posix.result }}
+          SOFTWARE_RESULT: ${{ needs.full-software.result }}
+          DATABASE_RESULT: ${{ needs.real-database-roundtrip.result }}
+          POLICY_RESULT: ${{ needs.rc-security-policy.result }}
+        run: |
+          set -euo pipefail
+          for value in "$POSIX_RESULT" "$SOFTWARE_RESULT" "$DATABASE_RESULT" "$POLICY_RESULT"; do
+            if test "$value" != success;then
+              echo "DENIED RC artifact: required current-SHA suite conclusion is $value" >&2
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build native CLI and agent from this exact approved branch commit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          cargo build --manifest-path rust/Cargo.toml --release \
+            --bin multi-backup-native --bin multi-backup-agent
+          rust/target/release/multi-backup-native --version
+      - name: Generate fail-closed machine-readable provider and RC limitations
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          rust/target/release/multi-backup-native plugins list --json > /tmp/rc-catalog.json
+          rust/target/release/multi-backup-native plugins plan \
+            --mode backup --input posix --output posix --json > /tmp/rc-backup.json
+          rust/target/release/multi-backup-native plugins plan \
+            --mode restore --input posix --output posix --json > /tmp/rc-restore.json
+          python3 scripts/ci/rc-preflight-r214.py \
+            --catalog /tmp/rc-catalog.json \
+            --backup-plan /tmp/rc-backup.json \
+            --restore-plan /tmp/rc-restore.json \
+            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+            --output preview/rc-preflight-manifest.json
+          cp rust/target/release/multi-backup-native preview/
+          cp rust/target/release/multi-backup-agent preview/
+          cp docs/RELEASE_CANDIDATE_R174_IT.md preview/LEGACY_RC_SCOPE_NOT_CURRENT.md
+          (cd preview && sha256sum multi-backup-native multi-backup-agent rc-preflight-manifest.json LEGACY_RC_SCOPE_NOT_CURRENT.md > SHA256SUMS)
+          tar --create --gzip --file "multi-backup-r214-linux-pre-rc-$GITHUB_SHA.tar.gz" \
+            -C preview .
+          test -s "multi-backup-r214-linux-pre-rc-$GITHUB_SHA.tar.gz"
+          sha256sum "multi-backup-r214-linux-pre-rc-$GITHUB_SHA.tar.gz"
+      - name: Store CI artifact as pre-RC only; do not publish a GitHub release
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-backup-r214-linux-pre-rc
+          path: multi-backup-r214-linux-pre-rc-*.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+      - name: Explicit remaining RC and stable gates
+        if: success()
+        run: |
+          echo 'PASS source-matched Rust CLI+agent Linux preview bundle; NOT official RC and NOT stable.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'BLOCKED before cross-platform RC: Mac Silicon/x86 signed/notarized installer smoke, Windows native installer smoke, same-SHA release matrix/artifact provenance.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Provider field remains Preview except narrowly scoped quiesced POSIX regular-file content-only.' >> "$GITHUB_STEP_SUMMARY"

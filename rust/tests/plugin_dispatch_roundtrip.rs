@@ -37,8 +37,11 @@ fn posix_pair_encrypts_verifies_and_restores_without_python() {
     let plan=cli(&["plugins","plan","--mode","backup","--input","posix",
         "--output","posix","--json"],true);
     let capability:Value=serde_json::from_slice(&plan.stdout).unwrap();
-    assert_eq!(capability["preview_executable"],true);
-    assert_eq!(capability["executable"],false);
+    assert_eq!(capability["preview_executable"],false);
+    assert_eq!(capability["executable"],true);
+    assert_eq!(capability["source_stage"],"ready");
+    assert_eq!(capability["destination_stage"],"ready");
+    assert!(capability["reason"].as_str().unwrap().contains("content-only"));
 
     let b=cli(&["plugins","backup","--input","posix","--output","posix",
         "--source",path(&source),"--root",path(&root),"--identity",path(&key),
@@ -130,4 +133,62 @@ fn key_inside_source_and_uninitialized_store_are_rejected() {
     cli(&["plugins","backup","--input","posix","--output","posix",
         "--source",path(&source),"--root",path(&store),
         "--identity",path(&key),"--label","no private keys"],false);
+}
+
+#[test]
+fn posix_ready_scope_is_exact_regular_file_data_and_fails_closed() {
+    let tmp=tempdir().unwrap();
+    let key=tmp.path().join("private-age.key");
+    assert!(Command::new("age-keygen").arg("-o").arg(&key)
+        .status().unwrap().success());
+    let text=fs::read_to_string(&key).unwrap();
+    let recipient=text.lines().find_map(|line|line.strip_prefix("# public key: "))
+        .unwrap().trim();
+    let source=tmp.path().join("src");
+    fs::create_dir_all(source.join("tree")).unwrap();
+    // Exactly supported scope: ordinary file bytes and nested file paths.
+    let payload=vec![0x5bu8; 128 * 1024 + 19];
+    fs::write(source.join("tree/blob.bin"),&payload).unwrap();
+    fs::write(source.join("empty.bin"),[]).unwrap();
+    let store=tmp.path().join("store");
+    cli(&["storage","init","--root",path(&store),"--recipient",recipient],true);
+    let result=cli(&["plugins","backup","--input","posix","--output","posix",
+        "--source",path(&source),"--root",path(&store),"--identity",path(&key),
+        "--label","READY content only","--namespace","data","--json"],true);
+    let obj:Value=serde_json::from_slice(&result.stdout).unwrap();
+    let id=obj["id"].as_str().unwrap();
+    let restored=tmp.path().join("restored");
+    cli(&["plugins","restore","--input","posix","--output","posix",
+        "--root",path(&store),"--identity",path(&key),"--id",id,
+        "--destination",path(&restored)],true);
+    assert_eq!(fs::read(restored.join("data/tree/blob.bin")).unwrap(),payload);
+    assert!(fs::read(restored.join("data/empty.bin")).unwrap().is_empty());
+    // Restore cannot overwrite existing data or clobber an existing path.
+    cli(&["plugins","restore","--input","posix","--output","posix",
+        "--root",path(&store),"--identity",path(&key),"--id",id,
+        "--destination",path(&restored)],false);
+    // Unrelated age identity never authorizes decrypt or new restore.
+    let wrong=tmp.path().join("wrong-age.key");
+    assert!(Command::new("age-keygen").arg("-o").arg(&wrong)
+        .status().unwrap().success());
+    let denied=tmp.path().join("denied");
+    cli(&["plugins","restore","--input","posix","--output","posix",
+        "--root",path(&store),"--identity",path(&wrong),"--id",id,
+        "--destination",path(&denied)],false);
+    assert!(!denied.exists());
+    // A source symlink, unlike plain bytes, cannot be silently omitted or followed.
+    #[cfg(unix)]{
+        use std::os::unix::fs::symlink;
+        let outside=tmp.path().join("outside");
+        fs::write(&outside,b"excluded sensitive data").unwrap();
+        symlink(&outside,source.join("escape")).unwrap();
+        cli(&["plugins","backup","--input","posix","--output","posix",
+            "--source",path(&source),"--root",path(&store),"--identity",path(&key),
+            "--label","reject symlink","--namespace","data"],false);
+        fs::remove_file(source.join("escape")).unwrap();
+    }
+    // A local plain directory is not an NFS mount even with user attestation.
+    cli(&["plugins","backup","--input","nfs","--output","posix",
+        "--source",path(&source),"--root",path(&store),"--identity",path(&key),
+        "--label","no fake remote","--source-snapshot-attested"],false);
 }

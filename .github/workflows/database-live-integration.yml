@@ -1,5 +1,6 @@
 name: Multi Backup - real PostgreSQL and MariaDB encrypted restore
 on:
+  workflow_call:
   push:
     branches: ["feature/**"]
     paths:

@@ -100,11 +100,26 @@ def leader(host):
     if len(names)!=1 or not names[0]:
         raise RuntimeError("Split brain or no Patroni primary")
     return names[0]
-def sql(host,query):
-    if not re.fullmatch(r"[A-Za-z0-9_ ,()*='.-]+",query):
+def sql(host, query, witness=None):
+    # Never construct SQL with untrusted string concatenation or inject it
+    # into a remotely interpreted shell command. psql stdin expands the
+    # separately validated -v variable with SQL-quoted :'witness_id' syntax.
+    if not re.fullmatch(r"[A-Za-z0-9_ ,()*='.:/-]+", query):
         raise RuntimeError("Unsafe witness SQL")
-    return ssh(host,"set -eu\nsudo -n -u postgres psql -XAt -v ON_ERROR_STOP=1"
-                    " -d postgres -c '"+query+"'\n",timeout=40)
+    using_witness = "witness_id" in query
+    if using_witness != (witness is not None):
+        raise RuntimeError("Witness SQL variable binding must be explicit")
+    if witness is not None and not re.fullmatch(r"[0-9a-f]{32}", witness):
+        raise RuntimeError("Witness ID is not a canonical UUID-hex nonce")
+    encoded = base64.b64encode((query+"\n").encode("ascii")).decode("ascii")
+    # The remote command includes only a strict base64 string; no shell or
+    # SQL parser interprets raw user-supplied witness query as shell syntax.
+    command = ("set -eu\nprintf '%s' '"+encoded+"' | base64 -d | "
+               "sudo -n -u postgres psql -XAt -v ON_ERROR_STOP=1")
+    if witness is not None:
+        command += " -v witness_id="+witness
+    command += " -d postgres\n"
+    return ssh(host, command, timeout=40)
 def wait_for(label,check,timeout):
     deadline=time.monotonic()+timeout
     while time.monotonic()<deadline:
@@ -165,10 +180,10 @@ def main():
     sql(hosts[index],"CREATE TABLE IF NOT EXISTS public.mb_physical_witness"
         "(id text primary key,payload text not null)")
     sql(hosts[index],"INSERT INTO public.mb_physical_witness VALUES "
-        "('"+nonce+"','acknowledged-before-power-off')")
+        "(:'witness_id','acknowledged-before-power-off')",witness=nonce)
     survivors=[h for i,h in enumerate(hosts) if i!=index]
-    query="SELECT count(*) FROM public.mb_physical_witness WHERE id='"+nonce+"'"
-    if not any(sql(x,query).strip()=="1" for x in survivors):
+    query="SELECT count(*) FROM public.mb_physical_witness WHERE id=:'witness_id'"
+    if not any(sql(x,query,witness=nonce).strip()=="1" for x in survivors):
         raise RuntimeError("No synchronous witness on the standby before fault")
     powered_off=False
     try:
@@ -184,7 +199,7 @@ def main():
             return first if first==second and first!=lead else None
         promotion=wait_for("Single surviving Patroni leader",new_primary,180)
         witness_host=next((h for h,x in zip(hosts,hw) if x["name"]==promotion),None)
-        if witness_host not in survivors or sql(witness_host,query).strip()!="1":
+        if witness_host not in survivors or sql(witness_host,query,witness=nonce).strip()!="1":
             raise RuntimeError("Synchronous PostgreSQL ACK lost after physical primary outage")
         print("PASS primary physical ForceOff, new leader elected, acknowledged data preserved",flush=True)
     finally:
