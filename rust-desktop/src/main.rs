@@ -2329,7 +2329,11 @@ mod provider_gui_tests{
         assert!(plugins::CATALOG.iter().filter(|p|p.ready_scope.is_none())
             .all(|p|p.backup_input!=plugins::Stage::Ready &&
                      p.backup_output!=plugins::Stage::Ready));
-        assert!(ready[0].ready_scope.unwrap().contains("content_only"));
-        assert!(ready[1].ready_scope.unwrap().contains("single_database"));
+        // READY is identified by stable plugin ID, never display/catalog index.
+        assert!(plugins::find("posix").unwrap().ready_scope.unwrap().contains("content_only"));
+        assert!(plugins::find("postgresql").unwrap().ready_scope.unwrap().contains("single_database"));
+        assert!(plugins::find("s3").unwrap().ready_scope.unwrap().contains("version_pinned"));
+        assert!(plugins::find("anti-ransomware-vault").unwrap().ready_scope.unwrap()
+            .contains("object_lock_compliance"));
     }
 }
