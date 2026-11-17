@@ -169,7 +169,7 @@ def main():
                 "PBS image bytes changed during age recovery")
         rows=list((base/"pbs-recovered").rglob("*.img.fidx"))
         require(len(rows)==1,"PBS recovered exactly one raw VM image archive")
-        expected=json.loads(Path(pbs).read_text())["sha256"]
+        expected=json.loads(run(["cat",pbs],root=True))["sha256"]
         with rows[0].open("rb") as stream:
             h=hashlib.file_digest(stream,"sha256").hexdigest()
         require(h==expected,"PBS encrypted VM disk SHA256 changed")
