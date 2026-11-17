@@ -520,10 +520,9 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if matches!(entry.id,"s3"|"ssh") {
-                // Native pinned-object backup source does NOT confer a
-                // generic restore-to-S3 capability; keep this direction
-                // planned until a write adapter is qualified.
+            if matches!(entry.id,"s3"|"ssh"|"oracle") {
+                // A dedicated native source/media adapter does not grant a
+                // database/cloud restore target; those roles remain planned.
                 assert_eq!(entry.backup_input,Stage::Preview);
                 assert_eq!(entry.restore_output,Stage::Planned);
             } else {
