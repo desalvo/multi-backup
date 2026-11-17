@@ -46,7 +46,16 @@ root,out=map(pathlib.Path,sys.argv[1:])
 for role in ("writer","recovery"):
     text=(root/"docs"/"policies"/f"worm-{role}-iam.example.json").read_text()
     text=text.replace("__BUCKET__","worm-r211-iam").replace("__PREFIX__","ci/r211")
-    (out/f"{role}.json").write_text(json.dumps(json.loads(text)))
+    policy=json.loads(text)
+    # MinIO 2025 does not implement AWS IAM s3:PutObjectAcl. Keep the
+    # production template strict, but remove only this unsupported DENY
+    # action from the disposable MinIO fixture. Actual DELETE, PUT,
+    # bucket-admin and versioned GET denials are tested against the server.
+    for rule in policy["Statement"]:
+        if rule["Effect"]=="Deny":
+            rule["Action"]=[name for name in rule["Action"] if name!="s3:PutObjectAcl"]
+            assert rule["Action"]
+    (out/f"{role}.json").write_text(json.dumps(policy))
 PY
 WRITER="ciwriter$(openssl rand -hex 5)"
 RECOVERY="cirecovery$(openssl rand -hex 5)"
