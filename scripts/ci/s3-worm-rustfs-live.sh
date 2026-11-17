@@ -150,9 +150,24 @@ fi
 "$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
   --manifest-version "$MANIFEST_VER" --identity "$TMP/key.age" --destination "$TMP/pinned-restore"
 cmp "$TMP/source/binary.bin" "$TMP/pinned-restore/multi-backup/s3-vault/$ID/binary.bin"
+# Separate process environments: the unattended writer never receives
+# the age private key nor the recovery principal. Ordinary AWS credentials
+# are removed from the native WORM subprocess (admin AWS CLI is lab-only).
+worm_writer(){
+  env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    MB_WORM_WRITER_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+    MB_WORM_WRITER_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    "$NATIVE" vault-worm "$@"
+}
+worm_recovery(){
+  env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    MB_WORM_RECOVERY_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+    MB_WORM_RECOVERY_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+    "$NATIVE" vault-worm "$@"
+}
 # r209: anti-ransomware vault MUST use a genuinely external COMPLIANCE
 # authority, never the application's local append-only filesystem policy.
-"$NATIVE" vault-worm preflight --config "$TMP/rustfs.json" >"$TMP/worm-preflight.json"
+worm_writer preflight --config "$TMP/rustfs.json" >"$TMP/worm-preflight.json"
 python3 - "$TMP/worm-preflight.json" <<'PY'
 import json,sys
 p=json.load(open(sys.argv[1]))
@@ -160,21 +175,33 @@ assert p["externally_enforced_object_lock"] is True
 assert p["same_host_root_compromise_certified"] is False
 assert p["protected_manifest_version_required"] is True
 PY
-if "$NATIVE" vault-worm preflight --config "$TMP/not-worm.json" >/dev/null 2>&1;then
+if worm_writer preflight --config "$TMP/not-worm.json" >/dev/null 2>&1;then
  echo 'FAIL: locked vault accepted an actual unprotected S3 bucket' >&2;exit 1
 fi
-"$NATIVE" vault-worm backup --config "$TMP/rustfs.json" \
- --source "$TMP/source" --identity "$TMP/key.age" >"$TMP/worm-receipt.json"
+worm_writer backup --config "$TMP/rustfs.json" \
+ --source "$TMP/source" >"$TMP/worm-receipt.json"
 read -r WORM_ID WORM_VER < <(python3 - "$TMP/worm-receipt.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
 assert r["attestation"]["externally_enforced_object_lock"]
 assert not r["attestation"]["same_host_root_compromise_certified"]
+assert r["attestation"]["independent_recovery_principal_required"]
+assert r["attestation"]["recovery_verified"] is False
 m=r["record"]["manifest_version"]
 assert m and r["record"]["archive_version"] and r["record"]["files"]>0
 print(r["record"]["id"],m)
 PY
 )
+# Writer-to-recovery API crossing must fail, even with the same temporary
+# RustFS admin IAM token used for CI. This only verifies application
+# capabilities; an actual separate-principal IAM deny gate remains required.
+if worm_writer verify --config "$TMP/rustfs.json" --id "$WORM_ID" \
+  --manifest-version "$WORM_VER" --identity "$TMP/key.age" >/dev/null 2>&1;then
+ echo 'FAIL writer was able to invoke WORM recovery' >&2; exit 1
+fi
+if worm_recovery backup --config "$TMP/rustfs.json" --source "$TMP/source" >/dev/null 2>&1;then
+ echo 'FAIL recovery principal was able to invoke WORM backup' >&2; exit 1
+fi
 WORM_OBJECT="ci/rustfs/r050/snapshots/$WORM_ID.tar.gz.age"
 WORM_MANIFEST="ci/rustfs/r050/manifests/$WORM_ID.json"
 if s3 delete-object --bucket "$BUCKET" --key "$WORM_OBJECT" \
@@ -182,14 +209,14 @@ if s3 delete-object --bucket "$BUCKET" --key "$WORM_OBJECT" \
  echo 'FAIL: externally locked backup version deleted under credentials' >&2;exit 1
 fi
 s3 delete-object --bucket "$BUCKET" --key "$WORM_MANIFEST" >/dev/null
-if "$NATIVE" vault-worm verify --config "$TMP/rustfs.json" --id "$WORM_ID" \
+if worm_recovery verify --config "$TMP/rustfs.json" --id "$WORM_ID" \
  --identity "$TMP/key.age" >/dev/null 2>&1;then
  echo 'FAIL: a protected WORM vault accepted an unpinned manifest' >&2;exit 1
 fi
-"$NATIVE" vault-worm verify --config "$TMP/rustfs.json" \
+worm_recovery verify --config "$TMP/rustfs.json" \
  --id "$WORM_ID" --manifest-version "$WORM_VER" \
  --identity "$TMP/key.age" >"$TMP/worm-verified.json"
-"$NATIVE" vault-worm restore --config "$TMP/rustfs.json" \
+worm_recovery restore --config "$TMP/rustfs.json" \
  --id "$WORM_ID" --manifest-version "$WORM_VER" \
  --identity "$TMP/key.age" --destination "$TMP/worm-new-restored" \
  >"$TMP/worm-restored.json"
@@ -197,12 +224,12 @@ cmp "$TMP/source/nested/hello.txt" \
  "$TMP/worm-new-restored/multi-backup/s3-vault/$WORM_ID/nested/hello.txt"
 cmp "$TMP/source/binary.bin" \
  "$TMP/worm-new-restored/multi-backup/s3-vault/$WORM_ID/binary.bin"
-if "$NATIVE" vault-worm restore --config "$TMP/rustfs.json" \
+if worm_recovery restore --config "$TMP/rustfs.json" \
  --id "$WORM_ID" --manifest-version "$WORM_VER" \
  --identity "$TMP/wrong.age" --destination "$TMP/unauthorized-worm" >/dev/null 2>&1;then
  echo 'FAIL: protected vault accepted an unrelated age key' >&2;exit 1
 fi
-if "$NATIVE" vault-worm restore --config "$TMP/rustfs.json" \
+if worm_recovery restore --config "$TMP/rustfs.json" \
  --id "$WORM_ID" --manifest-version "$WORM_VER" \
  --identity "$TMP/key.age" --destination "$TMP/worm-new-restored" >/dev/null 2>&1;then
  echo 'FAIL: protected vault overwrote a prior recovered directory' >&2;exit 1
