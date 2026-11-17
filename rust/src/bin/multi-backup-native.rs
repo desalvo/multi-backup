@@ -14,6 +14,8 @@ fn usage() -> &'static str {
        multi-backup-native updates activate-portable --active DIR --candidate DIR --rollback NEW_DIR --binary REL --expected-sha256 SHA (APP STOPPED; portable only)\n\
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins github-repository-backup --repository OWNER/REPO --output-dir PRIVATE_DIR --recipient AGE_PUBLIC --identity AGE_KEY [--json] (read-only GitHub mirror/LFS+metadata into age)\n\
+       multi-backup-native plugins github-repository-restore-offline --repository OWNER/REPO --archive VERIFIED.tar.gz.age --identity AGE_KEY --destination NEW_DIR [--json] (offline git fsck; never touches remote GitHub)\n\
        multi-backup-native plugins ssh-backup --config OWNER_ONLY_SSH.json --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label LABEL [--top-namespace NS] [--json] (pinned host key, single version-attested remote file into age chunks)\n\
        multi-backup-native plugins webdav-http-backup --config OWNER_ONLY_WEBDAV.json --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--json] (native trusted HTTPS conditional create-only PUT and independent GET; env MULTI_BACKUP_WEBDAV_PASSWORD)\n\
        multi-backup-native plugins webdav-http-restore --config OWNER_ONLY_WEBDAV.json --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_LOCAL_DIR [--json]\n\
@@ -233,6 +235,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--destination")?))?;
         if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
         else {println!("Restored {} verified Oracle RMAN media pieces to NEW path",receipt.pieces);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="github-repository-backup" {
+        if password_stdin{return Err("GitHub backup requires explicit age key and gh account".into());}
+        accepted(&flags,&["--repository","--output-dir","--recipient","--identity"])?;
+        let r=github_client::backup_single_repository(
+            Path::new(required(&flags,"--output-dir")?),
+            required(&flags,"--recipient")?,
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--repository")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("GitHub scoped mirror and metadata encrypted: {}",r["repository"]);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="github-repository-restore-offline" {
+        if password_stdin{return Err("GitHub offline recovery requires age key file".into());}
+        accepted(&flags,&["--repository","--archive","--identity","--destination"])?;
+        let r=github_client::restore_single_offline(
+            Path::new(required(&flags,"--archive")?),
+            Path::new(required(&flags,"--identity")?),
+            Path::new(required(&flags,"--destination")?),
+            required(&flags,"--repository")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("GitHub git mirror restored with git fsck to NEW local path");}
         return Ok(());
     }
     if family=="plugins" && command=="ssh-backup" {
