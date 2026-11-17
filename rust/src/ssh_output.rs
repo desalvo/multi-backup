@@ -185,7 +185,7 @@ pub fn backup(c:&Config,source:&Path,name:&str,recipient:&str,identity:&Path)->R
     // Atomically reserve ONE NEW remote directory. No --force, no rm.
     // This fails if another backup already owns the basename.
     let (remote_size,remote_sha)=if c.is_sftp(){
-        c.sftp(&format!("mkdir {folder}\nput {} {ciphertext}\n",local.display()))?;
+        c.sftp(&format!("mkdir {folder}\nchmod 0700 {folder}\nput {} {ciphertext}\n",local.display()))?;
         let remote_copy=temp.path().join("downloaded.tar.gz.age");
         c.sftp(&format!("get {ciphertext} {}\n",remote_copy.display()))?;
         hash_file(&remote_copy)?
@@ -230,7 +230,7 @@ pub fn restore(c:&Config,name:&str,identity:&Path,destination:&Path)->Result<usi
     let temp=TempDir::new()?;let local=temp.path().join(name);
     let bytes_from_marker=if c.is_sftp(){
         let local_marker=temp.path().join("remote.sha256");
-        c.sftp(&format!("get {marker} {}\\n",local_marker.display()).replace("\\n","\n"))?;
+        c.sftp(&format!("get {marker} {}\n",local_marker.display()))?;
         let b=fs::read(local_marker)?;
         if b.len()>4096{return Err("SFTP checksum marker too large".into());}
         b
