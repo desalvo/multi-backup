@@ -119,7 +119,7 @@ pub fn backup(s:&Snapshot,root:&Path,key:&Path,label:&str)->Result<Receipt>{
     let finish=Rc::clone(&state);
     let mut checked=Checked{reader,proof:state,limit:s.bytes};
     let expected=s.sha256.clone();let limit=s.bytes;
-    let name=format!("iscsi/{}/lun_{}.raw",s.target_iqn,s.lun);
+    let name=format!("iscsi/{}/lun_{}.raw",hex::encode(s.target_iqn.as_bytes()),s.lun);
     let result=store.backup_stream(key,label,"",&name,&mut checked,
         BackupKind::Full,None,||{
             let state=finish.borrow();
@@ -147,14 +147,14 @@ pub fn restore_new_local(root:&Path,key:&Path,id:&str,dest:&Path)->Result<Receip
     let entry=&snap.entries[0];
     let parts:Vec<_>=entry.path.split('/').collect();
     if parts.len()!=3||parts[0]!="iscsi"||
-       !parts[1].starts_with("iqn.")||
+       parts[1].len()>512||!parts[1].bytes().all(|b|b.is_ascii_hexdigit())||
        !parts[2].starts_with("lun_")||!parts[2].ends_with(".raw"){
         return Err("Encrypted backup is not an attested iSCSI LUN image".into());
     }
     let count=store.restore(key,id,None,dest)?;
     if count!=1{return Err("iSCSI offline restore missing raw member".into());}
     Ok(Receipt{provider:"iscsi",backup_id:id.to_owned(),
-        target_iqn:parts[1].into(),lun:parts[2][4..parts[2].len()-4].parse()?,
+        target_iqn:String::from_utf8(hex::decode(parts[1])?)?,lun:parts[2][4..parts[2].len()-4].parse()?,
         bytes:entry.bytes,encrypted:true,verified:true,
         create_only_local_image:true,iscsi_lun_restore_certified:false})
 }
