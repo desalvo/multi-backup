@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 concurrency:
   group: mb-r214-rc-source-${{ github.ref }}
   cancel-in-progress: true
