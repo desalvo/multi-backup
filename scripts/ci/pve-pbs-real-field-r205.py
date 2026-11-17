@@ -121,8 +121,9 @@ def main():
             "Refusing unapproved field run even before fixture loading")
     c=cfg()
     node=preflight(c)
-    with tempfile.TemporaryDirectory(prefix="mb-pve-pbs-field-") as scratch:
-        base=Path(scratch)
+    scratch=tempfile.mkdtemp(prefix="mb-pve-pbs-field-")
+    base=Path(scratch)
+    try:
         run(["age-keygen","-o",base/"identity"])
         pub=run(["age-keygen","-y",base/"identity"])
         # Store and temp area are local ephemeral and only used by THIS fixture.
@@ -197,6 +198,14 @@ def main():
                           "requires_manual_guest_boot_and_data_verification":True,
                           "new_guests_left_stopped_for_operator_inspection":True},
                          indent=2))
+    finally:
+        # sudo-run native Rust programs can create root-owned files under our
+        # private tempdir; remove ONLY the cryptographically random temporary
+        # lab workspace, never any protected source or restored guest volume.
+        if (base.parent.resolve()==Path(tempfile.gettempdir()).resolve()
+            and base.name.startswith("mb-pve-pbs-field-")
+            and base.is_dir() and not base.is_symlink()):
+            run(["rm","-rf","--",base],root=True)
 if __name__=="__main__":
     try:main()
     except Exception as e:
