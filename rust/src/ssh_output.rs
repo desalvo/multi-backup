@@ -160,9 +160,12 @@ pub fn backup(c:&Config,source:&Path,name:&str,recipient:&str,identity:&Path)->R
         return Err("Remote SSH independently downloaded ciphertext differs".into());
     }
     let side=PathBuf::from(format!("{}.sha256",local.display()));
-    let mut file=OpenOptions::new().write(true).create_new(true).open(&side)?;
-    write!(file,"{sha}  {name}\n")?;
-    file.sync_all()?;
+    // archive::create already produces the authoritative SHA sidecar.
+    // Never truncate or recreate it after local ciphertext verification.
+    let side_text=fs::read_to_string(&side)?;
+    if side_text.split_whitespace().next()!=Some(&sha){
+        return Err("SSH upload sidecar did not match independently hashed ciphertext".into());
+    }
     upload(c,&marker,&side)?;
     let (m_size,m_sha)=hash_file(&side)?;
     if readback(c,&marker,m_size)?!=(m_size,m_sha){
@@ -203,6 +206,11 @@ pub fn restore(c:&Config,name:&str,identity:&Path,destination:&Path)->Result<usi
     }
     let (_,sha)=hash_file(&local)?;
     if sha!=expected{return Err("SSH remote marker failed SHA256 integrity".into());}
+    let side=PathBuf::from(format!("{}.sha256",local.display()));
+    let mut local_side=OpenOptions::new().write(true).create_new(true).open(&side)?;
+    local_side.write_all(str_marker.as_bytes())?;
+    local_side.sync_all()?;
+    drop(local_side);
     let members=archive::verify(&local,identity)?;
     let entries=archive::extract(&local,identity,destination)?;
     if members!=entries.len(){return Err("SSH restore verified member count mismatch".into());}
