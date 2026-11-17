@@ -1130,3 +1130,9 @@ One-line English commit summary: Add guarded create-only Proxmox native qmrestor
 
 ## r203.2 — native PBS-backed restore directly into a new PVE VM/CT
 A separate Rust provider accepts a pinned real PBS snapshot ID from PVE's configured PBS storage, confirms it exists exactly once in pvesm's authenticated backup inventory, checks the requested new VMID is unused, and invokes native qmrestore/pct restore without --force, without live start, and with a unique network identity. This path **does not read age chunks**: it restores an existing PBS-native snapshot through the Proxmox integration, distinct from the encrypted PBS VM-disk B-In. Real PBS/PVE field guest boot and data verification remain OPEN. One-line English commit summary: Add strict native PBS-to-PVE new-guest VM/CT restoration with unique PBS snapshot evidence and collision refusal.
+
+
+## r205 — real PVE/PBS field acceptance and safety gate
+Added a dedicated and manually protected real PVE/PBS field workflow and Python acceptance. It requires an exact PVE node, tagged disposable QEMU/LXC source guests, new unused guest IDs and a genuine PBS server/storage. Checks real snapshot-mode vzdump with successful UPIDs, independent media length/SHA, native age encrypted PVE B-In, create-only qmrestore/pct restoration, real official PBS VM image import and age recovery, and native PBS-backed PVE VM/CT restoration. Leaves recovered guests STOPPED for manual boot and guest-content validation. Hosted CI #44041224020 PASS is only safety/syntax; real host job is skipped until dedicated lab access. Code still Preview, not complete provider certification. Docs in PVE_PBS_REAL_FIELD_R205_IT.md.
+
+One-line English commit summary: Add protected genuine Proxmox and PBS provider field acceptance for online media transfer and create-only VM/CT restores.
