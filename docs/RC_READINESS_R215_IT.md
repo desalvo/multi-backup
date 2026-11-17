@@ -25,8 +25,8 @@ READY non dichiara pronto un intero prodotto/protocollo. Si riferisce SOLO a una
 - Full software-readiness-r168.yml: Rust core/server/GUI, PostgreSQL/agent/HA, 3 nodi Kubernetes kind e OCI.
 - Real database-live-integration.yml: PostgreSQL16 e MariaDB11.4 age encrypted backup/restore.
 - Native scoped-ready-r215.yml: cargo test plugin contract, vero POSIX encrypted restore e prova negativa del planner.
-- Cinque LAB obbligatori e riusati, non simulati: mysql84-real-r209.yml; cephfs-kind-real-r182.yml (RBD+CephFS 3 OSD); iscsi-live-r198.yml (kernel/TGT); oracle-free-live.yml (RMAN/PDB/CDB/PITR); s3-worm-iam-real-r211.yml (due credenziali MinIO COMPLIANCE).
-- Python tests r215, sicurezza Ruff/Bandit/pip-audit; non ammettere alcuna suite skipped/cancelled/failure. Il manifest finale include source SHA, run GitHub e esiti dei cinque LAB e verifica i 9 READY con scripts/ci/rc-preflight-r215.py.
+- Sei LAB obbligatori e riusati, non simulati: mysql84-real-r209.yml; cephfs-kind-real-r182.yml (RBD+CephFS 3 OSD); iscsi-live-r198.yml (kernel/TGT); oracle-free-live.yml (RMAN/PDB/CDB/PITR); s3-worm-iam-real-r211.yml (due credenziali MinIO COMPLIANCE); s3-minio-live-r048.yml (oggetto MinIO versione-pinned con digest indipendente, backup age e restore).
+- Python tests r215, sicurezza Ruff/Bandit/pip-audit; non ammettere alcuna suite skipped/cancelled/failure. Il manifest finale include source SHA, run GitHub e esiti dei sei LAB e verifica i 9 READY con scripts/ci/rc-preflight-r215.py.
 - Solo quando tutti i job sono SUCCESS si compila Linux CLI e agent da SHA esatto, con SHA256SUMS e artefatto CI pre-RC. Non si pubblica release, tag o stable.
 
 ## Blocchi aperti
