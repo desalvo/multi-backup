@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y age jq openssl
+          sudo apt-get install -y age jq openssl qemu-utils
           bash -n scripts/ci/vmware-govc-vcsim-r212.sh
       - name: Test and compile native Rust VMware provider
         run: |
