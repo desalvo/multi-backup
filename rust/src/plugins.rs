@@ -213,18 +213,22 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Quiesced source tree; file-content-only, no metadata/ACL/xattr/symlink fidelity",
         "READY ONLY for a quiesced local tree of ordinary readable files, including nested files, age ciphertext, parity repair and new-directory content restore. Deliberately refuses symlink/special source files; empty directories, file modes, timestamps, ownership, ACLs, xattrs, hardlink identities and live application consistency are NOT captured. Not a general-purpose complete POSIX filesystem backup")
         .with_ready_scope("content_only_quiesced_regular_files; no ACL/xattr/owner/mode/timestamps/hardlinks/symlinks/empty dirs"),
-    PluginDescriptor::new("s3", "S3 WORM / MinIO / Ceph RGW / RustFS", DataKind::ObjectStore, PREVIEW, PREVIEW,
-        "Version-pinned S3 GetObject with independently supplied SHA-256 and server length; source snapshot pinned, WORM output only when explicitly configured",
-        "Dedicated Rust B-In streams a version-pinned S3/Ceph RGW/RustFS object to age-encrypted chunks with pre-commit digest; WORM B-Out/restore-from-vault remain separate. Batch ListObjects, ACL fidelity, vendor RGW field evidence and generic restore-to-S3 are unqualified")
-        .with_restore_output_stage(PLAN),
+    PluginDescriptor::new("s3", "S3 single-object import (MinIO-verified)", DataKind::ObjectStore, READY, PREVIEW,
+        "Single existing version-pinned object + independently attested byte length/SHA256, encrypted immutable import",
+        "READY only for ONE MinIO-tested immutable version-pinned S3 object read into age chunk store, digest+size verified before commit. B-Out remains Preview; no generic restore-to-S3, bulk object listing, object ACL/metadata, multi-version backups or claims for untested S3 vendors")
+        .with_restore_output_stage(PLAN)
+        .with_ready_scope("minio_version_pinned_single_object_sha256_age_import; no batch/ACL/metadata/restore-to-s3"),
     PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PREVIEW, PREVIEW,
         "Exact read-only authenticated davfs2 mount, with independently attested quiescent collection", "Experimental mounted WebDAV input to encrypted POSIX chunks; mounted create-only age archive B-Out and ciphertext readback Preview; native DAV ETag/ACL and remote auth field qualification pending"),
     PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PREVIEW,
         "Mounted filesystem plus server snapshot if available", "Read-only source and exact RW NFS mount B-Out encrypted create-only archive, checked via age readback; do not assume root or atomic snapshots"),
     PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, PREVIEW,
         "SMB durable handles or snapshots if available", "Authenticated SMB3 RO source, exact RW SMB3 mount encrypted B-Out and create-only recovery preview; ACL/ADS/Windows path semantics pending"),
-    PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PREVIEW, PREVIEW,
-        "CephFS snapshots or quiesced mount", "Exact mounted CephFS RW encrypted create-only B-Out preview; no cross-filesystem atomicity claim; separate CephFS and RBD"),
+    PluginDescriptor::new("cephfs", "CephFS regular-file content (genuine Rook client)", DataKind::Files, READY, PREVIEW,
+        "Attested read-only CephFS snapshot/mount, only ordinary file content to age chunks and create-only directory recovery",
+        "READY limited to bytes of regular files on an exact verified CephFS mount with independent frozen snapshot attestation; encrypted restore into a NEW directory. Mount-based encrypted B-Out remains Preview. No automatic MDS snapshot barrier, ACL/xattr/uid/gid/mode/empty directory fidelity through generic executor, physical fault/fencing or coordinated multi-FS consistency")
+        .with_restore_output_stage(READY)
+        .with_ready_scope("cephfs_snapshot_attested_mounted_regular_file_content_create_only; no atomic-multi-fs/metadata/physical-fault"),
     PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PREVIEW, PREVIEW,
         "Mounted Gluster volume inventory with consistency epoch and preserved GFID/ACL/xattr metadata",
         "Exact RW GlusterFS mount encrypted create-only B-Out preview; no direct brick writes, topology/ACL and replica health field validation still pending"),
@@ -250,12 +254,16 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("nextcloud", "Nextcloud", DataKind::Files, PLAN, PLAN,
         "Nextcloud WebDAV/OCS file ID, ETag, sharing, versions and chunked upload",
         "External WebDAV/OCS protocol integration; validate server version and atomic verified commits; never overwrite"),
-    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PREVIEW, PREVIEW,
-        "RBD image snapshots+diff export",
-        "Dedicated native RBD immutable snapshot B-In accepts exact numeric snapshot ID, length and independent SHA256. Restore creates a NEW RBD image, verifies complete remote export. Snapshot quiesce, VM/CT consistency, diff chains, namespaces and production fencing remain OPEN"),
-    PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PREVIEW, PLAN,
-        "Initiator/target IQN and LUN WWID with storage snapshot",
-        "Native read-only block-device iSCSI B-In validates exact kernel IQN/LUN udev ID_SERIAL/WWID, read-only bit, size and independent SHA256 before publishing age chunks. Restore is offline to NEW local image; direct NEW LUN B-Out still requires target-side allocation attestation, fencing and lab certification").with_san_lvm().with_restore_output_stage(PLAN),
+    PluginDescriptor::new("rbd", "Ceph RBD pinned full snapshot (genuine 3 OSD)", DataKind::BlockDevice, READY, NONE,
+        "Exact numeric RBD snapshot ID + independent size/SHA256, encrypted full export and NEW RBD image readback",
+        "READY for one complete immutable RBD snapshot export using actual rbd, authenticated age store and CREATE-ONLY different RBD image verified by independent block readback. Backup into RBD is unsupported; no online VM/CT quiesce, CBT/diff, incremental chains, mirroring, namespaces or production fencing")
+        .with_restore_output_stage(READY)
+        .with_ready_scope("ceph_rbd_pinned_snapshot_full_image_new_image_readback; no guest-consistency/diff/fencing"),
+    PluginDescriptor::new("iscsi", "iSCSI LUN (loopback TGT isolated)", DataKind::BlockTransport, READY, PLAN,
+        "Pinned read-only kernel IQN/LUN serial and SHA256 -> age archive -> NEW isolated local TGT LUN",
+        "READY only on dedicated Linux lab TGT + initiator: pinned source RO LUN, kernel IQN/LUN WWID/bytes/SHA256, age backup, create-new isolated local TGT target+LUN with byte-for-byte independent readback. Backup direct to remote LUN remains Planned. No arbitrary SAN B-Out, CHAP/multipath, virtual machine quiesce, distributed LVM or physical fencing")
+        .with_san_lvm().with_restore_output_stage(READY)
+        .with_ready_scope("linux_tgt_loopback_readonly_pinned_snapshot_new_lun_readback; no remote-san/multipath/fencing"),
     PluginDescriptor::new("fc", "Fibre Channel LUN", DataKind::BlockTransport, PLAN, PLAN,
         "FC WWPN, SCSI WWID, multipath and snapshot epoch",
         "Respect multipath aliases, WWID and ownership; raw FC LUN or LVM local/clustered/shared, with fencing/locking and snapshot consistency").with_san_lvm(),
@@ -277,16 +285,19 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Compiled VMware OVF offline B-In requires powered-off exact MoRef and owner-only export principal; separate import principal creates a NEW powered-off VM on named datastore, with TLS verified, no guest autostart and strict no-overwrite. Real vCenter/ESXi field lab, guest boot/data verification, online backup VADP/CBT, hot snapshot and production certification NOT DONE; CT disabled; NO guest-agent/container-runtime CT fallback.").with_restore_output_stage(PREVIEW),
     PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PREVIEW, NONE,
         "VM-only Engine API READY backup and versioned imageio disk download", "Native read-only IMAGEIO VM disk B-In needs independently preissued READY Engine backup and matching transfer URL, VM/disk UUIDs, SHA256+byte count and trusted HTTPS; records one QCOW2 disk in age store, with offline create-only recovery. NO native VM restore, no multi-disk/OVF completeness, no VM create/start, CT disabled (oVirt has no native supported CT). NO guest-agent/container-runtime CT fallback"),
-    PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
-        "Rust MariaDB InnoDB transactional FULL logical dump and create-only restore",
-        "Real MariaDB 11.4, 3-node Galera and Oracle MySQL 8.4 encrypted full dump/create-only restore are qualified in isolated CI; dedicated MariaDB ROW-binlog PITR CI also passes. Oracle MySQL GTID/binlog PITR, concurrent DDL snapshot and server/agent distributed policy remain unqualified"),
+    PluginDescriptor::new("mysql", "MariaDB 11.4 / MySQL 8.4 single-DB FULL logical", DataKind::Database, READY, NONE,
+        "One InnoDB database FULL single-transaction dump streamed into age store and restored into NEW target",
+        "READY for MariaDB 11.4 or Oracle MySQL 8.4 single-database transactional logical FULL dump/create-only new database recovery with binary+row verification and wrong credentials/overwrite denial. No MySQL GTID/binlog PITR, global users/grants, coordinated cluster Galera restore, concurrent DDL consistency or cross-version portability")
+        .with_ready_scope("mariadb11_mysql84_single_database_full_innodb_create_only; no GTID/PITR/globals/online-DDL"),
     PluginDescriptor::new("postgresql", "PostgreSQL 16 (single DB FULL logical Ready scope)", DataKind::Database, READY, NONE,
         "One PostgreSQL 16 database FULL pg_dump custom format and create-only pg_restore; never all-cluster readiness",
         "READY ONLY for an isolated PostgreSQL 16 single-database, logical FULL dump and encrypted age roundtrip to a NEW database, with nonzero exit/credentials/overwrite denied. No --owner/--acl; no cluster roles, globals, tablespaces permissions, PITR under Patroni, online DDL, all-cluster recovery, cross-version portability, or three-host physical HA. Separate PostgreSQL WAL/PITR integration is not certified by this scoped Ready status")
         .with_ready_scope("postgresql16_single_database_full_logical_create_only; no roles/owners/ACLs/globals/cluster-PITR/online-DDL"),
-    PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PREVIEW, NONE,
-        "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
-        "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries").with_restore_output_stage(PLAN),
+    PluginDescriptor::new("oracle", "Oracle Free RMAN media preservation (not live DB restore)", DataKind::Database, READY, NONE,
+        "Pre-generated nonempty RMAN .bkp piece files -> age-encrypted archive -> new local RMAN piece directory",
+        "READY only for complete, validated, ordinary .bkp media piece files: age encrypt, verify and create-new local media restore with exact file bytes. Real Oracle Free RMAN RESTORE VALIDATE and separate PDB/CDB/SCN-PITR lab exercised, but native provider does NOT orchestrate Oracle DB restore/recovery. No RAC, ASM, TDE, online DB PITR orchestration, proprietary binaries or production claim")
+        .with_restore_output_stage(READY)
+        .with_ready_scope("oracle_rman_media_pieces_new_directory_age_verified; not database-restore/RAC/ASM/TDE"),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PLAN,
         "Pinned SSH host key, exact remote-file digest and length, no shell escape",
         "Native authenticated SSH B-In streams one digest-and-length-pinned file into age-encrypted chunks; SCP/SFTP directory operations and B-Out remain planned")
@@ -294,10 +305,11 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PREVIEW,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",
         "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport; existing exact RW SSHFS mount may receive encrypted create-only archive B-Out"),
-    PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware append-only vault PREVIEW",
-        DataKind::ProtectedVault, NONE, PREVIEW,
-        "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
-        "Local immutable_vault remains ONLY app-level append-only and is NOT root-resistant. Dedicated vault-worm requires genuine external S3 Object Lock COMPLIANCE, versioned immutable manifest+objects, pinned receipt version and verified age restore. External root/host and credentials remain separate attack surfaces; physical independence not certified"),
+    PluginDescriptor::new("anti-ransomware-vault", "S3 WORM vault (MinIO Object Lock scope)",
+        DataKind::ProtectedVault, NONE, READY,
+        "Independent provider-enforced S3 COMPLIANCE retention, immutable version IDs, writer/recovery credentials, age restore",
+        "READY ONLY for genuine MinIO versioned COMPLIANCE Object Lock ciphertext ingest and protected manifest, pinned version+age recovery with two separate nonadmin IAM principals in real lab. Local append-only vault is NOT equivalent to WORM; root/host compromise, provider operator, retention policy bypass, physical/geo independence and other S3 vendors are NOT certified. Never claim ransomware immunity")
+        .with_ready_scope("minio_s3_object_lock_compliance_ciphertext_versioned_recovery; no root-immune/physical-DR"),
 ];
 
 pub fn find(id: &str) -> Option<&'static PluginDescriptor> {
@@ -518,7 +530,9 @@ mod tests {
                 .iter().any(|s|*s==Stage::Ready);
             assert_eq!(any_ready,plugin.ready_scope.is_some(),
                 "READY must have an explicit narrow scope: {}",plugin.id);
-            if any_ready {assert!(matches!(plugin.id,"posix"|"postgresql"));}
+            if any_ready {assert!(matches!(plugin.id,
+                "posix"|"s3"|"cephfs"|"rbd"|"iscsi"|"mysql"|
+                "postgresql"|"oracle"|"anti-ransomware-vault"));}
         }
         let p=plan(Mode::Backup,"posix","posix").unwrap();
         assert_eq!(p.source_stage,Stage::Ready);
@@ -542,7 +556,45 @@ mod tests {
     }
 
     #[test]
-    fn all_32_requested_input_plugins_and_26_outputs_are_listed() {
+    fn r215_scoped_ready_role_matrix_excludes_unsupported_vendor_write_operations(){
+        let roles=[
+            ("posix", [Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
+            ("s3", [Stage::Ready,Stage::Preview,Stage::Preview,Stage::Planned]),
+            ("cephfs", [Stage::Ready,Stage::Preview,Stage::Preview,Stage::Ready]),
+            ("rbd", [Stage::Ready,Stage::Unsupported,Stage::Unsupported,Stage::Ready]),
+            ("iscsi", [Stage::Ready,Stage::Planned,Stage::Planned,Stage::Ready]),
+            ("mysql", [Stage::Ready,Stage::Unsupported,Stage::Unsupported,Stage::Ready]),
+            ("postgresql", [Stage::Ready,Stage::Unsupported,Stage::Unsupported,Stage::Ready]),
+            ("oracle", [Stage::Ready,Stage::Unsupported,Stage::Unsupported,Stage::Ready]),
+            ("anti-ransomware-vault", [Stage::Unsupported,Stage::Ready,Stage::Ready,Stage::Unsupported]),
+        ];
+        let mut actual=0;
+        for entry in CATALOG {
+            let observed=[entry.backup_input,entry.backup_output,entry.restore_input,entry.restore_output];
+            let should=roles.iter().find(|(id,_)|entry.id==*id);
+            if let Some((_,expect))=should {
+                actual+=1;
+                assert_eq!(observed,*expect,"Unexpected READY escalation for {}",entry.id);
+                assert!(entry.ready_scope.is_some());
+            }else{
+                assert!(entry.ready_scope.is_none(),"False READY for {}",entry.id);
+                assert!(!observed.contains(&Stage::Ready),"Unqualified READY for {}",entry.id);
+            }
+        }
+        assert_eq!(actual,roles.len());
+        for provider in ["mysql","oracle","iscsi","rbd","s3","cephfs","anti-ransomware-vault"] {
+            let p=find(provider).unwrap();
+            assert!(p.ready_scope.unwrap().contains(';'),"Scope needs exclusions: {provider}");
+            // Dedicated provider commands are never mistaken for POSIX dispatcher.
+            let supported=if p.backup_input.listed(){
+                plan(Mode::Backup,provider,"posix").ok()
+            }else{plan(Mode::Backup,"posix",provider).ok()};
+            assert!(supported.is_some(),"Missing capability plan for {provider}");
+            assert!(!supported.unwrap().executable,"No uncompiled generic adapter for {provider}");
+        }
+    }
+    #[test]
+    fn all_32_requested_input_plugins_and_25_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox", "pbs",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
@@ -552,9 +604,9 @@ mod tests {
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
-            "owncloud", "nextcloud", "sshfs", "smb", "rbd", "proxmox"];
+            "owncloud", "nextcloud", "sshfs", "smb", "proxmox"];
         assert_eq!(catalog_for(Mode::Backup, true).len(), 32);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 26);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 25);
         assert_eq!(CATALOG.len(), 33);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
@@ -563,13 +615,13 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 25);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if matches!(entry.id,"s3"|"ssh"|"oracle"|"iscsi"|"proxmox"|"pbs") {
-                // A dedicated native source/media adapter does not grant a
-                // database/cloud restore target; those roles remain planned.
-                assert_eq!(entry.backup_input,Stage::Preview);
+            if matches!(entry.id,"s3"|"ssh"|"proxmox"|"pbs") {
+                // No S3/SSH/PVE/PBS full native provider-side remote restore.
+                assert_eq!(entry.backup_input,
+                    if entry.id=="s3"{Stage::Ready}else{Stage::Preview});
                 assert_eq!(entry.restore_output,Stage::Planned);
             } else {
                 assert_eq!(entry.backup_input, entry.restore_output);
@@ -590,15 +642,17 @@ mod tests {
         }
     }
     #[test]
-    fn requested_proxmox_and_rbd_output_roles_are_only_declarative(){
-        for id in ["rbd","proxmox"]{
-            let p=plan(Mode::Backup,"posix",id).unwrap();
-            assert_eq!(p.destination_stage,if id=="rbd"{Stage::Preview}else{Stage::Planned});
-            assert!(!p.executable && !p.preview_executable);
-            assert!(p.confirmation_required_before_writes);
-            assert!(p.required_preflight.iter().any(|s|s.contains("create") ||
-                s.contains("NEW") || s.contains("new backup")));
-        }
+    fn rbd_create_only_restore_is_typed_not_a_generic_bout(){
+        assert_eq!(find("rbd").unwrap().backup_output,Stage::Unsupported);
+        assert_eq!(find("rbd").unwrap().restore_input,Stage::Unsupported);
+        assert_eq!(find("rbd").unwrap().restore_output,Stage::Ready);
+        assert!(plan(Mode::Backup,"posix","rbd").is_err());
+        let r=plan(Mode::Restore,"posix","rbd").unwrap();
+        assert_eq!(r.destination_stage,Stage::Ready);
+        assert!(!r.executable && !r.preview_executable);
+        let p=plan(Mode::Backup,"posix","proxmox").unwrap();
+        assert_eq!(p.destination_stage,Stage::Planned);
+        assert!(!p.executable && !p.preview_executable);
     }
     #[test]
     fn pve_and_pbs_have_distinct_non_executable_capabilities() {
@@ -675,8 +729,8 @@ mod tests {
         assert_eq!(find("postgresql").unwrap().kind, DataKind::Database);
         for database in ["postgresql","mysql"] {
             let d=find(database).unwrap();
-            assert_eq!(d.backup_input,if database=="postgresql"{Stage::Ready}else{Stage::Preview});
-            assert_eq!(d.restore_output,if database=="postgresql"{Stage::Ready}else{Stage::Preview});
+            assert_eq!(d.backup_input,Stage::Ready);
+            assert_eq!(d.restore_output,Stage::Ready);
             assert_eq!(d.restore_input,Stage::Unsupported);
             assert!(!plan(Mode::Backup,database,"posix").unwrap().preview_executable,
                 "Dedicated DB commands must not be misrepresented as generic executor");
@@ -689,10 +743,10 @@ mod tests {
             let descriptor=find(id).unwrap();
             assert_eq!(descriptor.kind, DataKind::BlockTransport);
             assert_eq!(descriptor.safety, SafetyProfile::SnapshotBlockDevice);
-            assert_eq!(descriptor.backup_input, if id=="iscsi" {Stage::Preview} else {Stage::Planned});
+            assert_eq!(descriptor.backup_input, if id=="iscsi" {Stage::Ready} else {Stage::Planned});
             assert_eq!(descriptor.backup_output, Stage::Planned);
             assert_eq!(descriptor.restore_input, Stage::Planned);
-            assert_eq!(descriptor.restore_output, Stage::Planned);
+            assert_eq!(descriptor.restore_output, if id=="iscsi"{Stage::Ready}else{Stage::Planned});
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
@@ -701,7 +755,7 @@ mod tests {
     #[test]
     fn native_s3_worm_vault_is_dedicated_preview_not_generic_backup_pipeline() {
         let s3=find("s3").expect("S3 vault registry is required");
-        assert_eq!(s3.backup_input,Stage::Preview,
+        assert_eq!(s3.backup_input,Stage::Ready,
             "S3 version-pinned object import has dedicated native Rust CLI");
         assert_eq!(s3.backup_output,Stage::Preview);
         assert_eq!(s3.restore_input,Stage::Preview);
@@ -716,7 +770,7 @@ mod tests {
     fn s3_input_and_dropbox_output_are_dedicated_but_not_general_executors(){
         let s3=find("s3").unwrap();
         let dropbox=find("dropbox").unwrap();
-        assert_eq!(s3.backup_input,Stage::Preview);
+        assert_eq!(s3.backup_input,Stage::Ready);
         assert_eq!(s3.restore_output,Stage::Planned);
         assert_eq!(dropbox.backup_output,Stage::Preview);
         assert_eq!(dropbox.restore_input,Stage::Preview);
@@ -730,8 +784,8 @@ mod tests {
         let vault=find("anti-ransomware-vault").unwrap();
         assert_eq!(vault.safety, SafetyProfile::ImmutableRecoveryVault);
         assert_eq!(vault.backup_input, Stage::Unsupported);
-        assert_eq!(vault.backup_output, Stage::Preview);
-        assert_eq!(vault.restore_input, Stage::Preview);
+        assert_eq!(vault.backup_output, Stage::Ready);
+        assert_eq!(vault.restore_input, Stage::Ready);
         assert_eq!(vault.restore_output, Stage::Unsupported);
         assert!(plan(Mode::Backup, "posix", vault.id).is_ok());
         assert!(plan(Mode::Restore, vault.id, "posix").is_ok());
