@@ -234,7 +234,7 @@ pub struct Receipt {
     pub provider:&'static str,pub id:String,pub source_vm_moref:String,
     pub ovf_file_count:usize,pub vmdk_count:usize,
     pub encrypted:bool,pub offline_only:bool,
-    pub imported_new_vm:bool,pub boot_verified:bool,pub guest_data_verified:bool,
+    pub source_provenance_attested:bool,pub imported_new_vm:bool,pub boot_verified:bool,pub guest_data_verified:bool,
     pub vadp_cbt_certified:bool,pub vcenter_field_certified:bool
 }
 pub fn backup(profile:&Profile,root:&Path,key:&Path,label:&str,stage_root:&Path)->Result<Receipt>{
@@ -285,10 +285,84 @@ pub fn backup(profile:&Profile,root:&Path,key:&Path,label:&str,stage_root:&Path)
     Ok(Receipt{provider:"vmware",id:snapshot.id,source_vm_moref:source.moref,
         ovf_file_count:files.len(),
         vmdk_count:files.iter().filter(|x|x.ends_with(".vmdk")).count(),
-        encrypted:true,offline_only:true,imported_new_vm:false,
+        encrypted:true,offline_only:true,source_provenance_attested:true,imported_new_vm:false,
         boot_verified:false,guest_data_verified:false,
         vadp_cbt_certified:false,vcenter_field_certified:false})
 }
+
+fn fingerprint(dir:&Path,files:&[String])->Result<String>{
+    // Independent fingerprint over sorted member names, u64-le lengths
+    // and raw SHA256 digests. Not a tar-header-dependent checksum.
+    let mut h=Sha256::new();
+    for name in files{
+        let file=dir.join(name);
+        let meta=fs::symlink_metadata(&file)?;
+        if !meta.file_type().is_file()||meta.file_type().is_symlink(){
+            return Err("VMware package member replaced or became nonregular".into())
+        }
+        h.update(name.as_bytes());h.update([0u8]);
+        h.update(meta.len().to_le_bytes());
+        h.update(hex::decode(digest(&file)?)?);
+    }
+    Ok(hex::encode(h.finalize()))
+}
+/// Import a previously exported, externally fingerprinted OVF/VMDK package,
+/// without a remote vCenter connection. This is an OFFLINE package B-In,
+/// NOT proof of its provenance from a genuine VMware VM.
+pub fn backup_package(
+    root:&Path,key:&Path,stage_root:&Path,source:&Path,
+    vm_moref:&str,expected_fingerprint:&str,label:&str
+)->Result<Receipt>{
+    if !moref(vm_moref)||expected_fingerprint.len()!=64||
+       !expected_fingerprint.bytes().all(|x|x.is_ascii_hexdigit()&&!x.is_ascii_uppercase())||
+       label.trim().is_empty()||label.len()>256{
+        return Err("VMware package import requires exact MoRef, fingerprint and label".into())
+    }
+    let stage=staging_root(stage_root,root,key)?;
+    if !source.is_absolute()||fs::symlink_metadata(source)?.file_type().is_symlink(){
+        return Err("VMware package must be an existing non-symlink absolute path".into())
+    }
+    let source=fs::canonicalize(source)?;
+    if !source.starts_with(&stage)||source==stage{
+        return Err("VMware package directory must be inside protected staging".into())
+    }
+    let files=checked_files(&source)?;
+    if fingerprint(&source,&files)?!=expected_fingerprint{
+        return Err("VMware OVF member fingerprint mismatch".into())
+    }
+    let store=Store::open(root,key)?;
+    let logical=format!("vmware/vm/{vm_moref}/ovf.tar");
+    let mut tar=Command::new("tar");
+    tar.arg("-cf").arg("-").arg("-C").arg(&source).arg("--")
+       .args(&files).stdin(Stdio::null()).stdout(Stdio::piped())
+       .stderr(Stdio::null());
+    let mut child=tar.spawn()?;
+    let mut reader=child.stdout.take().ok_or("VMware tar pipe unavailable")?;
+    let result=store.backup_stream(key,label,"",&logical,&mut reader,
+       BackupKind::Full,None,||{
+        if !child.wait().map_err(|_|"VMware package tar failed")?.success(){
+            return Err("VMware OVF tar exit unsuccessful".into())
+        }
+        if fingerprint(&source,&files).map_err(|_|"VMware OVF source changed")?
+            !=expected_fingerprint {
+            return Err("VMware OVF package changed while encrypting".into())
+        }
+        Ok(())
+    });
+    drop(reader);
+    if result.is_err(){let _=child.kill();let _=child.wait();}
+    let snapshot=result?;
+    if !store.verify(key,&snapshot.id)?.healthy{
+        return Err("VMware imported OVF encrypted verification failed".into())
+    }
+    Ok(Receipt{provider:"vmware",id:snapshot.id,
+       source_vm_moref:vm_moref.into(),ovf_file_count:files.len(),
+       vmdk_count:files.iter().filter(|x|x.ends_with(".vmdk")).count(),
+       encrypted:true,offline_only:true,source_provenance_attested:false,
+       imported_new_vm:false,boot_verified:false,guest_data_verified:false,
+       vadp_cbt_certified:false,vcenter_field_certified:false})
+}
+
 fn safe_extract(archive:&Path,dest:&Path)->Result<PathBuf>{
     let mut tar=tar::Archive::new(File::open(archive)?);
     let mut names=HashSet::new();let mut ovfs=Vec::new();let mut disks=0;
@@ -385,7 +459,7 @@ pub fn restore_new(profile:&Profile,root:&Path,key:&Path,id:&str,
         ovf_file_count:fs::read_dir(&folder)?.count(),
         vmdk_count:fs::read_dir(&folder)?.filter(|e|e.as_ref().is_ok_and(|e|
             e.file_name().to_string_lossy().ends_with(".vmdk"))).count(),
-        encrypted:true,offline_only:true,imported_new_vm:true,
+        encrypted:true,offline_only:true,source_provenance_attested:false,imported_new_vm:true,
         boot_verified:false,guest_data_verified:false,
         vadp_cbt_certified:false,vcenter_field_certified:false})
 }
