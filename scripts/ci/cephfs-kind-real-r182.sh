@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Real CephFS in an ephemeral 3 MON/3 OSD Rook kind cluster, never a mock.
+set -Eeuo pipefail
+umask 077
+test "$GITHUB_ACTIONS" = true && test "$RUNNER_ENVIRONMENT" = github-hosted
+test "$(kubectl config current-context)" = kind-mb-ceph-rgw
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TEMP="$1"
+test -d "$TEMP" && test -x "$ROOT/rust/target/debug/multi-backup-native"
+kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s
+cat > "$TEMP/cephfs.yaml" <<'YAML'
+apiVersion: ceph.rook.io/v1
+kind: CephFilesystem
+metadata: { name: mb-ci-fs, namespace: rook-ceph }
+spec:
+  metadataPool:
+    replicated: { size: 3 }
+  dataPools:
+    - name: data0
+      replicated: { size: 3 }
+  preservePoolsOnDelete: false
+  metadataServer:
+    activeCount: 1
+    activeStandby: true
+YAML
+kubectl apply -f "$TEMP/cephfs.yaml"
+READY=0
+for n in $(seq 1 75);do
+  if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph fs status mb-ci-fs -f json \
+      >"$TEMP/fs-status.json" 2>/dev/null &&
+    python3 - "$TEMP/fs-status.json" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1]))
+mds=data.get("mdsmap",{}).get("info",{})
+active=any(m.get("state")=="up:active" for m in mds.values())
+if not active:
+    active=any(m.get("state") in ["active","up:active"] for m in data.get("mds",[]))
+if not active:
+    raise SystemExit(1)
+PY
+  then READY=1;break;fi
+  sleep 8
+done
+test "$READY" = 1 || { echo 'FAIL: CephFS never got a real active MDS' >&2; exit 1; }
+kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph fs status mb-ci-fs
+cat > "$TEMP/client.yaml" <<'YAML'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mb-ci-cephfs-client
+  namespace: rook-ceph
+  labels: { app: mb-ci-cephfs-client }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: client
+      image: ubuntu:24.04
+      command: ["/bin/bash", "-lc", "sleep 1800"]
+      securityContext:
+        privileged: true
+      resources:
+        requests: { memory: 128Mi, cpu: 100m }
+        limits: { memory: 2Gi }
+YAML
+kubectl apply -f "$TEMP/client.yaml"
+kubectl -n rook-ceph wait --for=condition=Ready pod/mb-ci-cephfs-client --timeout=300s
+kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash -lc \
+  'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq age ceph-fuse ceph-common jq'
+# Auth material never leaves the disposable cluster, even in logs/artifacts.
+kubectl -n rook-ceph exec deploy/rook-ceph-tools -- tar -C / -cf - etc/ceph \
+  | kubectl -n rook-ceph exec -i mb-ci-cephfs-client -- tar -C / -xf -
+kubectl -n rook-ceph cp "$ROOT/rust/target/debug/multi-backup-native" \
+  mb-ci-cephfs-client:/usr/local/bin/multi-backup-native
+kubectl -n rook-ceph cp "$ROOT/tests/cephfs/rook-real-client-r182.sh" \
+  mb-ci-cephfs-client:/tmp/cephfs-acceptance.sh
+kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash /tmp/cephfs-acceptance.sh
+echo 'PASS: real 3 OSD CephFS MDS, actual client mounts, Rust encrypted full and ciphertext output'

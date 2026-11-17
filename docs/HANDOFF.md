@@ -971,3 +971,8 @@ On stacked r179 branch, new `ssh_input.rs`, `plugins ssh-backup` and dedicated O
 ### r181 followup
 
 RBD/PVE B-Out upgraded from Unsupported to Planned ONLY, no runtime executor. Real SSH B-In #43989432365 failed (exit=255 due OpenSSH option split); fixed in next SHA by using `UserKnownHostsFile=<abs path>` as one `-o` option. See r179 provider readiness doc. Do not mark SSH B-In CI PASS until rerun.
+
+
+## r182 field-CI lab handoff
+
+Branch feature/r182-cephfs-lustre-oracle-field-ci stacked on PR #33. New CephFS kind workflow uses existing real 3 MON/3 OSD Rook RGW cluster + MDS CephFS and isolated Ubuntu client pod; actual Rust age encrypted B-In and B-Out via fuse.ceph-fuse. New Lustre workflow uses pinned LTVM genuine Rocky9 guest, compile same SHA static Rust and pass SHA256-verified binaries over ephemeral bridge; actual Rust Lustre B-In/B-Out and restore. Oracle Free workflow rerun with additional wrong-age-key negative on real RMAN pieces. Historical real AFS certified #43747477666 unchanged adapter module+test script. Only mark green when exact-SHA runs succeed, not on scripted lab existence. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.

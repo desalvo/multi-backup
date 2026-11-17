@@ -114,6 +114,17 @@ RECIPIENT=$(sed -n 's/^# public key: //p' "$WORK/identity" | head -1)
   --namespace rman --top-namespace oracle --json > "$WORK/snapshot.json"
 SNAP=$(jq -er .id "$WORK/snapshot.json")
 "$CLI" storage verify --root "$WORK/encrypted-store" --identity "$WORK/identity" --id "$SNAP" >/dev/null
+
+# Real RMAN backup pieces are retained ONLY as authenticated age archives.
+# An unrelated recovery identity must fail before any recovered piece is
+# published. The test never mutates the original Oracle database.
+age-keygen -o "$WORK/wrong-identity" >/dev/null 2>&1
+if "$CLI" storage verify --root "$WORK/encrypted-store" \
+  --identity "$WORK/wrong-identity" --id "$SNAP" >/dev/null 2>&1;then
+  echo 'FAIL: Oracle RMAN encrypted backup accepted unrelated age identity' >&2
+  exit 1
+fi
+
 "$CLI" plugins restore --input posix --output posix --root "$WORK/encrypted-store" \
   --identity "$WORK/identity" --id "$SNAP" --destination "$WORK/recovered" --json >/dev/null
 for file in "$WORK/pieces/"*.bkp; do

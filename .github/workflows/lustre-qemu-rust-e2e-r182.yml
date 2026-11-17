@@ -1,0 +1,51 @@
+name: Multi Backup - actual Lustre QEMU FULL encrypted Rust backup and remote restore
+on:
+  push:
+    branches: ["feature/r182-cephfs-lustre-oracle-field-ci"]
+    paths:
+      - '.github/workflows/lustre-qemu-rust-e2e-r182.yml'
+      - 'tests/lustre/ltvm-guest-rust-r182.sh'
+      - 'scripts/ci/lustre-ltvm-rust-r182.sh'
+      - 'scripts/test-lustre-ltvm-hosted.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-lustre-qemu-rust-r182-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-lustre-rust:
+    name: Genuine Lustre kernel/MDT/OST under KVM, actual Rust FULL/verify/restore and ciphertext B-Out
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require genuine KVM, static Rust and safe test scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -c /dev/kvm
+          for path in scripts/test-lustre-ltvm-hosted.sh scripts/ci/lustre-ltvm-rust-r182.sh tests/lustre/ltvm-guest-rust-r182.sh tests/lustre/ltvm-guest-smoke.sh; do
+            bash -n "$path"
+          done
+          df -h /
+      - name: Install genuine age helpers and static guest cross compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age musl-tools file
+          rustup target add x86_64-unknown-linux-musl
+      - name: Compile exact-source static native Rust binary for Rocky9 Lustre QEMU
+        run: |
+          cargo build --manifest-path rust/Cargo.toml --release --target x86_64-unknown-linux-musl --bin multi-backup-native
+          file rust/target/x86_64-unknown-linux-musl/release/multi-backup-native
+      - name: Boot pinned real Lustre QEMU guest and exercise Rust B-In/B-Out
+        env:
+          MB_LUSTRE_RUST_E2E: "1"
+          RUNNER_ENVIRONMENT: github-hosted
+        run: bash scripts/test-lustre-ltvm-hosted.sh
+      - name: Precise readiness scope
+        if: success()
+        run: |
+          echo 'PASS genuine Lustre MDT+OST QEMU guest, signed source bytes, age encryption, full backup, byte-identical create-only Lustre restore, mounted ciphertext B-Out and age readback.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED production MDT/OST coordinated snapshots, inode ACL/xattrs, uid/gid/mtime, stripe layout recreation, HA or physical OST failure.' >> "$GITHUB_STEP_SUMMARY"
