@@ -129,6 +129,8 @@ pub struct PluginDescriptor {
     pub restore_output: Stage,
     pub consistency: &'static str,
     pub notes: &'static str,
+    /// Narrow Ready promise: empty for any unqualified provider. No general provider certification.
+    pub ready_scope: Option<&'static str>,
     pub safety: SafetyProfile,
     pub access_gate: AccessGate,
     pub gpfs_access: &'static [GpfsAccess],
@@ -142,6 +144,7 @@ impl PluginDescriptor {
                  consistency: &'static str, notes: &'static str) -> Self {
         Self {
             id, title, kind,
+            ready_scope: None,
             backup_input: backup_source,
             backup_output: backup_target,
             restore_input: backup_target,
@@ -157,6 +160,10 @@ impl PluginDescriptor {
                 _ => SafetyProfile::General,
             },
         }
+    }
+    const fn with_ready_scope(mut self, scope:&'static str) -> Self {
+        self.ready_scope=Some(scope);
+        self
     }
     const fn with_access_gate(mut self, gate: AccessGate) -> Self {
         self.access_gate = gate;
@@ -188,6 +195,7 @@ impl PluginDescriptor {
 const NONE: Stage = Stage::Unsupported;
 const PLAN: Stage = Stage::Planned;
 const PREVIEW: Stage = Stage::Preview;
+const READY: Stage = Stage::Ready;
 const EXPERIMENTAL: Stage = Stage::Experimental;
 pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("github", "GitHub", DataKind::SourceControl, PREVIEW, NONE,
@@ -201,8 +209,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("onedrive", "OneDrive / SharePoint drive", DataKind::Files, PLAN, PLAN,
         "Microsoft Graph driveItem+eTag/delta token",
         "Graph OAuth/tenant consent, upload-session retry and explicit conflict handling for new encrypted objects").with_access_gate(AccessGate::OAuthScopeReview),
-    PluginDescriptor::new("posix", "Local POSIX filesystem", DataKind::Files, PREVIEW, PREVIEW,
-        "Filesystem walk+metadata+optional consistent snapshot", "Archive CLI supports local files; generic plugin wiring and complete ACL/xattr capture are pending"),
+    PluginDescriptor::new("posix", "Local POSIX regular-file data (content-only)", DataKind::Files, READY, READY,
+        "Quiesced source tree; file-content-only, no metadata/ACL/xattr/symlink fidelity",
+        "READY ONLY for a quiesced local tree of ordinary readable files, including nested files, age ciphertext, parity repair and new-directory content restore. Deliberately refuses symlink/special source files; empty directories, file modes, timestamps, ownership, ACLs, xattrs, hardlink identities and live application consistency are NOT captured. Not a general-purpose complete POSIX filesystem backup")
+        .with_ready_scope("content_only_quiesced_regular_files; no ACL/xattr/owner/mode/timestamps/hardlinks/symlinks/empty dirs"),
     PluginDescriptor::new("s3", "S3 WORM / MinIO / Ceph RGW / RustFS", DataKind::ObjectStore, PREVIEW, PREVIEW,
         "Version-pinned S3 GetObject with independently supplied SHA-256 and server length; source snapshot pinned, WORM output only when explicitly configured",
         "Dedicated Rust B-In streams a version-pinned S3/Ceph RGW/RustFS object to age-encrypted chunks with pre-commit digest; WORM B-Out/restore-from-vault remain separate. Batch ListObjects, ACL fidelity, vendor RGW field evidence and generic restore-to-S3 are unqualified")
@@ -464,9 +474,10 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
             required_preflight.push("independently attest WORM retention, append-only ingest and separate recovery authorizations");
         }
     }
-    // A generic multi-plugin job requires streaming, verified commit and
-    // restore preflight adapters, none of which are ready yet.
-    let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready;
+    // A generic pair is executable only when BOTH role stages are Ready AND
+    // its actual compiled dispatcher is independently allowlisted below.
+    // The sole Ready scope in r214 is quiesced regular-file content POSIX->POSIX;
+    // native/provider-specific Preview commands never become generic jobs.
     // Reflect the ACTUAL compiled generic dispatcher, not catalog roles.
     // AFS uses separate typed volume CLI commands and cannot be generalized
     // as a mounted-file backup or a POSIX directory restore.
@@ -477,10 +488,12 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
         Mode::Restore => source.id == "posix" && matches!(destination.id,
             "posix" | "nfs" | "smb" | "gpfs" | "sshfs" | "cephfs" | "glusterfs" | "lustre"),
     };
+    let executable = source_stage == Stage::Ready && destination_stage == Stage::Ready
+        && preview_executable && source.id == "posix" && destination.id == "posix";
     Ok(Plan {
         mode, source_plugin: source.id, destination_plugin: destination.id,
-        source_stage, destination_stage, executable, preview_executable,
-        reason: if executable { "both adapters are ready" } else if source_stage == Stage::Experimental || destination_stage == Stage::Experimental {
+        source_stage, destination_stage, executable, preview_executable:preview_executable && !executable,
+        reason: if executable { "READY in explicitly narrow quiesced regular-file content-only scope; POSIX metadata/ACL/xattr and live snapshots excluded" } else if source_stage == Stage::Experimental || destination_stage == Stage::Experimental {
             "EXPERIMENTAL: optional provider, external IBM field qualification pending; never a default RC blocker"
         } else if preview_executable {
             "compiled local or read-only mounted-source preview available; production qualification pending"
@@ -496,6 +509,30 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    #[test]
+    fn ready_scope_must_be_explicit_and_only_posix_content_roundtrip_can_execute(){
+        for plugin in CATALOG{
+            let any_ready=[plugin.backup_input,plugin.backup_output,
+                plugin.restore_input,plugin.restore_output]
+                .iter().any(|s|*s==Stage::Ready);
+            assert_eq!(any_ready,plugin.ready_scope.is_some(),
+                "READY must have an explicit narrow scope: {}",plugin.id);
+            if any_ready {assert_eq!(plugin.id,"posix");}
+        }
+        let p=plan(Mode::Backup,"posix","posix").unwrap();
+        assert_eq!(p.source_stage,Stage::Ready);
+        assert_eq!(p.destination_stage,Stage::Ready);
+        assert!(p.executable && !p.preview_executable);
+        let restore=plan(Mode::Restore,"posix","posix").unwrap();
+        assert!(restore.executable && !restore.preview_executable);
+        assert!(p.reason.contains("metadata/ACL/xattr"));
+        for provider in ["nfs","smb","cephfs","glusterfs","lustre","gpfs",
+            "sshfs","webdav","s3"] {
+            let plan=plan(Mode::Backup,provider,"posix").unwrap();
+            assert!(!plan.executable,"provider {provider} cannot inherit POSIX READY");
+        }
+    }
+
     #[test]
     fn all_32_requested_input_plugins_and_26_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
