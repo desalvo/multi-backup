@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   oracle-free-live-rman:
-    name: Real Oracle Free container, RMAN backup -> Rust encrypted pieces -> RMAN restore VALIDATE
+    name: Real Oracle Free PDB/CDB physical RMAN restore and SCN PITR from Rust encrypted backup pieces
     runs-on: ubuntu-24.04
-    timeout-minutes: 80
+    timeout-minutes: 115
     steps:
       - uses: actions/checkout@v4
       - name: Install actual age, jq, OpenSSL and validate acceptance script
@@ -34,6 +34,6 @@ jobs:
       - name: Record precise qualification scope
         if: success()
         run: |
-          echo 'PASS: real Oracle Database Free PDB RMAN backup, Rust encrypted backup-piece storage/recovery, and RMAN restore VALIDATE.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PASS when script succeeds: Oracle Free physical PDB RESTORE/RECOVER, whole-CDB RESTORE/RECOVER and SCN PITR with before/after marker assertions, using Rust age-restored RMAN media.' >> "$GITHUB_STEP_SUMMARY"
           echo 'PASS dedicated native Oracle RMAN media import and create-only restore with real PDB RMAN RESTORE VALIDATE.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'NOT CERTIFIED: orchestrated Oracle database physical restore, full CDB, archived redo/PITR, production licensing.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT CERTIFIED: production Oracle RAC/ASM, TDE, standby, restore-to-different-host, automated orchestration, Oracle licensing beyond Free.' >> "$GITHUB_STEP_SUMMARY"

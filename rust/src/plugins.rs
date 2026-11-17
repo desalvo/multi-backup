@@ -243,9 +243,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PREVIEW, PREVIEW,
         "RBD image snapshots+diff export",
         "Dedicated native RBD immutable snapshot B-In accepts exact numeric snapshot ID, length and independent SHA256. Restore creates a NEW RBD image, verifies complete remote export. Snapshot quiesce, VM/CT consistency, diff chains, namespaces and production fencing remain OPEN"),
-    PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
+    PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PREVIEW, PLAN,
         "Initiator/target IQN and LUN WWID with storage snapshot",
-        "Read only a stable quiesced block snapshot; supports raw LUN or LVM (local, clustered-local, shared-exclusive, HA-exclusive, clustered-shared); restore to fresh isolated VG/LUN only").with_san_lvm(),
+        "Native read-only block-device iSCSI B-In validates exact kernel IQN/LUN udev ID_SERIAL/WWID, read-only bit, size and independent SHA256 before publishing age chunks. Restore is offline to NEW local image; direct NEW LUN B-Out still requires target-side allocation attestation, fencing and lab certification").with_san_lvm().with_restore_output_stage(PLAN),
     PluginDescriptor::new("fc", "Fibre Channel LUN", DataKind::BlockTransport, PLAN, PLAN,
         "FC WWPN, SCSI WWID, multipath and snapshot epoch",
         "Respect multipath aliases, WWID and ownership; raw FC LUN or LVM local/clustered/shared, with fencing/locking and snapshot consistency").with_san_lvm(),
@@ -254,12 +254,12 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
     // Keep the historical "proxmox" ID for backward compatibility with
     // saved jobs, but never conflate a PVE hypervisor with a PBS datastore.
-    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, PLAN,
+    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PREVIEW, PLAN,
         "QEMU VM and native LXC CT inventory with explicit snapshot/suspend/stop modes",
-        "PVE B-In media export and B-Out native backup-storage target/import are PLANNED only; task receipt is not a verified archive; cannot overwrite existing VMID or storage backup; real QEMU/LXC restore unqualified"),
-    PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PLAN, PLAN,
+        "PVE B-In preview uses real completed UPID status, TLS media list, node-local pvesm path and independently pinned archive bytes/SHA256 before age backup; offline create-only recovery. Full VM/CT restore, B-Out guest import and field certification remain planned").with_restore_output_stage(PLAN),
+    PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PREVIEW, PLAN,
         "Distinct PBS datastore and snapshot groups for VM/CT/host backup archives",
-        "PBS datastore AND native vm/ct/host snapshot listing via TLS scoped read-only token is implemented in Rust preview; transfer, encrypted export, native verification and create-only restore remain PLANNED"),
+        "PBS B-In preview streams one signed/verified VM image through official proxmox-backup-client after validated snapshot file inventory, fingerprint/CA TLS, independent SHA256 and age encryption. Only offline image recovery; PBS write-back, CT pxar, live provider restore and field E2E remain planned").with_restore_output_stage(PLAN),
     PluginDescriptor::new("kubernetes", "Kubernetes / OpenShift / OKD", DataKind::Cluster, PLAN, NONE,
         "API object resourceVersion, CSI VolumeSnapshots and etcd/CRD scope", "Never capture Secrets without explicit policy; cluster restore requires name remapping"),
     PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PLAN, NONE,
@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if matches!(entry.id,"s3"|"ssh"|"oracle") {
+            if matches!(entry.id,"s3"|"ssh"|"oracle"|"iscsi"|"proxmox"|"pbs") {
                 // A dedicated native source/media adapter does not grant a
                 // database/cloud restore target; those roles remain planned.
                 assert_eq!(entry.backup_input,Stage::Preview);
@@ -558,9 +558,9 @@ mod tests {
     fn pve_and_pbs_have_distinct_non_executable_capabilities() {
         let pve=find("proxmox").expect("PVE compatibility ID");
         let pbs=find("pbs").expect("PBS must be separately selectable");
-        assert_eq!(pve.backup_input,Stage::Planned);
+        assert_eq!(pve.backup_input,Stage::Preview);
         assert_eq!(pve.backup_output,Stage::Planned);
-        assert_eq!(pbs.backup_input,Stage::Planned);
+        assert_eq!(pbs.backup_input,Stage::Preview);
         assert_eq!(pbs.backup_output,Stage::Planned);
         assert_ne!(pve.id,pbs.id);
         assert!(!plan(Mode::Backup,"proxmox","posix").unwrap().executable);
@@ -640,7 +640,7 @@ mod tests {
             let descriptor=find(id).unwrap();
             assert_eq!(descriptor.kind, DataKind::BlockTransport);
             assert_eq!(descriptor.safety, SafetyProfile::SnapshotBlockDevice);
-            assert_eq!(descriptor.backup_input, Stage::Planned);
+            assert_eq!(descriptor.backup_input, if id=="iscsi" {Stage::Preview} else {Stage::Planned});
             assert_eq!(descriptor.backup_output, Stage::Planned);
             assert_eq!(descriptor.restore_input, Stage::Planned);
             assert_eq!(descriptor.restore_output, Stage::Planned);

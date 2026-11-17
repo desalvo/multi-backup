@@ -1,5 +1,6 @@
 name: Multi Backup - PostgreSQL agents server Rust GUI single-SHA gate
 on:
+  workflow_call:
   push:
     branches: ["ci/r168-software-field-gates","feature/r194-oracle-rman-media-and-provider-gates"]
     paths:

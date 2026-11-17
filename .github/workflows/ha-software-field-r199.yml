@@ -1,0 +1,40 @@
+name: Multi Backup - exact-SHA real HA failure injection and software gate
+on:
+  push:
+    branches: ["feature/r211-provider-field-certification"]
+    paths:
+      - ".github/workflows/ha-software-field-r199.yml"
+      - ".github/workflows/software-readiness-r168.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: mb-r199-ha-gate-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-patroni-partition:
+    name: Real three network namespaces PG16 Patroni etcd network partition
+    uses: ./.github/workflows/patroni-netns-real-ha-r149.yml
+  software-cluster:
+    name: Reuse one exact-commit Rust server agents GUI Kubernetes gate
+    uses: ./.github/workflows/software-readiness-r168.yml
+  final-gate:
+    name: Reject any skipped or failed HA/software test; never call it physical host fault test
+    needs: [real-patroni-partition, software-cluster]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Exact-SHA fan-in and honest physical boundary
+        env:
+          PATRONI: ${{ needs.real-patroni-partition.result }}
+          SOFTWARE: ${{ needs.software-cluster.result }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "## Real isolated HA software fault gate on SHA $SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Patroni PostgreSQL/etcd partition: $PATRONI" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Software agents/server/GUI/kind: $SOFTWARE" >> "$GITHUB_STEP_SUMMARY"
+          echo "This tests real namespaces and multiple KIND containers; NOT 3 independent physical host power failures or fencing." >> "$GITHUB_STEP_SUMMARY"
+          test "$PATRONI" = success
+          test "$SOFTWARE" = success
