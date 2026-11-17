@@ -41,6 +41,16 @@ def run():
         # validate actual certs rather than disabling verification.
         cmd("sudo","-n","install","-m","0644",root/"ca.crt",CERT)
         cmd("sudo","-n","update-ca-certificates",timeout=45)
+        def all_healthy():
+            status,body=ha.patroni_https(root,primary,"cluster")
+            if status!=200:
+                return False
+            cluster=json.loads(body)
+            members=cluster.get("members",[])
+            return len(members)==3 and all(
+                m.get("state") in ("running","streaming") for m in members)
+        ha.wait_for("all 3 genuine Patroni members running/streaming before native DB snapshot",
+                    all_healthy,processes,90)
         with tempfile.TemporaryDirectory(prefix="mb-pg-patroni-db-") as w:
             w=Path(w)
             age=w/"age-key"
