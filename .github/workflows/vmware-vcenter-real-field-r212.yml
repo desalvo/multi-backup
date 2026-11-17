@@ -1,0 +1,59 @@
+name: Multi Backup - protected real VMware vCenter offline full VM field acceptance
+on:
+  push:
+    branches: ['feature/r212-vmware-native-provider-and-field-gates']
+    paths:
+      - 'scripts/ci/vmware-vcenter-real-field-r212.sh'
+      - '.github/workflows/vmware-vcenter-real-field-r212.yml'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES_ISOLATED_VMWARE_NEW_VM (new stopped dedicated VMware VM)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mb-vmware-physical-field-r212
+  cancel-in-progress: false
+jobs:
+  hosted-safety:
+    name: Verify field runner refuses any normal hosted CI execution
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -euo pipefail
+          bash -n scripts/ci/vmware-vcenter-real-field-r212.sh
+          if MB_VMWARE_FIELD=YES_ISOLATED_VMWARE_NEW_VM bash scripts/ci/vmware-vcenter-real-field-r212.sh > /tmp/vsphere-refusal.log 2>&1;then
+            echo 'FAIL field write operations were allowed on hosted runner' >&2
+            exit 1
+          fi
+          grep -q 'DENIED: real VMware field lab' /tmp/vsphere-refusal.log
+          echo 'PASS protected VMware create-only field guard, NOT provider qualification'
+  isolated-vcenter-real:
+    name: Genuine VMware vCenter/ESXi OVF encrypted B-In and new stopped VM import
+    if: github.event_name == 'workflow_dispatch'
+    needs: hosted-safety
+    runs-on: [self-hosted, linux, multi-backup-vmware-field]
+    environment: multi-backup-vmware-disruptive-lab
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build exact native VMware adapter
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -u)" -ne 0
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Run approved real VMware offline export and create-only new VM
+        env:
+          MB_VMWARE_FIELD: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/vmware-vcenter-real-field-r212.sh
+      - name: Explicitly report remaining vendor field gaps
+        if: always()
+        run: |
+          echo 'Real field can certify only powered-off OVF+VMDK/NEW stopped VM when manually approved and executed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'VADP/CBT live incremental and guest boot/data remain separate required field gates.' >> "$GITHUB_STEP_SUMMARY"
