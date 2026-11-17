@@ -62,6 +62,15 @@ def run():
                 m.get("state") in ("running","streaming") for m in members)
         ha.wait_for("all 3 genuine Patroni members running/streaming before native DB snapshot",
                     all_healthy,processes,90)
+        hcode,hbody=ha.patroni_https(root,primary,"primary")
+        hdata=json.loads(hbody)
+        print("Real Patroni HTTP /primary evidence:",
+              {"http_status":hcode,"role":hdata.get("role"),
+               "state":hdata.get("state"),
+               "timeline_present":isinstance(hdata.get("timeline"),int),
+               "name_present":bool(hdata.get("patroni",{}).get("name"))},
+              flush=True)
+        if hcode!=200:raise RuntimeError("Genuine Patroni leader-lock endpoint refused")
         with tempfile.TemporaryDirectory(prefix="mb-pg-patroni-db-") as w:
             w=Path(w)
             age=w/"age-key"
