@@ -1,0 +1,43 @@
+name: Multi Backup - genuine GitHub read-only repository/LFS encrypted source acceptance
+on:
+  push:
+    branches: ["feature/r207-github-repo-restore-e2e"]
+    paths:
+      - "rust/src/github_client.rs"
+      - "rust/src/bin/multi-backup-native.rs"
+      - "scripts/ci/github-real-repo-source-r207.sh"
+      - ".github/workflows/github-real-source-r207.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-real-github-r207-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  github-source:
+    name: Real GitHub API and git mirror/LFS B-In plus encrypted recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 38
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install genuine Git LFS and age
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update -qq
+          sudo apt-get install -y git-lfs age jq
+          git lfs version
+          bash -n scripts/ci/github-real-repo-source-r207.sh
+      - name: Compile exact commit of real Rust native B-In
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib github_client
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Exercise GitHub provider and independent Git object restore
+        run: bash scripts/ci/github-real-repo-source-r207.sh
+      - name: Record certification scope
+        if: success()
+        run: |
+          echo "PASS actual authenticated GitHub API plus Git mirror/LFS fetch, two encrypted Rust archives, full git fsck and create-only offline age restore." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED all-account organization settings, full CI artifact history, GitHub remote repository provisioning or private org OAuth scopes." >> "$GITHUB_STEP_SUMMARY"
