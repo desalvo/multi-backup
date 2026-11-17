@@ -22,6 +22,13 @@ trap cleanup EXIT
 # The preceding functional CephFS test correctly unmounted its own RW
 # client at exit. This advanced test must create a SEPARATE genuine mount,
 # never silently treat an ordinary local directory as CephFS.
+# CephFS FUSE ACLs require both explicit client_acl_type=posix_acl
+# and FUSE-side permission checking disabled; without these,
+# setfacl returns EOPNOTSUPP despite genuine RADOS/XATTR support.
+# This is an ephemeral lab cluster, not a production client setting.
+ceph config set client client_acl_type posix_acl
+ceph config set client fuse_default_permissions false
+test "$(ceph config get client client_acl_type)" = posix_acl
 mkdir -p "$RW" "$SNAP"
 if ! ceph-fuse --client_fs mb-ci-fs "$RW" >"$D/ceph-fuse-rw.log" 2>&1;then
   echo 'FAIL: independent real CephFS RW mount for ACL/xattr test failed' >&2
