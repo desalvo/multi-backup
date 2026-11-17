@@ -29,6 +29,8 @@ pub struct Config {
     pub transfer_id:String,
     pub transfer_url:String,
     pub expected_bytes:u64,
+    /// Explicit actual IMAGEIO content format, not a guessed .qcow2 file.
+    pub expected_format:String,
     pub expected_sha256:String,
 }
 impl Drop for Config{
@@ -73,6 +75,7 @@ impl Config{
         }
         if self.bearer_token.len()<16||self.bearer_token.len()>4096||
            self.bearer_token.bytes().any(|x|x.is_ascii_whitespace()||x.is_ascii_control())||
+           !matches!(self.expected_format.as_str(),"raw"|"qcow2")||
            self.expected_sha256.len()!=64||
            !self.expected_sha256.bytes().all(|c|c.is_ascii_hexdigit())||
            self.expected_bytes==0||self.expected_bytes>1_099_511_627_776 {
@@ -163,8 +166,8 @@ pub fn backup(config:&Config,root:&Path,identity:&Path,label:&str)->Result<Logic
     let mut reader=Checked{source:response.into_reader(),proof,
                            max:config.expected_bytes};
     let digest=config.expected_sha256.to_ascii_lowercase();
-    let logical=format!("ovirt/vm/{}/backup/{}/{}.qcow2",
-                       config.vm_id,config.backup_id,config.disk_id);
+    let logical=format!("ovirt/vm/{}/backup/{}/{}.{}",
+                       config.vm_id,config.backup_id,config.disk_id,config.expected_format);
     let result=store.backup_stream(identity,label,"",&logical,&mut reader,
         BackupKind::Full,None,||{
             let p=check.borrow();
@@ -190,7 +193,8 @@ mod tests{
             bearer_token:"opaque-read-only-ticket-value".into(),
             vm_id:U.into(),backup_id:U.into(),disk_id:U.into(),transfer_id:U.into(),
             transfer_url:format!("https://imageio.example.test/images/{U}"),
-            expected_bytes:128,expected_sha256:"a".repeat(64)}
+            expected_bytes:128,expected_format:"raw".into(),
+            expected_sha256:"a".repeat(64)}
     }
     #[test]fn exact_https_readonly_vendor_identity_required(){
         let mut c=conf();assert!(c.validate().is_ok());
@@ -209,5 +213,6 @@ mod tests{
         assert!(reader.read_to_end(&mut buf).is_err());
         let mut c=conf();c.expected_sha256.clear();assert!(c.validate().is_err());
         c=conf();c.expected_bytes=0;assert!(c.validate().is_err());
+        c=conf();c.expected_format="vmdk".into();assert!(c.validate().is_err());
     }
 }
