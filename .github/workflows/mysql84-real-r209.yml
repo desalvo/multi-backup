@@ -1,0 +1,39 @@
+name: Multi Backup - genuine Oracle MySQL 8.4 encrypted B-In/restore acceptance
+on:
+  push:
+    branches: ["feature/r209-worm-vault-db-patroni-ovirt"]
+    paths:
+      - "rust/src/database.rs"
+      - "scripts/ci/mysql84-real-r209.sh"
+      - ".github/workflows/mysql84-real-r209.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-true-mysql84-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-mysql84:
+    name: Genuine Oracle MySQL 8.4 InnoDB and Rust encrypted restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 38
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official service-compatible MariaDB client and age
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update -qq
+          sudo apt-get install -y mariadb-client age jq
+          bash -n scripts/ci/mysql84-real-r209.sh
+      - name: Build actual native Rust database plugin
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib database
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Run real MySQL 8.4 engine, crypto and data-diff acceptance
+        run: bash scripts/ci/mysql84-real-r209.sh
+      - name: Record precise qualification boundaries
+        if: success()
+        run: |
+          echo "PASS actual MySQL 8.4 InnoDB with MariaDB-client native Rust dump, age-encrypted verified chunk store, new database and complete binary/row readback." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT certified Oracle MySQL GTID/binlog PITR or concurrent DDL consistency." >> "$GITHUB_STEP_SUMMARY"
