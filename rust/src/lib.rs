@@ -17,6 +17,7 @@ pub mod dropbox_client;
 pub mod github_client;
 pub mod vault;
 pub mod immutable_vault;
+pub mod worm_vault;
 pub mod s3_vault;
 pub mod plugins;
 pub mod virtualization_inventory;
