@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, env, fs::{self, File}, io::{Read, Write},
           path::Path, time::Duration as Timeout};
 use url::Url;
+use zeroize::Zeroize;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Hmac256 = Hmac<Sha256>;
@@ -192,17 +193,25 @@ impl CredentialRole {
 struct Client {
     cfg: Config, access: String, secret: String, token: Option<String>, role: CredentialRole,
 }
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.access.zeroize();
+        self.secret.zeroize();
+        if let Some(token)=self.token.as_mut(){ token.zeroize(); }
+    }
+}
 impl Client {
     fn new(cfg:&Config)->Result<Self>{Self::new_for(cfg,CredentialRole::Ambient)}
     fn new_for(cfg:&Config,role:CredentialRole)->Result<Self>{
         cfg.validate()?;
         if role!=CredentialRole::Ambient{
             let other=if role==CredentialRole::WormWriter{
-                "MB_WORM_RECOVERY_ACCESS_KEY_ID"
-            }else{"MB_WORM_WRITER_ACCESS_KEY_ID"};
-            if env::var_os(other).is_some() ||
-                ["AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN"]
-                    .iter().any(|name|env::var_os(name).is_some()){
+                CredentialRole::WormRecovery
+            }else{CredentialRole::WormWriter};
+            let (other_access,other_secret,other_token)=other.names();
+            if [other_access,other_secret,other_token,
+                "AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN"]
+                .iter().any(|name|env::var_os(name).is_some()){
                 return Err("WORM credential isolation failed: ambient or opposite principal present".into());
             }
         }
@@ -266,7 +275,10 @@ impl Client {
         let ksign=mac(&kservice,b"aws4_request")?;
         let signature=hex::encode(mac(&ksign,to_sign.as_bytes())?);
         let auth=format!("AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed}, Signature={signature}",self.access);
-        let agent=ureq::AgentBuilder::new().timeout_connect(Timeout::from_secs(10))
+        // Signed S3 requests must never follow a server-supplied Location to
+        // another authority or path: redirects can leak authorization or
+        // change the capability being exercised.
+        let agent=ureq::AgentBuilder::new().redirects(0).timeout_connect(Timeout::from_secs(10))
             .timeout_read(Timeout::from_secs(120)).build();
         let mut req=agent.request(method,&url).set("Authorization",&auth);
         for (key,value) in headers {
