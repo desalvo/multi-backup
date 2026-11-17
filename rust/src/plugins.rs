@@ -275,9 +275,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PREVIEW, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries").with_restore_output_stage(PLAN),
-    PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PLAN,
+    PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PREVIEW,
         "Pinned SSH host key, exact remote-file digest and length, no shell escape",
-        "Native authenticated SSH B-In streams one digest-and-length-pinned file into age-encrypted chunks; SCP/SFTP directory operations and B-Out remain planned")
+        "Native authenticated SSH B-In streams a pinned file to age chunks; SSH POSIX-shell B-Out creates a NEW encrypted directory+checksum marker, independently GET-verifies it, and restores to a NEW local path. SFTP-only servers, ACL and resumable bulk transfers remain unqualified")
         .with_restore_output_stage(PLAN),
     PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PREVIEW,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",

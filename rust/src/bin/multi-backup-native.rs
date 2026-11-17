@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, ssh_output, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -14,6 +14,8 @@ fn usage() -> &'static str {
        multi-backup-native updates activate-portable --active DIR --candidate DIR --rollback NEW_DIR --binary REL --expected-sha256 SHA (APP STOPPED; portable only)\n\
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins ssh-output-backup --config OWNER_ONLY_SSH_OUT.json --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_KEY [--json] (real pinned SSH, create-only remote encrypted archive)\n\
+       multi-backup-native plugins ssh-output-restore --config OWNER_ONLY_SSH_OUT.json --filename VERIFIED.tar.gz.age --identity AGE_KEY --destination NEW_DIR [--json]\n\
        multi-backup-native plugins ssh-backup --config OWNER_ONLY_SSH.json --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label LABEL [--top-namespace NS] [--json] (pinned host key, single version-attested remote file into age chunks)\n\
        multi-backup-native plugins webdav-http-backup --config OWNER_ONLY_WEBDAV.json --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--json] (native trusted HTTPS conditional create-only PUT and independent GET; env MULTI_BACKUP_WEBDAV_PASSWORD)\n\
        multi-backup-native plugins webdav-http-restore --config OWNER_ONLY_WEBDAV.json --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_LOCAL_DIR [--json]\n\
@@ -233,6 +235,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--destination")?))?;
         if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
         else {println!("Restored {} verified Oracle RMAN media pieces to NEW path",receipt.pieces);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="ssh-output-backup" {
+        if password_stdin{return Err("SSH encrypted B-Out requires a pinned SSH identity".into());}
+        accepted(&flags,&["--config","--source","--filename","--recipient","--identity"])?;
+        let c=ssh_output::Config::load(Path::new(required(&flags,"--config")?))?;
+        let r=ssh_output::backup(&c,
+            Path::new(required(&flags,"--source")?),
+            required(&flags,"--filename")?,
+            required(&flags,"--recipient")?,
+            Path::new(required(&flags,"--identity")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("SSH encrypted create-only B-Out with independent readback: {}",r.archive);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="ssh-output-restore" {
+        if password_stdin{return Err("SSH output recovery requires a pinned SSH identity".into());}
+        accepted(&flags,&["--config","--filename","--identity","--destination"])?;
+        let c=ssh_output::Config::load(Path::new(required(&flags,"--config")?))?;
+        let n=ssh_output::restore(&c,required(&flags,"--filename")?,
+            Path::new(required(&flags,"--identity")?),
+            Path::new(required(&flags,"--destination")?))?;
+        if json{println!("{}",serde_json::json!({"provider":"ssh","restored_members":n,"verified":true}));}
+        else{println!("SSH encrypted archive recovered: {n} members");}
         return Ok(());
     }
     if family=="plugins" && command=="ssh-backup" {

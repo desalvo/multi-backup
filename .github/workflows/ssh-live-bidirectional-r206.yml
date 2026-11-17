@@ -1,0 +1,41 @@
+name: Multi Backup - genuine pinned OpenSSH B-In and encrypted create-only B-Out
+on:
+  push:
+    branches: ["feature/r206-ssh-native-bout-real-ci"]
+    paths:
+      - "rust/src/ssh_output.rs"
+      - "rust/src/plugins.rs"
+      - "scripts/ci/ssh-live-bidirectional-r206.sh"
+      - ".github/workflows/ssh-live-bidirectional-r206.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-real-ssh-output-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  genuine-ssh:
+    name: Real ephemeral OpenSSH server and pinned client full ciphertext backup/restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install authentic OpenSSH server and age binary
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-server openssh-client age jq
+          bash -n scripts/ci/ssh-live-bidirectional-r206.sh
+      - name: Native Rust compile and safe shell command preflight
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib ssh_output
+          cargo test --manifest-path rust/Cargo.toml --lib ssh_input
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Real OpenSSH pubkey auth and ciphertext/age verification
+        run: bash scripts/ci/ssh-live-bidirectional-r206.sh
+      - name: Explicit field scope
+        if: success()
+        run: |
+          echo "PASS authentic SSH server, strict host-key pin, encrypted B-In and B-Out, remote independently authenticated SHA and no-overwrite create-only recovery." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED SFTP-only shell-less accounts, SSH remote production agent/HA, ACL fidelity or multi-TB resumable transfers." >> "$GITHUB_STEP_SUMMARY"
