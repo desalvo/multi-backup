@@ -19,7 +19,18 @@ def cmd(*argv,okay=True,env=None,timeout=45):
     p=subprocess.run(list(map(str,argv)),env=env,capture_output=True,
                      text=True,timeout=timeout)
     if okay and p.returncode:
-        # No passwords or potentially sensitive DB contents in user-visible errors.
+        # Surface ONLY recognized fail-closed validation messages. Never log
+        # argv paths/credentials, SQL dumps or untrusted stderr content.
+        clues=("Patroni","timeline","leader","quorum","member","URL","HTTPS",
+               "TLS","certificate","profile","Profile","SSL","identity",
+               "expected","unsafe","BackupKind","database backup",
+               "ERR","store","root")
+        eligible=[line.strip()[:220] for line in p.stderr.splitlines()
+                  if any(key in line for key in clues)
+                  and not any(key in line.lower() for key in
+                              ("password","token","secret","bearer","authorization"))]
+        print("Native Patroni failure category:",eligible[:4] or ["no recognized safety message"],
+              flush=True)
         raise RuntimeError("Native Patroni database acceptance command failed: "+str(argv[:3]))
     return p
 
