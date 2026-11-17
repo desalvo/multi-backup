@@ -1092,3 +1092,9 @@ One-line English commit summary: Pin real WebDAV TLS field host to IPv4 loopback
 - Tests must run on the exact new SHA and complete before RC2 promotion. No release/merge from this change alone.
 
 One-line English commit summary: Fix real CephFS client CephX compatibility and WebDAV trust-chain fixtures without relaxing security.
+
+
+## r194 — native Oracle RMAN-media adapter and Oracle Free CI
+A dedicated Rust Oracle RMAN media provider now rejects non-.bkp and symlinked/empty inputs, encrypts a full verified set in age chunk storage and supports create-only restoration of the pieces. The existing **real Oracle Free RMAN PDB** workflow is updated to exercise the native Rust plugin in both directions, ensure a wrong age key fails, and finish with RMAN RESTORE VALIDATE using only recovered pieces. CI must pass on the exact branch SHA before counting as qualified. The adapter does not yet directly orchestrate RMAN backup, restore a live PDB, perform SCN/redo PITR or preserve advanced Oracle metadata. There is no broad RC2 promotion or physical HA certification by this change.
+
+One-line English commit summary: Add fail-closed native Rust Oracle RMAN media backup and create-only restore with real Oracle Free acceptance.

@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -27,6 +27,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
        multi-backup-native plugins pve-task-status --config-json OWNER_ONLY_PVE.json --node NODE --upid PVE_UPID [--json] (read-only status)\n\
        multi-backup-native plugins pve-backup-media --config-json OWNER_ONLY_PVE.json --node NODE --storage STORE --guest-id VMID [--json] (read-only provider backup volume metadata; NOT Multi Backup verified)\n\
+       multi-backup-native plugins oracle-rman-media-backup --pieces RMAN_PIECES_DIR --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label NAME [--json] (native encrypted RMAN piece importer; RMAN job executed separately)\n\
+       multi-backup-native plugins oracle-rman-media-restore --root EXISTING_AGE_STORE --identity AGE_PRIVATE --id HASH --destination NEW_DIR [--json] (create-only piece recovery; separately validate via RMAN)\n\
        multi-backup-native plugins pbs-snapshots --config-json OWNER_ONLY_PBS.json --datastore DATASTORE [--namespace NS] [--json] (read-only native VM/CT/host snapshots; PBS verification is not Multi Backup verification)\n\
        multi-backup-native plugins plan --input PLUGIN --output PLUGIN --mode backup|restore [--input-lvm MODE] [--output-lvm MODE] [--input-gpfs-access ces-nfs|ces-smb] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins database-backup --profile-json DB.json --root STORE --identity AGE_KEY --label NAME [--json]\n\
@@ -155,6 +157,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family=="plugins" && command=="oracle-rman-media-backup" {
+        if password_stdin {return Err("Oracle provider accepts only an age identity file".into());}
+        accepted(&flags,&["--pieces","--root","--identity","--label"])?;
+        let receipt=oracle_rman::backup_pieces(
+            Path::new(required(&flags,"--pieces")?),
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--label")?)?;
+        if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
+        else {println!("Oracle RMAN encrypted media set verified: {}",receipt.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="oracle-rman-media-restore" {
+        if password_stdin {return Err("Oracle provider accepts only an age identity file".into());}
+        accepted(&flags,&["--root","--identity","--id","--destination"])?;
+        let receipt=oracle_rman::restore_pieces(
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--id")?,
+            Path::new(required(&flags,"--destination")?))?;
+        if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
+        else {println!("Restored {} verified Oracle RMAN media pieces to NEW path",receipt.pieces);}
+        return Ok(());
+    }
     if family=="plugins" && command=="ssh-backup" {
         if password_stdin {return Err("SSH requires a pinned external key file, not console password".into());}
         accepted(&flags,&["--config","--root","--identity","--label","--top-namespace"])?;

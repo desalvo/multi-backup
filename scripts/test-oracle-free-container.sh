@@ -109,9 +109,10 @@ find "$WORK/pieces" -type f -name 'pdb_*.bkp' -size +0c | grep -q . || { echo "F
 age-keygen -o "$WORK/identity" >/dev/null 2>&1
 RECIPIENT=$(sed -n 's/^# public key: //p' "$WORK/identity" | head -1)
 "$CLI" storage init --root "$WORK/encrypted-store" --recipient "$RECIPIENT" >/dev/null
-"$CLI" plugins backup --input posix --output posix --source "$WORK/pieces" \
-  --root "$WORK/encrypted-store" --identity "$WORK/identity" --label oracle-free-real-rman-pieces \
-  --namespace rman --top-namespace oracle --json > "$WORK/snapshot.json"
+"$CLI" plugins oracle-rman-media-backup --pieces "$WORK/pieces" \
+  --root "$WORK/encrypted-store" --identity "$WORK/identity" \
+  --label oracle-free-real-rman-pieces --json > "$WORK/snapshot.json"
+jq -e '.provider == "oracle" and .encrypted == true and .verified == true and .pieces > 0' "$WORK/snapshot.json" >/dev/null
 SNAP=$(jq -er .id "$WORK/snapshot.json")
 "$CLI" storage verify --root "$WORK/encrypted-store" --identity "$WORK/identity" --id "$SNAP" >/dev/null
 
@@ -125,8 +126,17 @@ if "$CLI" storage verify --root "$WORK/encrypted-store" \
   exit 1
 fi
 
-"$CLI" plugins restore --input posix --output posix --root "$WORK/encrypted-store" \
-  --identity "$WORK/identity" --id "$SNAP" --destination "$WORK/recovered" --json >/dev/null
+"$CLI" plugins oracle-rman-media-restore --root "$WORK/encrypted-store" \
+  --identity "$WORK/identity" --id "$SNAP" --destination "$WORK/recovered" \
+  --json >"$WORK/native-restore.json"
+jq -e '.provider == "oracle" and .verified == true and .pieces > 0' "$WORK/native-restore.json" >/dev/null
+if "$CLI" plugins oracle-rman-media-restore --root "$WORK/encrypted-store" \
+  --identity "$WORK/identity" --id "$SNAP" --destination "$WORK/recovered" \
+  >/dev/null 2>&1; then echo 'FAIL Oracle media adapter overwrote existing restore' >&2; exit 1; fi
+if "$CLI" plugins oracle-rman-media-restore --root "$WORK/encrypted-store" \
+  --identity "$WORK/wrong-identity" --id "$SNAP" --destination "$WORK/recovered-wrong" \
+  >/dev/null 2>&1; then echo 'FAIL Oracle media adapter accepted wrong key' >&2; exit 1; fi
+test ! -e "$WORK/recovered-wrong"
 for file in "$WORK/pieces/"*.bkp; do
   test -f "$file"
   cmp "$file" "$WORK/recovered/oracle/rman/$(basename "$file")"
@@ -147,4 +157,4 @@ if grep -Eq '^RMAN-[0-9]+:|^ORA-[0-9]+:' "$WORK/restore.log" || ! grep -qi 'Fini
   echo "FAIL: RMAN did not validate recovered PDB backup pieces" >&2; exit 1
 fi
 echo "PASS real Oracle Free PDB RMAN backup -> Rust age-encrypted store -> Rust restore -> RMAN restore VALIDATE"
-echo "Scope: genuine RMAN PDB backup-piece backup and recovery validation, NOT live database physical restore, full-CDB/PITR or a dedicated Oracle Rust adapter."
+echo "Scope: dedicated native Rust RMAN-media adapter with genuine Oracle Free RMAN VALIDATE, NOT orchestrated database physical restore or full-CDB/PITR."
