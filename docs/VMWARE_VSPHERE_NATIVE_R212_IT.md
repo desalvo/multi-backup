@@ -93,3 +93,11 @@ multi-backup-native plugins vmware-ovf-package-backup \
   --source-moref vm-42 --expected-fingerprint ACTUAL_SHA256_64_HEX \
   --label "Offline OVF import without source provenance" --json
 ```
+
+## r212 verifiche finali su GitHub Actions (17 novembre 2026)
+- **PASS** <https://github.com/desalvo/multi-backup/actions/runs/44092243993> — Rust native focused compilation/unit/regression sull'adapter VMware e i plugin integrati.
+- **PASS** <https://github.com/desalvo/multi-backup/actions/runs/44095177198> — official `govc/vcsim` v0.56.2, trusted TLS, generazione OVF e VMDK streamOptimized, fingerprint indipendente, backup age, importazione VM nuova in simulator e controlli negativi. Il simulator non supporta il reale `ExportVm` NFC; il suo manifest lease SHA-1 legacy è usato **esclusivamente nella fixture**. Il SHA256 indipendente del pacchetto e age rimangono obbligatori.
+- **PASS** <https://github.com/desalvo/multi-backup/actions/runs/44095656045> — vero file VMDK `qemu-img` passato da OVF-package B-In a chunk encryption age, restore OVF/VMDK, confronto binario contro la fonte e conversione a RAW con confronto del disco originale; digest errato, chiave errata, overwrite e symlink rifiutati.
+- **PASS hosted SAFETY ONLY** <https://github.com/desalvo/multi-backup/actions/runs/44091122559> — il test distruttivo vCenter rifiuta un runner ordinario. **SKIPPED** vera esecuzione ESXi/vCenter fino a un self-hosted runner autorizzato e una VM usa-e-getta predisposta.
+- **Non collaudati / non implementati completamente**: VMware VADP/CBT, full/incremental live VM, snapshot coerenti con guest application, vero ESXi/vCenter export NFC e clone/new guest boot/integrity; analoghi field per PVE/PBS, oVirt, 3 host fisici, WAL+Patroni e Lustre MDT/OST coordinated restano aperti.
+- La PR r212 è <https://github.com/desalvo/multi-backup/pull/49>, **DRAFT**; non viene promosso alcun plugin universale a READY sulla base di test simulati.
