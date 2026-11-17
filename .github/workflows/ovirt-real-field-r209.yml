@@ -1,7 +1,7 @@
 name: Multi Backup - oVirt genuine READY VM backup IMAGEIO read-only field gate
 on:
   push:
-    branches: ["feature/r209-worm-vault-db-patroni-ovirt"]
+    branches: ["feature/r209-worm-vault-db-patroni-ovirt", "feature/r210-vault-credential-isolation-ovirt"]
     paths:
       - "rust/src/ovirt_imageio.rs"
       - "scripts/ci/ovirt-real-field-r209.sh"
