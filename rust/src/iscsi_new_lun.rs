@@ -104,8 +104,11 @@ pub fn create_and_restore(root:&Path,identity:&Path,id:&str,backing_dir:&Path,
             "new","--tid",&target_id,"--lun","1","-b",base])?;
         run("tgtadm",&["--lld","iscsi","--mode","target","--op","bind",
             "--tid",&target_id,"-I","127.0.0.1"])?;
+        // TGT's target show output with --tid is not stable across versions;
+        // enumerate the actual native target inventory and match exact new
+        // IQN/backing file after successful create_new target operation.
         let listing=run("tgtadm",&["--lld","iscsi","--mode","target",
-            "--op","show","--tid",&target_id])?;
+            "--op","show"])?;
         if !listing.contains(iqn)||!listing.contains(base){
             return Err("TGT did not confirm exact NEW IQN and private backing file".into());
         }
