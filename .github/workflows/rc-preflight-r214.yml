@@ -35,14 +35,29 @@ jobs:
   rc-security-policy:
     name: RC preflight policy negatives and limited publish rights
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Validate untrusted catalog and false-certification denial
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_rc_preflight_r214.py -v
           python3 -m py_compile scripts/ci/rc-preflight-r214.py
+      - name: Install mandatory release static and dependency-security auditors
+        run: |
+          set -euo pipefail
+          python3 -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3'
+      - name: Check Python syntax correctness, injection and dependency vulnerabilities
+        run: |
+          set -euo pipefail
+          ruff check --select E4,E9,F63,F7,F82 --extend-select E722 .
+          bandit -q -r . -x ./tests,./.git -ll
+          python3 -m pip_audit -r requirements.txt
+          python3 -m pip_audit -r requirements-docs.txt
+          echo 'PASS r214 Python static correctness, Bandit medium/high security and both pip-audit dependency manifests' >> "$GITHUB_STEP_SUMMARY"
       - name: No publication authorization in this workflow
         run: |
           test "${{ github.event_name }}" != "release"
