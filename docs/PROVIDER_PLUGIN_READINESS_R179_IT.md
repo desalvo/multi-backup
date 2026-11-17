@@ -1,0 +1,71 @@
+# Multi Backup — sviluppo provider multipiattaforma r179
+Data: 17 novembre 2026. Branch feature/r179-provider-output-hardening.
+
+## Priorità e stato reale
+
+I seguenti plugin sono richiesti per la prossima RC. In questa revisione è
+implementato un adapter **B-Out cifrato age** verso filesystem Linux pre-montati
+in modalità RW: NFS, SMB/CIFS, WebDAV/davfs2, CephFS, GlusterFS, Lustre,
+IBM GPFS via NFS/SMB CES compatibilità protocollo, SSHFS. Non viene montato o
+configurato automaticamente alcun client remoto. L'adapter richiede una
+corrispondenza esatta con il filesystem kernel/FUSE previsto, non accetta
+mount RO o locali mascherati, non sovrascrive, pubblica in staging
+`.tar.gz.age` e `.sha256`, e verifica **leggendo e decifrando** gli oggetti
+creati via mount prima di tornare successo. Un secondo comando B-Out→R-In
+legge e verifica l'archivio cifrato remoto e ripristina verso una nuova
+directory locale; NON equivale a ripristino diretto nel filesystem remoto.
+Questa modalità non promette retention WORM né ACL/xattr/UID/mtime completi.
+
+CLI: `multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount /exact/rw --source /readonly/source --filename NEW.tar.gz.age --recipient age1... --identity /keys/age-id [--output-gpfs-access ces-nfs|ces-smb] --json`.
+Per lettura: `plugins mounted-restore --input nfs|... --mount /exact/remote --filename NEW.tar.gz.age --identity /keys/age-id --destination /new/local/path [--input-gpfs-access ces-nfs|ces-smb]`.
+Richiede GNU age nel PATH, identità privata separata. I secret non sono
+trasmessi al server di backup in chiaro; viene inviato solo ciphertext.
+NFS/SMB e GPFS protocollo non provano il funzionamento di GPFS nativo IBM.
+
+## Tabella delle direzioni B-In/B-Out richieste e work remaining
+
+| Provider | B-In | B-Out | Limitazioni necessarie per Ready |
+|---|---|---|---|
+| S3/Ceph RGW/RustFS | Preview pinned version | Preview WORM | B-In Ceph RGW specifico, batch/list, versioned restore-to-S3 |
+| Dropbox | Preview incrementale | Preview upload cifrato | B-Out account isolato reale con secret/token, OAuth refresh e restore diretto |
+| GitHub | Preview mirror+CI | Unsupported | account reale con git-lfs, Actions, test di creazione nuova repo |
+| Ceph RBD | Planned | Unsupported | export-diff RBD snapshot, encryption, image create-only restore |
+| iSCSI | Planned | Planned | immutabile snapshot LUN, WWID, fencing e LVM cluster preflight reale |
+| Proxmox VE | Planned | Unsupported | media vzdump+task validato, export criptato VM/CT, restore |
+| Proxmox Backup Server | Planned | Planned | datastore export verification, restore CT/VM/host su host di prova |
+| Oracle RMAN | Planned | Unsupported | RMAN reale online/offline, ARCHIVELOG, dump age e restore |
+| SSH/SCP/SFTP | Planned | Planned | stream autenticato con hostkey pinned, non-overwrite, restore E2E |
+| WebDAV | Preview mounted RO | Preview mounted RW age | server HTTPS RW, ETag/PROPFIND, davfs2 cache coherence |
+| NFS | Preview mounted RO | Preview mounted RW age | server NFS v3/v4 con ripristino e HA/corruzione test |
+| SMB/Samba | Preview mounted RO | Preview mounted RW age | SMB3 ACL/ADS/consistency oltre a encrypted archive |
+| CephFS | Preview mount | Preview mounted RW age | MDS/OSD CephFS real snapshot consistency |
+| GlusterFS | Preview mount | Preview mounted RW age | replica/disperse, GFID/xattr consistency + field |
+| Lustre | Preview mount | Preview mounted RW age | MDT/OST stripe metadata & server real |
+| GPFS CES NFS/SMB | Preview protocol-only | Preview mounted RW age | client IBM CES reale non disponibile; standard protocol-only |
+| SSHFS | Preview mount | Preview mounted RW age | SSH host key, agent/quiesce and real RW field |
+
+## Validation gates
+
+Unit tests fail-closed when a POSIX folder pretends to be NFS, SMB, davfs2,
+GlusterFS, CephFS, GPFS, Lustre, or SSHFS. Extended the **existing** live
+`network-filesystems-live-r042.yml` to exercise five genuine NFS/Samba/
+GlusterFS/GPFS-protocol mounts for ciphertext B-Out, digest sidecar, live age
+readback, fresh-directory restore, RO rejection and no-overwrite.
+Do not call these PASS before the new SHA CI completes.
+Vendor-specific CephFS/Lustre/GPFS, block, Oracle, and Proxmox require real
+systems; cannot infer from a planner or protocol-compatible test.
+
+The connected Dropbox account can confirm that Dropbox access is available,
+but it is personal and MUST NOT be used to create/delete remotely during
+CI without explicit isolated-account authorization. The manual-only
+`provider=dropbox-output` E2E uses disposable credentials and records evidence.
+
+## RC gate
+
+Do not publish another RC or change existing RC1 artifacts based solely on
+this feature-branch update. The branch remains Draft until exact-SHA CI PASS
+and the specifically required provider field tests are satisfied. Notarization
+is a later Stable concern; rollback installation and production signing remain
+separate gates.
+
+One-line English commit summary: Add authenticated mount-bound encrypted backup destinations and verified create-only recovery for NFS, SMB, WebDAV, CephFS, GlusterFS, Lustre, GPFS and SSHFS.

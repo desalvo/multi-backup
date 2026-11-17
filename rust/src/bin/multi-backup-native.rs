@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -14,6 +14,8 @@ fn usage() -> &'static str {
        multi-backup-native updates activate-portable --active DIR --candidate DIR --rollback NEW_DIR --binary REL --expected-sha256 SHA (APP STOPPED; portable only)\n\
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount EXACT_MOUNT --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
+       multi-backup-native plugins mounted-restore --input MOUNT_PROVIDER --mount EXACT_MOUNT --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_DIR [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins s3-object-backup --config S3.json --object-key KEY --version-id VERSION --sha256 RAW_SHA256 --root EXISTING_CHUNK_STORE --identity AGE_ID --label LABEL [--top-namespace NS] [--json] (B-In versioned S3 / Ceph RGW / RustFS -> age chunk store)\n\
        multi-backup-native plugins dropbox-upload --archive VERIFIED.tar.gz.age --remote-path /New/Archive.tar.gz.age [--json] (B-Out Dropbox: create-only encrypted upload)\n\
        multi-backup-native plugins dropbox-backup --source LOCAL_DIR --remote-path /New/Archive.tar.gz.age --recipient AGE_PUBLIC [--json] (B-Out encrypted, no plaintext archive)\n\
@@ -150,6 +152,39 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family=="plugins" && command=="mounted-backup" {
+        if password_stdin {return Err("Mounted B-Out accepts only age recipient and separate key path".into());}
+        accepted(&flags,&["--output","--mount","--source","--filename","--recipient",
+                           "--identity","--output-gpfs-access"])?;
+        let output=required(&flags,"--output")?;
+        let access=flags.get("--output-gpfs-access")
+            .map(|v|plugins::GpfsAccess::parse(v)).transpose()?;
+        let result=mounted_output::backup_to_mount(output,
+            Path::new(required(&flags,"--source")?),
+            Path::new(required(&flags,"--mount")?),
+            required(&flags,"--filename")?,
+            required(&flags,"--recipient")?,
+            Path::new(required(&flags,"--identity")?),access)?;
+        if json {println!("{}",serde_json::to_string_pretty(&result)?);}
+        else {println!("Encrypted mounted {} output, verified: {}",output,result.archive);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="mounted-restore" {
+        if password_stdin {return Err("Mounted recovery requires a separate age identity path".into());}
+        accepted(&flags,&["--input","--mount","--filename","--identity",
+                           "--destination","--input-gpfs-access"])?;
+        let input=required(&flags,"--input")?;
+        let access=flags.get("--input-gpfs-access")
+            .map(|v|plugins::GpfsAccess::parse(v)).transpose()?;
+        let count=mounted_output::restore_from_mount(input,
+            Path::new(required(&flags,"--mount")?),
+            required(&flags,"--filename")?,
+            Path::new(required(&flags,"--identity")?),
+            Path::new(required(&flags,"--destination")?),access)?;
+        if json {println!("{}",serde_json::json!({"restored_members":count,"input":input}));}
+        else {println!("Restored {} verified encrypted members from {} to a NEW target",count,input);}
+        return Ok(());
+    }
     // Dedicated S3 B-In and Dropbox B-Out adapters. The generic filesystem
     // dispatcher remains intentionally locked to its tested mount protocols.
     if family=="plugins" && command=="s3-object-backup" {
