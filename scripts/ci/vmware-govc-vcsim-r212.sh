@@ -68,11 +68,92 @@ age-keygen -o "$TMP/private" >/dev/null 2>&1
 age-keygen -o "$TMP/wrong" >/dev/null 2>&1
 PUB="$(age-keygen -y "$TMP/private")"
 "$NATIVE" storage init --root "$TMP/store" --recipient "$PUB" >/dev/null
-"$NATIVE" plugins vmware-ovf-backup --profile-json "$TMP/source.json" \
- --root "$TMP/store" --identity "$TMP/private" --label "VMware sim OVF" \
- --stage-root "$TMP/staging" --json >"$TMP/backup.json"
+# vcsim does not implement VMware ExportVm NFC. Test the real govc
+# import with a deterministic, independently pinned OVF/VMDK package;
+# the genuine export remains protected in the physical vCenter field job.
+PACKAGE="$TMP/staging/package"
+mkdir -m 0700 "$PACKAGE"
+qemu-img create -f raw "$TMP/disk.raw" 2M >/dev/null
+printf 'MB-SIM-VMWARE-DISK-ROUNDTRIP' | dd of="$TMP/disk.raw" bs=1 conv=notrunc status=none
+qemu-img convert -f raw -O vmdk -o subformat=streamOptimized \
+ "$TMP/disk.raw" "$PACKAGE/disk.vmdk"
+export PACKAGE
+python3 - <<'PY'
+import os
+from pathlib import Path
+d=Path(os.environ["PACKAGE"])
+n=(d/"disk.vmdk").stat().st_size
+xml=f'''<?xml version="1.0" encoding="UTF-8"?>
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1"
+ xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1"
+ xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData"
+ xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData">
+ <References><File ovf:href="disk.vmdk" ovf:id="f1" ovf:size="{n}"/></References>
+ <DiskSection><Info>VMware virtual disk</Info><Disk ovf:capacity="2"
+ ovf:capacityAllocationUnits="byte * 2^20" ovf:diskId="d1" ovf:fileRef="f1"
+ ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized"/></DiskSection>
+ <VirtualSystem ovf:id="mb-test">
+  <Info>Disposable OVF virtual machine</Info><Name>mb-test</Name>
+  <OperatingSystemSection ovf:id="36"><Info>Linux</Info></OperatingSystemSection>
+  <VirtualHardwareSection><Info>Hardware</Info>
+   <System><vssd:ElementName>mb-test</vssd:ElementName>
+    <vssd:InstanceID>0</vssd:InstanceID>
+    <vssd:VirtualSystemIdentifier>mb-test</vssd:VirtualSystemIdentifier>
+    <vssd:VirtualSystemType>vmx-13</vssd:VirtualSystemType>
+   </System>
+   <Item><rasd:ElementName>CPU</rasd:ElementName><rasd:InstanceID>1</rasd:InstanceID>
+    <rasd:ResourceType>3</rasd:ResourceType><rasd:VirtualQuantity>1</rasd:VirtualQuantity></Item>
+   <Item><rasd:ElementName>Memory</rasd:ElementName><rasd:InstanceID>2</rasd:InstanceID>
+    <rasd:ResourceType>4</rasd:ResourceType><rasd:VirtualQuantity>512</rasd:VirtualQuantity>
+    <rasd:AllocationUnits>byte * 2^20</rasd:AllocationUnits></Item>
+   <Item><rasd:AddressOnParent>0</rasd:AddressOnParent><rasd:ElementName>SCSI</rasd:ElementName>
+    <rasd:InstanceID>3</rasd:InstanceID><rasd:ResourceSubType>lsilogic</rasd:ResourceSubType>
+    <rasd:ResourceType>6</rasd:ResourceType></Item>
+   <Item><rasd:AddressOnParent>0</rasd:AddressOnParent><rasd:ElementName>Disk</rasd:ElementName>
+    <rasd:HostResource>ovf:/disk/d1</rasd:HostResource><rasd:InstanceID>4</rasd:InstanceID>
+    <rasd:Parent>3</rasd:Parent><rasd:ResourceType>17</rasd:ResourceType></Item>
+  </VirtualHardwareSection>
+ </VirtualSystem>
+</Envelope>
+'''
+(d/"mb-test.ovf").write_text(xml)
+PY
+python3 - <<'PY'
+import os,hashlib
+from pathlib import Path
+d=Path(os.environ["PACKAGE"])
+body=""
+for f in sorted(d.iterdir()):
+ body+=f"SHA256({f.name})= {hashlib.sha256(f.read_bytes()).hexdigest()}\n"
+(d/"mb-test.mf").write_text(body)
+PY
+PIN="$(python3 - <<'PY'
+import os,hashlib
+from pathlib import Path
+d=Path(os.environ["PACKAGE"])
+h=hashlib.sha256()
+for f in sorted(d.iterdir()):
+ h.update(f.name.encode());h.update(b'\0')
+ h.update(f.stat().st_size.to_bytes(8,'little'))
+ h.update(hashlib.sha256(f.read_bytes()).digest())
+print(h.hexdigest())
+PY
+)"
+if "$NATIVE" plugins vmware-ovf-package-backup \
+ --root "$TMP/store" --identity "$TMP/private" \
+ --stage-root "$TMP/staging" --source-ovf-dir "$PACKAGE" \
+ --source-moref "$MORE" \
+ --expected-fingerprint "$(printf '0%.0s' {1..64})" \
+ --label "Wrong hash must reject" >/dev/null 2>&1;then
+ echo "FAIL wrong independent OVF fingerprint accepted" >&2;exit 1
+fi
+"$NATIVE" plugins vmware-ovf-package-backup \
+ --root "$TMP/store" --identity "$TMP/private" \
+ --stage-root "$TMP/staging" --source-ovf-dir "$PACKAGE" \
+ --source-moref "$MORE" --expected-fingerprint "$PIN" \
+ --label "Official govc simulator OVF package" --json >"$TMP/backup.json"
 ID="$(jq -er .id "$TMP/backup.json")"
-jq -e '.encrypted==true and .offline_only==true and .vadp_cbt_certified==false' "$TMP/backup.json" >/dev/null
+jq -e '.encrypted==true and .offline_only==true and .source_provenance_attested==false and .vadp_cbt_certified==false' "$TMP/backup.json" >/dev/null
 NAME=mb-sim-new-r212
 "$NATIVE" plugins vmware-ovf-restore-new --profile-json "$TMP/target.json" \
  --root "$TMP/store" --identity "$TMP/private" --id "$ID" \
@@ -104,5 +185,5 @@ if "$NATIVE" plugins vmware-ovf-backup --profile-json "$TMP/source.json" \
  --stage-root "$TMP/staging" >/dev/null 2>&1;then
  echo 'FAIL live VM offline export accepted' >&2;exit 1
 fi
-echo 'PASS official govc, trusted TLS vSphere simulator, age OVF/VMDK and new-VM restore with role, key, duplicate and power negative tests'
+echo 'PASS official govc vSphere simulator (offline source package), age OVF/VMDK and new-VM restore with role, key, duplicate and power negative tests'
 echo 'NOT a genuine ESXi/vCenter/VADP/CBT/guest boot or hardware acceptance'
