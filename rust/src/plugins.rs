@@ -274,7 +274,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Requires client-installed pg_dump/pg_restore, private credentials, TLS CA for remote; WAL/PITR and roles/extensions parity still open"),
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PREVIEW, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
-        "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries"),
+        "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries").with_restore_output_stage(PLAN),
     PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PLAN,
         "Pinned SSH host key, exact remote-file digest and length, no shell escape",
         "Native authenticated SSH B-In streams one digest-and-length-pinned file into age-encrypted chunks; SCP/SFTP directory operations and B-Out remain planned")
