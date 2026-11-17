@@ -1,0 +1,91 @@
+name: Multi Backup - manual three independent physical hosts and Redfish power-fault acceptance
+on:
+  push:
+    branches: ["feature/r204-physical-three-host-redfish-ha"]
+    paths:
+      - "scripts/ci/ha-three-physical-redfish-r204.py"
+      - ".github/workflows/ha-three-physical-redfish-r204.yml"
+  workflow_dispatch:
+    inputs:
+      node1:
+        description: "Approved dedicated physical host #1 (SSH known_hosts pinned)"
+        required: true
+        type: string
+      node2:
+        description: "Approved dedicated physical host #2 (SSH known_hosts pinned)"
+        required: true
+        type: string
+      node3:
+        description: "Approved dedicated physical host #3 (SSH known_hosts pinned)"
+        required: true
+        type: string
+      physical_fault_authorization:
+        description: "Type YES_POWER_CYCLE_ONE_ISOLATED_TEST_HOST to authorize real lab primary power interruption"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mb-three-physical-redfish-exclusive-lab
+  cancel-in-progress: false
+jobs:
+  safe-source-checks:
+    name: Validate real hardware drill code and deny unsafe hosted execution
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python syntax and refuse physical fault on hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci/ha-three-physical-redfish-r204.py
+          python3 -m py_compile scripts/ci/ha-three-host-field-r166.py
+          if python3 scripts/ci/ha-three-physical-redfish-r204.py \
+             --hosts lab1.example.test lab2.example.test lab3.example.test \
+             --authorize YES_POWER_CYCLE_ONE_ISOLATED_TEST_HOST >/tmp/mb-hw-deny.log 2>&1; then
+             echo 'FAIL: physical host script accepted GitHub-hosted runner' >&2;exit 1
+          fi
+          grep -q 'dedicated protected manual physical lab required' /tmp/mb-hw-deny.log
+          echo 'PASS: physical Redfish power mutations categorically disabled on GitHub-hosted CI'
+  physical-fault:
+    name: Approved physical Patroni primary power-off and rejoin (manual dispatch ONLY)
+    if: github.event_name == 'workflow_dispatch'
+    needs: safe-source-checks
+    runs-on: [self-hosted, linux, multi-backup-ha-field]
+    environment: multi-backup-physical-destructive-lab
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ONLY on approved BMC-mapped dedicated physical lab
+        shell: bash
+        env:
+          MB_EXPLICIT_PHYSICAL_LAB: ${{ inputs.physical_fault_authorization }}
+          MB_BMC1_USER: ${{ secrets.MB_BMC1_USER }}
+          MB_BMC1_PASSWORD: ${{ secrets.MB_BMC1_PASSWORD }}
+          MB_BMC2_USER: ${{ secrets.MB_BMC2_USER }}
+          MB_BMC2_PASSWORD: ${{ secrets.MB_BMC2_PASSWORD }}
+          MB_BMC3_USER: ${{ secrets.MB_BMC3_USER }}
+          MB_BMC3_PASSWORD: ${{ secrets.MB_BMC3_PASSWORD }}
+          HOST1: ${{ inputs.node1 }}
+          HOST2: ${{ inputs.node2 }}
+          HOST3: ${{ inputs.node3 }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$RUNNER_OS" = Linux
+          test "$(id -u)" -ne 0
+          test "$MB_EXPLICIT_PHYSICAL_LAB" = YES_POWER_CYCLE_ONE_ISOLATED_TEST_HOST
+          test -r /etc/multi-backup/physical-ha-lab.json
+          test -s "$HOME/.ssh/known_hosts"
+          for n in 1 2 3; do
+            u="MB_BMC${n}_USER"; p="MB_BMC${n}_PASSWORD"
+            test -n "${!u}" && test -n "${!p}"
+          done
+          python3 scripts/ci/ha-three-physical-redfish-r204.py \
+            --hosts "$HOST1" "$HOST2" "$HOST3" \
+            --authorize YES_POWER_CYCLE_ONE_ISOLATED_TEST_HOST
+      - name: Evidence boundary and production-fencing scope
+        if: always()
+        run: |
+          echo "Redfish physical host drill has a separate protected approval gate and dedicated 3-host allowlist." >> "$GITHUB_STEP_SUMMARY"
+          echo "A PASS here certifies only the three approved lab machines, not arbitrary production racks/PDUs/BMCs." >> "$GITHUB_STEP_SUMMARY"

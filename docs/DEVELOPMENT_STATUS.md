@@ -1108,3 +1108,9 @@ Implemented a Rust rbd CLI adapter (not raw shell) for a separately approved sna
 New Rust fs_metadata_archive provider streams an ACL/xattr/owner/mtime capable PAX archive from an exact externally attested RO filesystem mount into age chunks without local plaintext staging. Restore uses verified archive into a private RW-mount staging area and Linux renameat2 RENAME_NOREPLACE; never replace existing paths. Genuine Rook/CephFS CI now creates a .snap subtree, mutates the live tree concurrently, mounts the immutable subtree via native ceph-fuse -r, captures ACL/xattrs through libarchive, and verifies restored file bytes, named UID ACL and user xattr. This is **pending exact-SHA CI**; physical-host resilience and coordinated CephFS+RBD/VM snapshots remain unqualified.
 
 One-line English commit summary: Add real CephFS concurrent snapshot ACL/xattr-preserving native Rust PAX backups with create-only recovery tests.
+
+
+## r204 — real three-physical-host Redfish disaster field gate
+Implemented a strongly gated manual CI path for independently attested bare-metal Patroni/etcd hosts, pinned Redfish TLS/BMC UUID, a synchronous PostgreSQL acknowledged witness, single-primary ForceOff, failover, PowerOn in finally and replica rejoin with fresh boot ID. Root-owned and group-readable lab allowlist, approval environment and non-root self-hosted orchestration runner required. Hosted CI #44041403053 PASS proves syntax and refusal of unsafe execution; **actual physical-host power failure not run**, no hardware certification or RC readiness claim until operator-provided three-host field run passes. Docs in HA_THREE_PHYSICAL_REDFISH_R204_IT.md.
+
+One-line English commit summary: Gate actual Patroni three-bare-metal power-failure acceptance behind protected Redfish hardware identities and a synchronous witness.
