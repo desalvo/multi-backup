@@ -1,0 +1,50 @@
+name: Multi Backup - official govc/vcsim TLS OVF encrypted recovery r212
+on:
+  push:
+    branches: ["feature/r212-vmware-native-provider-and-field-gates"]
+    paths:
+      - "rust/src/vmware_ovf.rs"
+      - "scripts/ci/vmware-govc-vcsim-r212.sh"
+      - ".github/workflows/vmware-govc-vcsim-r212.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-vsphere-vcsim-r212
+  cancel-in-progress: true
+jobs:
+  actual-govc-simulator:
+    name: Official govc binary, TLS API simulator, encrypted OVF/VMDK and NEW VM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Prepare age and isolated trusted TLS simulator script
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq openssl qemu-utils
+          bash -n scripts/ci/vmware-govc-vcsim-r212.sh
+          python3 - <<'PY'
+          import pathlib,re
+          src=pathlib.Path("scripts/ci/vmware-govc-vcsim-r212.sh").read_text()
+          snippets=re.findall(r"(?ms)^python3 - <<'PY'\n(.*?)\nPY$",src)
+          assert len(snippets)>=3,"Expected distinct test-fixture Python scripts"
+          for num,body in enumerate(snippets,1):
+              compile(body,f"vmware-fixture-heredoc-{num}","exec")
+          print(f"PASS: {len(snippets)} embedded fixture programs compile")
+          PY
+      - name: Test and compile native Rust VMware provider
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib vmware_ovf
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Execute official govc/vcsim API and age encrypted new VM restore
+        run: bash scripts/ci/vmware-govc-vcsim-r212.sh
+      - name: Reject false physical provider qualification
+        if: success()
+        run: |
+          echo 'PASS official govc API simulator, trusted TLS, age ciphertext, OVF create-only VM import and negative tests.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT VERIFIED genuine VMware ESXi/vCenter, VADP/CBT, guest boot or data recovery.' >> "$GITHUB_STEP_SUMMARY"

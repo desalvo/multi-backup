@@ -1160,3 +1160,22 @@ One-line English commit summary: Separate WORM writer and recovery authority wit
 - Full per-area status, proof scope, external lab prerequisites and explicit noncertifications in `docs/PROVIDER_FIELD_CERTIFICATION_R211_IT.md`.
 
 One-line English commit summary: Integrate genuine iSCSI new-LUN and Oracle PDB/CDB/PITR recovery, qualify separate MinIO WORM IAM principals, and wire protected PVE/PBS and physical HA field gates.
+
+## r212 — native VMware vSphere offline full OVF encryption and create-only recovery (2026-11-17)
+
+- Branch `feature/r212-vmware-native-provider-and-field-gates`, draft PR #49 on r211; no main merge/release.
+- New `rust/src/vmware_ovf.rs` and three native commands: `vmware-ovf-backup` (real powered-off VM only), `vmware-ovf-package-backup` (pre-exported locally fingerprinted OVF+VMDK with **NO VM provenance**), `vmware-ovf-restore-new` (create-only VM import, remain powered-off). Source exact VMware MoRef, owner-only role-scoped VMware credentials, govc SHA256 executable pin, authenticated TLS CA, no ambient proxy/GOVC, strict temporary package member validation, streaming age encrypted chunks/restore, fresh VM name/datastore confirmation and no overwrite. **Offline only**, not full VADP/CBT, online snapshot or live incremental.
+- Rust focused PASS on integrated package path: [#44092243993](https://github.com/desalvo/multi-backup/actions/runs/44092243993). Guarded genuine vCenter/ESXi field workflow hosted-safety PASS [#44091122559](https://github.com/desalvo/multi-backup/actions/runs/44091122559); its real self-hosted job **SKIPPED/NOT RUN** without provider VM and dedicated runner.
+- Upstream official govmomi `vcsim` does not implement actual `ExportVm` NFC. Simulator CI tests a genuine tagged `govc` binary over verified TLS with a deterministic `qemu-img` streamOptimized VMDK/OVF package, age store and `govc import.ovf` NEW simulator VM; it cannot certify true export or vendor guest data. CI result must be checked for exact SHA before claiming simulator PASS.
+- Status is VMware **Preview**, not globally Collaudato; verified field vCenter/ESXi, guest boot/data, VADP/CBT, runtime snapshot/failure modes and license/api permissions remain missing. Same honest flags apply to PVE/PBS, oVirt Engine, 3 real physical HA hosts and physical WORM root resilience; see `docs/PROVIDER_FIELD_CERTIFICATION_R211_IT.md`.
+- Full operator instructions `docs/VMWARE_VSPHERE_NATIVE_R212_IT.md`. No fake VM boot certifications or unsupported CT claims.
+
+One-line English commit summary: Add role-scoped VMware offline OVF encrypted backup and create-only VM restore, independently pinned package import, and protected official provider acceptance gates.
+
+## r212 verifiche finali su GitHub Actions (17 novembre 2026)
+- **PASS** <https://github.com/desalvo/multi-backup/actions/runs/44092243993> — Rust native focused compilation/unit/regression sull'adapter VMware e i plugin integrati.
+- **PASS** <https://github.com/desalvo/multi-backup/actions/runs/44095177198> — official `govc/vcsim` v0.56.2, trusted TLS, generazione OVF e VMDK streamOptimized, fingerprint indipendente, backup age, importazione VM nuova in simulator e controlli negativi. Il simulator non supporta il reale `ExportVm` NFC; il suo manifest lease SHA-1 legacy è usato **esclusivamente nella fixture**. Il SHA256 indipendente del pacchetto e age rimangono obbligatori.
+- **PASS** <https://github.com/desalvo/multi-backup/actions/runs/44095656045> — vero file VMDK `qemu-img` passato da OVF-package B-In a chunk encryption age, restore OVF/VMDK, confronto binario contro la fonte e conversione a RAW con confronto del disco originale; digest errato, chiave errata, overwrite e symlink rifiutati.
+- **PASS hosted SAFETY ONLY** <https://github.com/desalvo/multi-backup/actions/runs/44091122559> — il test distruttivo vCenter rifiuta un runner ordinario. **SKIPPED** vera esecuzione ESXi/vCenter fino a un self-hosted runner autorizzato e una VM usa-e-getta predisposta.
+- **Non collaudati / non implementati completamente**: VMware VADP/CBT, full/incremental live VM, snapshot coerenti con guest application, vero ESXi/vCenter export NFC e clone/new guest boot/integrity; analoghi field per PVE/PBS, oVirt, 3 host fisici, WAL+Patroni e Lustre MDT/OST coordinated restano aperti.
+- La PR r212 è <https://github.com/desalvo/multi-backup/pull/49>, **DRAFT**; non viene promosso alcun plugin universale a READY sulla base di test simulati.

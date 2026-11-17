@@ -262,8 +262,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "PBS B-In preview streams one signed/verified VM image through official proxmox-backup-client after validated snapshot file inventory, fingerprint/CA TLS, independent SHA256 and age encryption. Only offline image recovery; PBS write-back, CT pxar, live provider restore and field E2E remain planned").with_restore_output_stage(PLAN),
     PluginDescriptor::new("kubernetes", "Kubernetes / OpenShift / OKD", DataKind::Cluster, PLAN, NONE,
         "API object resourceVersion, CSI VolumeSnapshots and etcd/CRD scope", "Never capture Secrets without explicit policy; cluster restore requires name remapping"),
-    PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PLAN, NONE,
-        "VM-only VADP/CBT snapshot and config inventory", "CT disabled unless a specific vSphere version offers documented native CT types AND matching backup and restore modes, independently certified; NO guest-agent/container-runtime CT fallback. Restore into new VM/datastore; license/API checks apply"),
+    PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PREVIEW, NONE,
+        "Offline vSphere OVF+VMDK full export through verified govmomi/govc into age-encrypted chunks",
+        "Compiled VMware OVF offline B-In requires powered-off exact MoRef and owner-only export principal; separate import principal creates a NEW powered-off VM on named datastore, with TLS verified, no guest autostart and strict no-overwrite. Real vCenter/ESXi field lab, guest boot/data verification, online backup VADP/CBT, hot snapshot and production certification NOT DONE; CT disabled; NO guest-agent/container-runtime CT fallback.").with_restore_output_stage(PREVIEW),
     PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PREVIEW, NONE,
         "VM-only Engine API READY backup and versioned imageio disk download", "Native read-only IMAGEIO VM disk B-In needs independently preissued READY Engine backup and matching transfer URL, VM/disk UUIDs, SHA256+byte count and trusted HTTPS; records one QCOW2 disk in age store, with offline create-only recovery. NO native VM restore, no multi-disk/OVF completeness, no VM create/start, CT disabled (oVirt has no native supported CT). NO guest-agent/container-runtime CT fallback"),
     PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
@@ -573,7 +574,7 @@ mod tests {
         for id in ["vmware","ovirt"] {
             let adapter=find(id).expect("Hypervisor catalog entry required");
             assert_eq!(adapter.backup_input,
-                if id=="ovirt"{Stage::Preview}else{Stage::Planned});
+                if matches!(id,"ovirt"|"vmware"){Stage::Preview}else{Stage::Planned});
             assert_eq!(adapter.backup_output,Stage::Unsupported);
             assert!(adapter.notes.contains("CT disabled"));
             assert!(adapter.notes.contains("NO guest-agent/container-runtime CT fallback"));
