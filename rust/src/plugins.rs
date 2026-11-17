@@ -943,16 +943,20 @@ mod tests {
         assert!(!r.executable);
     }
     #[test]
-    fn oracle_rman_is_database_input_not_generic_output() {
+    fn oracle_rman_media_ready_is_not_generic_oracle_database_restore() {
         let d=find("oracle").unwrap();
         assert_eq!(d.kind,DataKind::Database);
-        assert_eq!(d.backup_input,Stage::Preview);
+        assert_eq!(d.backup_input,Stage::Ready);
         assert_eq!(d.backup_output,Stage::Unsupported);
-        assert_eq!(d.restore_output,Stage::Planned);
+        assert_eq!(d.restore_output,Stage::Ready);
         assert_eq!(d.restore_input,Stage::Unsupported);
-        assert!(!plan(Mode::Backup,"oracle","anti-ransomware-vault").unwrap().executable);
-        assert!(plan(Mode::Restore,"anti-ransomware-vault","oracle").is_ok());
+        assert!(d.ready_scope.unwrap().contains("oracle_rman_media_pieces_new_directory"));
+        let b=plan(Mode::Backup,"oracle","anti-ransomware-vault").unwrap();
+        assert!(!b.executable && !b.preview_executable);
+        let r=plan(Mode::Restore,"anti-ransomware-vault","oracle").unwrap();
+        assert!(!r.executable && !r.preview_executable);
         assert!(plan(Mode::Backup,"posix","oracle").is_err());
+        assert!(!d.notes.contains("orchestrate Oracle DB restore"),"Never pretend to run RMAN restore");
     }
     #[test]
     fn plan_mode_is_not_silently_defaulted() {
