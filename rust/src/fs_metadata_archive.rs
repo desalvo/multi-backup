@@ -74,6 +74,23 @@ pub fn backup(provider:&str,source:&Path,store_root:&Path,key:&Path,
         archive_bytes:bytes,encrypted:true,
         restores_acl_xattr:true,snapshot_consistency_attested:true})
 }
+// Publishing a new directory MUST be atomic no-replace, not POSIX rename
+// (which silently replaces an existing empty directory after a race).
+#[cfg(target_os="linux")]
+fn publish_new(source:&Path,target:&Path)->Result<()>{
+    use std::{ffi::CString,os::unix::ffi::OsStrExt};
+    let from=CString::new(source.as_os_str().as_bytes())?;
+    let to=CString::new(target.as_os_str().as_bytes())?;
+    let status=unsafe{libc::syscall(libc::SYS_renameat2,libc::AT_FDCWD,
+        from.as_ptr(),libc::AT_FDCWD,to.as_ptr(),libc::RENAME_NOREPLACE)};
+    if status!=0{return Err(format!("New restore publication refused (atomic no-replace): {}",
+        std::io::Error::last_os_error()).into());}
+    Ok(())
+}
+#[cfg(not(target_os="linux"))]
+fn publish_new(_source:&Path,_target:&Path)->Result<()>{
+    Err("Atomic metadata directory publication requires Linux renameat2".into())
+}
 pub fn restore_new(provider:&str,root:&Path,key:&Path,id:&str,destination:&Path)
                   ->Result<Receipt>{
     if !destination.is_absolute()||fs::symlink_metadata(destination).is_ok(){
@@ -125,7 +142,7 @@ pub fn restore_new(provider:&str,root:&Path,key:&Path,id:&str,destination:&Path)
     }
     let dest=parent.join(name);
     if fs::symlink_metadata(&dest).is_ok(){return Err("Concurrent restore destination exists".into());}
-    fs::rename(stage.path(),dest)?;
+    publish_new(stage.path(),&dest)?;
     Ok(Receipt{provider:provider.into(),backup_id:id.into(),archive_bytes:bytes,
         encrypted:true,restores_acl_xattr:true,snapshot_consistency_attested:true})
 }
