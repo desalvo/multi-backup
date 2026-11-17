@@ -34,6 +34,7 @@ pub mod ssh_input;
 pub mod afs_volume;
 pub mod database;
 pub mod oracle_rman;
+pub mod rbd_native;
 pub mod agent_protocol;
 pub mod execution_policy;
 pub mod cluster_placement;
