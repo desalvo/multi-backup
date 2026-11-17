@@ -293,6 +293,7 @@ pub fn restore_new(profile:&Profile,root:&Path,identity:&Path,id:&str,
     if confirmation!=profile.confirmation(){
         return Err("Destination confirmation differs from new target".into());
     }
+    let initial_patroni=profile.check_patroni()?;
     let store=Store::open(root,identity).map_err(|e|e.to_string())?;
     if !store.verify(identity,id).map_err(|e|e.to_string())?.healthy{
         return Err("Database backup integrity verification failed".into());
@@ -362,6 +363,9 @@ pub fn restore_new(profile:&Profile,root:&Path,identity:&Path,id:&str,
     };
     if !child.wait().map_err(|e|e.to_string())?.success(){
         return Err("Database restore failed; inspect new partial database".into());
+    }
+    if profile.check_patroni()? != initial_patroni {
+        return Err("Patroni leadership changed during new-database restore; new partial target requires manual inspection".into());
     }
     Ok(bytes)
 }
