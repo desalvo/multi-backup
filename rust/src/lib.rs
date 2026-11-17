@@ -31,6 +31,7 @@ pub mod mount_probe;
 pub mod mounted_output;
 pub mod webdav_output;
 pub mod ssh_input;
+pub mod ssh_output;
 pub mod afs_volume;
 pub mod database;
 pub mod oracle_rman;
