@@ -14,7 +14,7 @@ import re
 import stat
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET  # hardened against DTD/entity expansion
 
 PREFIX = "mb-r213-"
 ALLOWED_ROOT = Path("/var/lib/multi-backup-ci/r213")
@@ -151,6 +151,8 @@ def real_environment(cfg, names):
             fail("lab output directory must belong to runner and be mode 0700")
         net = subprocess.run(["virsh", "-c", "qemu:///system", "net-dumpxml",
                               cfg["network"]], capture_output=True, text=True, check=True)
+        if len(net.stdout) > 65536:
+            fail("libvirt network XML exceeds bounded 64 KiB parser input")
         xml = ET.fromstring(net.stdout)
         if xml.tag != "network" or xml.findtext("name") != cfg["network"] or \
            xml.find("forward") is not None:
