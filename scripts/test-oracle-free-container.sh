@@ -315,7 +315,13 @@ grep -qi 'Finished restore at' "$WORK/cdb-recovery.log" &&
 cat > "$WORK/open-cdb.sql" <<'SQL'
 whenever sqlerror exit failure
 alter database open;
-alter pluggable database FREEPDB1 open;
+-- Oracle Free may automatically open FREEPDB1 from PDB saved state.
+begin
+ execute immediate 'alter pluggable database FREEPDB1 open';
+exception when others then
+ if SQLCODE != -65019 then raise; end if;
+end;
+/
 alter session set container=FREEPDB1;
 set heading off feedback off pagesize 0
 select 'FULLCDB:'||count(*) from MB_RECOVERY.PHYSICAL_MARKER where id in (1,2);
@@ -323,7 +329,8 @@ exit
 SQL
 docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' \
  < "$WORK/open-cdb.sql" > "$WORK/full-cdb-check.log" 2>&1 ||
- { echo 'FAIL: physically recovered CDB/PDB could not open' >&2;exit 1; }
+ { echo 'FAIL: physically recovered CDB/PDB could not open' >&2;
+ grep -E '(ORA-[0-9]+|SP2-[0-9]+|ERROR)' "$WORK/full-cdb-check.log" | head -15 >&2 || true; exit 1; }
 grep -q 'FULLCDB:2' "$WORK/full-cdb-check.log" ||
  { echo 'FAIL: complete CDB recovery did not replay post-backup redo' >&2;exit 1; }
 echo 'PASS physical full Oracle Free CDB RMAN RESTORE+RECOVER and post-backup redo replay'
@@ -349,7 +356,12 @@ fi
 cat > "$WORK/check-pitr.sql" <<'SQL'
 whenever sqlerror exit failure
 alter database open resetlogs;
-alter pluggable database FREEPDB1 open;
+begin
+ execute immediate 'alter pluggable database FREEPDB1 open';
+exception when others then
+ if SQLCODE != -65019 then raise; end if;
+end;
+/
 alter session set container=FREEPDB1;
 set heading off feedback off pagesize 0
 select 'PITR-EARLY:'||count(*) from MB_RECOVERY.PHYSICAL_MARKER where id=1;
@@ -358,7 +370,8 @@ exit
 SQL
 docker exec -u oracle -i "$NAME" sh -c '"$ORACLE_HOME/bin/sqlplus" -L -s "/ as sysdba"' \
  < "$WORK/check-pitr.sql" > "$WORK/pitr-check.log" 2>&1 ||
- { echo 'FAIL: PITR CDB RESETLOGS/open failed' >&2;exit 1; }
+ { echo 'FAIL: PITR CDB RESETLOGS/open failed' >&2;
+ grep -E '(ORA-[0-9]+|SP2-[0-9]+|ERROR)' "$WORK/pitr-check.log" | head -15 >&2 || true; exit 1; }
 grep -q 'PITR-EARLY:1' "$WORK/pitr-check.log" &&
  grep -q 'PITR-LATE:0' "$WORK/pitr-check.log" ||
  { echo 'FAIL: PITR did not restore expected BEFORE and exclude AFTER marker' >&2;exit 1; }
