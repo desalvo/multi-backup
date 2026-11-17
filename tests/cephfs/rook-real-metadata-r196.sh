@@ -7,7 +7,7 @@ for b in ceph-fuse ceph bsdtar setfacl getfacl setfattr getfattr sha256sum jq; d
   command -v "$b" >/dev/null || { echo "FAIL: CephFS metadata lab lacks genuine $b" >&2; exit 1; }
 done
 CLI=/usr/local/bin/multi-backup-native
-RW=/mnt/mb-cephfs-rw
+RW=/mnt/mb-cephfs-rw-r196
 SNAP=/mnt/mb-cephfs-snapshot-r196
 D=$(mktemp -d /tmp/mb-fsmeta-r196.XXXXXXXX)
 WRITER=""
@@ -15,13 +15,23 @@ cleanup(){
   set +e
   if [ -n "$WRITER" ];then kill "$WRITER" >/dev/null 2>&1 || :;wait "$WRITER" 2>/dev/null || :;fi
   mountpoint -q "$SNAP" && (fusermount -u "$SNAP" || umount "$SNAP")
+  mountpoint -q "$RW" && (fusermount -u "$RW" || umount "$RW")
   rm -rf -- "$D"
 }
 trap cleanup EXIT
-test "$(findmnt -rn -T "$RW" -o FSTYPE)" = fuse.ceph-fuse ||
- test "$(findmnt -rn -T "$RW" -o FSTYPE)" = ceph
+# The preceding functional CephFS test correctly unmounted its own RW
+# client at exit. This advanced test must create a SEPARATE genuine mount,
+# never silently treat an ordinary local directory as CephFS.
+mkdir -p "$RW" "$SNAP"
+if ! ceph-fuse --client_fs mb-ci-fs "$RW" >"$D/ceph-fuse-rw.log" 2>&1;then
+  echo 'FAIL: independent real CephFS RW mount for ACL/xattr test failed' >&2
+  exit 1
+fi
+FSTYPE="$(findmnt -rn -T "$RW" -o FSTYPE)"
+case "$FSTYPE" in fuse.ceph-fuse|ceph) ;; *)
+ echo "FAIL: metadata test source is not genuine mounted CephFS ($FSTYPE)" >&2;exit 1;; esac
 ceph fs set mb-ci-fs allow_new_snaps true >/dev/null
-mkdir -p "$RW/r196-source/nested" "$SNAP"
+mkdir -p "$RW/r196-source/nested"
 printf 'stable snapshot version\n' > "$RW/r196-source/nested/data.txt"
 dd if=/dev/urandom of="$RW/r196-source/nested/payload.bin" bs=1M count=2 status=none
 SOURCE_SHA=$(sha256sum "$RW/r196-source/nested/payload.bin" | awk '{print $1}')
