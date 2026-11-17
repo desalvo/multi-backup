@@ -1,0 +1,65 @@
+name: Multi Backup - real PVE/PBS native media and create-only VM CT field acceptance
+on:
+  push:
+    branches: ["feature/r203-pve-direct-guest-restore"]
+    paths:
+      - "scripts/ci/pve-pbs-real-field-r205.py"
+      - ".github/workflows/pve-pbs-live-field-r205.yml"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type YES_ISOLATED_PVE_PBS_TEST_GUESTS (creates new lab VMIDs, no automatic destruction)"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mb-pve-pbs-disposable-hypervisor-lab
+  cancel-in-progress: false
+jobs:
+  hosted-safety:
+    name: Compile native field script and prohibit execution on GitHub-hosted runner
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test input guards and Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci/pve-pbs-real-field-r205.py
+          if MB_PVE_PBS_FIELD=YES_ISOLATED_PVE_PBS_TEST_GUESTS \
+               python3 scripts/ci/pve-pbs-real-field-r205.py >/tmp/proxmox-field-denied.log 2>&1;then
+            echo "FAIL: PVE/PBS field script authorized provider writes on hosted CI" >&2
+            exit 1
+          fi
+          grep -q 'Refusing unapproved field run' /tmp/proxmox-field-denied.log
+          echo 'PASS no provider mutation outside protected self-hosted lab'
+  real-provider-restore:
+    name: PVE online vzdump QEMU/LXC encrypted import plus PBS VM disk and guest restores
+    if: github.event_name == 'workflow_dispatch'
+    needs: hosted-safety
+    runs-on: [self-hosted, linux, multi-backup-pve-pbs-field]
+    environment: multi-backup-pve-pbs-disruptive-lab
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build exact checked-out Rust native executable on actual lab PVE host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$(id -u)" -ne 0
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+      - name: Actual online guest backup and provider-native/new-guest restore lab
+        shell: bash
+        env:
+          MB_PVE_PBS_FIELD: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test "$MB_PVE_PBS_FIELD" = YES_ISOLATED_PVE_PBS_TEST_GUESTS
+          python3 scripts/ci/pve-pbs-real-field-r205.py
+      - name: Report exact qualification boundaries
+        if: always()
+        run: |
+          echo "Native PVE/PBS field tests must use dedicated disposable guests and a manually approved self-hosted PVE/PBS lab." >> "$GITHUB_STEP_SUMMARY"
+          echo "New guests remain STOPPED; boot and guest-content certification require a separate isolated network boot acceptance." >> "$GITHUB_STEP_SUMMARY"
