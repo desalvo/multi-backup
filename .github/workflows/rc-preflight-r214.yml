@@ -28,6 +28,10 @@ jobs:
     name: Current-SHA Rust/server/PG agents/GUI/K8s full acceptance
     uses: ./.github/workflows/software-readiness-r168.yml
 
+  real-database-roundtrip:
+    name: Current-SHA real PostgreSQL16 and MariaDB11 encrypted backup/restore
+    uses: ./.github/workflows/database-live-integration.yml
+
   rc-security-policy:
     name: RC preflight policy negatives and limited publish rights
     runs-on: ubuntu-24.04
@@ -46,7 +50,7 @@ jobs:
 
   current-sha-linux-candidate:
     name: Exact-commit signed-by-age Linux native preview bundle (NOT published RC)
-    needs: [ready-posix, full-software, rc-security-policy]
+    needs: [ready-posix, full-software, real-database-roundtrip, rc-security-policy]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -55,10 +59,11 @@ jobs:
         env:
           POSIX_RESULT: ${{ needs.ready-posix.result }}
           SOFTWARE_RESULT: ${{ needs.full-software.result }}
+          DATABASE_RESULT: ${{ needs.real-database-roundtrip.result }}
           POLICY_RESULT: ${{ needs.rc-security-policy.result }}
         run: |
           set -euo pipefail
-          for value in "$POSIX_RESULT" "$SOFTWARE_RESULT" "$POLICY_RESULT"; do
+          for value in "$POSIX_RESULT" "$SOFTWARE_RESULT" "$DATABASE_RESULT" "$POLICY_RESULT"; do
             if test "$value" != success;then
               echo "DENIED RC artifact: required current-SHA suite conclusion is $value" >&2
               exit 1
