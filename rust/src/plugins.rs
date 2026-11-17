@@ -254,12 +254,12 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
     // Keep the historical "proxmox" ID for backward compatibility with
     // saved jobs, but never conflate a PVE hypervisor with a PBS datastore.
-    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, PLAN,
+    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PREVIEW, PLAN,
         "QEMU VM and native LXC CT inventory with explicit snapshot/suspend/stop modes",
-        "PVE B-In media export and B-Out native backup-storage target/import are PLANNED only; task receipt is not a verified archive; cannot overwrite existing VMID or storage backup; real QEMU/LXC restore unqualified"),
-    PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PLAN, PLAN,
+        "PVE B-In preview uses real completed UPID status, TLS media list, node-local pvesm path and independently pinned archive bytes/SHA256 before age backup; offline create-only recovery. Full VM/CT restore, B-Out guest import and field certification remain planned").with_restore_output_stage(PLAN),
+    PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PREVIEW, PLAN,
         "Distinct PBS datastore and snapshot groups for VM/CT/host backup archives",
-        "PBS datastore AND native vm/ct/host snapshot listing via TLS scoped read-only token is implemented in Rust preview; transfer, encrypted export, native verification and create-only restore remain PLANNED"),
+        "PBS B-In preview streams one signed/verified VM image through official proxmox-backup-client after validated snapshot file inventory, fingerprint/CA TLS, independent SHA256 and age encryption. Only offline image recovery; PBS write-back, CT pxar, live provider restore and field E2E remain planned").with_restore_output_stage(PLAN),
     PluginDescriptor::new("kubernetes", "Kubernetes / OpenShift / OKD", DataKind::Cluster, PLAN, NONE,
         "API object resourceVersion, CSI VolumeSnapshots and etcd/CRD scope", "Never capture Secrets without explicit policy; cluster restore requires name remapping"),
     PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PLAN, NONE,
@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if matches!(entry.id,"s3"|"ssh"|"oracle"|"iscsi") {
+            if matches!(entry.id,"s3"|"ssh"|"oracle"|"iscsi"|"proxmox"|"pbs") {
                 // A dedicated native source/media adapter does not grant a
                 // database/cloud restore target; those roles remain planned.
                 assert_eq!(entry.backup_input,Stage::Preview);
@@ -558,9 +558,9 @@ mod tests {
     fn pve_and_pbs_have_distinct_non_executable_capabilities() {
         let pve=find("proxmox").expect("PVE compatibility ID");
         let pbs=find("pbs").expect("PBS must be separately selectable");
-        assert_eq!(pve.backup_input,Stage::Planned);
+        assert_eq!(pve.backup_input,Stage::Preview);
         assert_eq!(pve.backup_output,Stage::Planned);
-        assert_eq!(pbs.backup_input,Stage::Planned);
+        assert_eq!(pbs.backup_input,Stage::Preview);
         assert_eq!(pbs.backup_output,Stage::Planned);
         assert_ne!(pve.id,pbs.id);
         assert!(!plan(Mode::Backup,"proxmox","posix").unwrap().executable);

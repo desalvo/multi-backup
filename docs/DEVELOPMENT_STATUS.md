@@ -1112,3 +1112,11 @@ One-line English commit summary: Add real CephFS concurrent snapshot ACL/xattr-p
 
 ## r198 — iSCSI kernel-snapshot B-In isolated from destructive LUN recovery
 Added a native Rust read-only iSCSI source with strict Linux udev target IQN/LUN identity, ID_SERIAL/WWID, block RO bit, pinned byte count, independent SHA256 and encrypted age chunk store. Offline restore creates a NEW raw image file, not an existing iSCSI LUN. Real target/initiator acceptance is separately gated; do not promote this adapter to production or advertise iSCSI output until a fresh target-side LUN allocation/fencing protocol is implemented and tested. One-line English commit summary: Add fail-closed native iSCSI snapshot input and offline encrypted recovery with strict kernel device attestation.
+
+
+## r200 — native PVE/PBS provider media transfer previews
+- PVE: requires the existing trusted HTTPS API with a successful exact-node UPID, independently corroborated backup-volume inventory, exact host-local pvesm path, regular archive of correct QEMU/LXC type, SHA256/size pinning before age chunk commit. Creates only a NEW offline restored media directory, **not** a VM/CT.
+- PBS: official proxmox-backup-client validates snapshot file listing and restores only one VM disk (fidx) to stdout under native repository trust and TLS fingerprint/CA with protected password file; Rust validates byte count/SHA256 before encrypted chunk manifest, restores only to a NEW offline directory. No PBS authentication token in args/logs and no unsigned-signature bypass.
+- Both **Preview only** and **not actual provider field certified**: authentic PVE/PBS services and signed/encrypted dataset not available as isolated disposable CI here; vendor restore-to-new VM/CT, PBS write-back, CT pxar metadata and live snapshots require real integration acceptance. Never claim Ready.
+
+One-line English commit summary: Add native PVE vzdump and PBS VM disk encrypted media import with strict provider evidence and offline create-only recovery.
