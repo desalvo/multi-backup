@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, iscsi_snapshot, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -29,6 +29,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins pve-backup-media --config-json OWNER_ONLY_PVE.json --node NODE --storage STORE --guest-id VMID [--json] (read-only provider backup volume metadata; NOT Multi Backup verified)\n\
        multi-backup-native plugins metadata-snapshot-backup --input cephfs|lustre|nfs|smb|glusterfs|sshfs --source EXACT_RO_SNAPSHOT_MOUNT --root STORE --identity AGE_KEY --label LABEL --source-snapshot-attested [--json] (ACL/xattr/PAX stream encrypted)\n\
        multi-backup-native plugins metadata-snapshot-restore --output PROVIDER --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--json] (ACL/xattr create-only same-mount restore)\n\
+       multi-backup-native plugins iscsi-snapshot-backup --snapshot-json OWNER_ONLY.json --root STORE --identity AGE_KEY --label LABEL [--json] (read-only attested iSCSI LUN to age chunks)\n\
+       multi-backup-native plugins iscsi-restore-image --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--json] (offline raw image only; never writes to a LUN)\n\
        multi-backup-native plugins rbd-snapshot-backup --snapshot-json PRIVATE.json --root STORE --identity AGE_KEY --label LABEL [--json]\n\
        multi-backup-native plugins rbd-restore-new --root STORE --identity AGE_KEY --id HASH --pool POOL --image NEW --confirm-new-image POOL/NEW [--json]\n\
        multi-backup-native plugins oracle-rman-media-backup --pieces RMAN_PIECES_DIR --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label NAME [--json] (native encrypted RMAN piece importer; RMAN job executed separately)\n\
@@ -185,6 +187,31 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--destination")?))?;
         if json{println!("{}",serde_json::to_string_pretty(&result)?);}
         else{println!("Restored ACL/xattr metadata archive to fresh mount: {}",result.backup_id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="iscsi-snapshot-backup" {
+        if password_stdin{return Err("iSCSI uses owner-only snapshot attestation".into());}
+        accepted(&flags,&["--snapshot-json","--root","--identity","--label"])?;
+        let snapshot=iscsi_snapshot::Snapshot::load(
+            Path::new(required(&flags,"--snapshot-json")?))?;
+        let item=iscsi_snapshot::backup(&snapshot,
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--label")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&item)?);}
+        else{println!("Verified read-only iSCSI LUN encrypted: {}",item.backup_id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="iscsi-restore-image" {
+        if password_stdin{return Err("iSCSI offline image restore requires age key".into());}
+        accepted(&flags,&["--root","--identity","--id","--destination"])?;
+        let item=iscsi_snapshot::restore_new_local(
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--id")?,
+            Path::new(required(&flags,"--destination")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&item)?);}
+        else{println!("Encrypted iSCSI image restored into a NEW local directory: {}",item.backup_id);}
         return Ok(());
     }
     if family=="plugins" && command=="rbd-snapshot-backup" {

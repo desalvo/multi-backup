@@ -243,9 +243,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PREVIEW, PREVIEW,
         "RBD image snapshots+diff export",
         "Dedicated native RBD immutable snapshot B-In accepts exact numeric snapshot ID, length and independent SHA256. Restore creates a NEW RBD image, verifies complete remote export. Snapshot quiesce, VM/CT consistency, diff chains, namespaces and production fencing remain OPEN"),
-    PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
+    PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PREVIEW, PLAN,
         "Initiator/target IQN and LUN WWID with storage snapshot",
-        "Read only a stable quiesced block snapshot; supports raw LUN or LVM (local, clustered-local, shared-exclusive, HA-exclusive, clustered-shared); restore to fresh isolated VG/LUN only").with_san_lvm(),
+        "Native read-only block-device iSCSI B-In validates exact kernel IQN/LUN udev ID_SERIAL/WWID, read-only bit, size and independent SHA256 before publishing age chunks. Restore is offline to NEW local image; direct NEW LUN B-Out still requires target-side allocation attestation, fencing and lab certification").with_san_lvm().with_restore_output_stage(PLAN),
     PluginDescriptor::new("fc", "Fibre Channel LUN", DataKind::BlockTransport, PLAN, PLAN,
         "FC WWPN, SCSI WWID, multipath and snapshot epoch",
         "Respect multipath aliases, WWID and ownership; raw FC LUN or LVM local/clustered/shared, with fencing/locking and snapshot consistency").with_san_lvm(),
@@ -639,7 +639,7 @@ mod tests {
             let descriptor=find(id).unwrap();
             assert_eq!(descriptor.kind, DataKind::BlockTransport);
             assert_eq!(descriptor.safety, SafetyProfile::SnapshotBlockDevice);
-            assert_eq!(descriptor.backup_input, Stage::Planned);
+            assert_eq!(descriptor.backup_input, if id=="iscsi" {Stage::Preview} else {Stage::Planned});
             assert_eq!(descriptor.backup_output, Stage::Planned);
             assert_eq!(descriptor.restore_input, Stage::Planned);
             assert_eq!(descriptor.restore_output, Stage::Planned);
