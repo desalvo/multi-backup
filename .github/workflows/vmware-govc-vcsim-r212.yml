@@ -28,6 +28,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y age jq openssl qemu-utils
           bash -n scripts/ci/vmware-govc-vcsim-r212.sh
+          python3 - <<'PY'
+          import pathlib,re
+          src=pathlib.Path("scripts/ci/vmware-govc-vcsim-r212.sh").read_text()
+          snippets=re.findall(r"(?ms)^python3 - <<'PY'\n(.*?)\nPY$",src)
+          assert len(snippets)>=3,"Expected distinct test-fixture Python scripts"
+          for num,body in enumerate(snippets,1):
+              compile(body,f"vmware-fixture-heredoc-{num}","exec")
+          print(f"PASS: {len(snippets)} embedded fixture programs compile")
+          PY
       - name: Test and compile native Rust VMware provider
         run: |
           cargo test --manifest-path rust/Cargo.toml --lib vmware_ovf

@@ -124,7 +124,9 @@ from pathlib import Path
 d=Path(os.environ["PACKAGE"])
 body=""
 for f in sorted(d.iterdir()):
- # vcsim lease reports legacy Sha1; the independent package fingerprint\n # below continues to use full SHA256 for each file and for the package.\n body+=f"SHA1({f.name})= {hashlib.sha1(f.read_bytes()).hexdigest()}\n"
+ # vcsim exposes a legacy SHA1 lease checksum.
+ # The independent package fingerprint below still uses SHA256.
+ body+=f"SHA1({f.name})= {hashlib.sha1(f.read_bytes()).hexdigest()}\n"
 (d/"mb-test.mf").write_text(body)
 PY
 # Independent govc import.spec check and a disposable fixture-import probe.
