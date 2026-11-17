@@ -548,7 +548,7 @@ mod tests {
     fn requested_proxmox_and_rbd_output_roles_are_only_declarative(){
         for id in ["rbd","proxmox"]{
             let p=plan(Mode::Backup,"posix",id).unwrap();
-            assert_eq!(p.destination_stage,Stage::Planned);
+            assert_eq!(p.destination_stage,if id=="rbd"{Stage::Preview}else{Stage::Planned});
             assert!(!p.executable && !p.preview_executable);
             assert!(p.confirmation_required_before_writes);
             assert!(p.required_preflight.iter().any(|s|s.contains("create") ||
