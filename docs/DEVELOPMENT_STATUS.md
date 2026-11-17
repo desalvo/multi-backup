@@ -1062,3 +1062,8 @@ One-line English commit summary: Add fail-closed DAVFS2 ciphertext publication a
 Existing 3-MON/3-OSD Rook Ceph RGW S3 WORM live acceptance now includes dedicated S3 B-In from an explicitly pinned old version under a newer current version, independent SHA256, age chunks and bytewise restore; wrong hash refuses commit. Lab execution on the updated SHA is still pending; keep source role Preview. This extends the same lab, never starts a duplicate mock. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.
 
 One-line English commit summary: Extend genuine multi-OSD Ceph RGW lab with version-pinned S3 encrypted input and byte-verified recovery.
+
+
+## r189 — Native HTTPS WebDAV ciphertext B-Out and R-In
+
+Real davfs2 RW CI failed independent remote GET even after bounded 120s, demonstrating deferred FUSE writeback is not sufficient as verified B-Out. Native \`webdav_output.rs\` now uses strict HTTPS BasicAuth scoped config, age-encrypted local-only staging, conditional create-only PUT, exact encrypted remote GET SHA256/size verification and checksum-marker-last. Dedicated CLI also restores remote verified ciphertext to NEW local directory. Real HTTPS rclone server CI rerun required. See docs/PLUGIN_FIELD_READINESS_R182_IT.md. One-line English commit summary: Implement encrypted WebDAV native conditional PUT with independent HTTPS GET and safe create-only restore after FUSE writeback failure.

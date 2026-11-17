@@ -139,67 +139,59 @@ test -w "$RW" && touch "$RW/.mb-write-probe"
 rm -f -- "$RW/.mb-write-probe"
 "$CLI" plugins probe --plugin webdav --mount "$RW" --json \
   | jq -e '.rw_mount_option == true and (.fs_type == "fuse.davfs" or .fs_type == "fuse")'
+# Native HTTPS API B-Out is intentionally distinct from the mounted
+# davfs2 B-Out: the latter ACKed cached writes without remote durability.
+# We require actual HTTP PUT (If-None-Match: *) and an independent HTTPS GET
+# for BOTH ciphertext and completion marker before returning success.
 if "$CLI" plugins mounted-backup --output webdav --mount "$RO" \
-  --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
+  --source "$WORK/local-output" --filename should-not-write.tar.gz.age \
   --recipient "$RECEIVER" --identity "$IDENTITY" >/dev/null 2>&1;then
-  echo 'FAIL: WebDAV B-Out accepted read-only davfs2 mount' >&2;exit 1
+  echo 'FAIL: read-only WebDAV mount accepted B-Out' >&2;exit 1
 fi
-"$CLI" plugins mounted-backup --output webdav --mount "$RW" \
+python3 - "$WORK/webdav-output.json" <<'PY'
+import json,os,sys
+path=sys.argv[1]
+with open(path,"x",encoding="utf-8") as target:
+    json.dump({"endpoint":"https://localhost:18920/","username":"mbci"},target)
+os.chmod(path,0o600)
+PY
+export MULTI_BACKUP_WEBDAV_PASSWORD="$AUTH_PASS"
+"$CLI" plugins webdav-http-backup \
+  --config "$WORK/webdav-output.json" \
   --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
-  --recipient "$RECEIVER" --identity "$IDENTITY" --json > "$WORK/webdav-out.json"
-jq -e '.create_only and .encrypted and (.verified_members == .source_members)' "$WORK/webdav-out.json"
-test -f "$RW/new-webdav.tar.gz.age.sha256"
-sync
-# Independently read over HTTPS, bypassing FUSE/davfs2 cache.
-# davfs2 may ACK write+fsync locally before its background upload is
-# visible to the server. Do not mistake a local FUSE readback for a remote
-# durability assertion. Poll the AUTHENTIC HTTPS endpoint with bounded time
-# and check full bytes, instead of disabling the verification.
-remote_ready=0
-for attempt in $(seq 1 60);do
-  if curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
-       https://localhost:18920/new-webdav.tar.gz.age \
-       -o "$WORK/https-downloaded.tar.gz.age" &&
-     cmp -s "$RW/new-webdav.tar.gz.age" "$WORK/https-downloaded.tar.gz.age";then
-    remote_ready=1
-    break
-  fi
-  sleep 2
-done
-test "$remote_ready" = 1 || {
-  echo "FAIL: WebDAV server did not durably expose the full encrypted archive" >&2
-  exit 1
-}
-cmp "$RW/new-webdav.tar.gz.age" "$WORK/https-downloaded.tar.gz.age"
-# The checksum marker must also be visible via independent HTTPS, not only
-# the FUSE cache. A partially published remote backup is never a CI PASS.
-sidecar_ready=0
-for attempt in $(seq 1 60);do
-  if curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
-       https://localhost:18920/new-webdav.tar.gz.age.sha256 \
-       -o "$WORK/https-downloaded.sha256" &&
-     cmp -s "$RW/new-webdav.tar.gz.age.sha256" "$WORK/https-downloaded.sha256";then
-    sidecar_ready=1
-    break
-  fi
-  sleep 2
-done
-test "$sidecar_ready" = 1 || {
-  echo "FAIL: WebDAV remote SHA256 completion marker absent or divergent" >&2
-  exit 1
-}
-"$CLI" plugins mounted-restore --input webdav --mount "$RW" \
+  --recipient "$RECEIVER" --identity "$IDENTITY" \
+  --json > "$WORK/webdav-http-out.json"
+jq -e '.create_only and .encrypted and .independent_https_readback and (.verified_members > 0)' "$WORK/webdav-http-out.json"
+# Verify the HTTP endpoint *again*, independent of the Rust verification;
+# still no WebDAV FUSE cache or client-side mount in the proof.
+curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+  https://localhost:18920/new-webdav.tar.gz.age \
+  -o "$WORK/downloaded-ciphertext.tar.gz.age"
+curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+  https://localhost:18920/new-webdav.tar.gz.age.sha256 \
+  -o "$WORK/remote-completion.sha256"
+ACTUAL_HASH="$(sha256sum "$WORK/downloaded-ciphertext.tar.gz.age" | awk '{print $1}')"
+test "$ACTUAL_HASH" = "$(jq -r .sha256 "$WORK/webdav-http-out.json")"
+test "$ACTUAL_HASH" = "$(awk 'NR==1{print $1}' "$WORK/remote-completion.sha256")"
+"$CLI" plugins webdav-http-restore --config "$WORK/webdav-output.json" \
   --filename new-webdav.tar.gz.age --identity "$IDENTITY" \
-  --destination "$WORK/restored-from-webdav"
+  --destination "$WORK/restored-from-webdav" --json > "$WORK/webdav-recover.json"
+jq -e '.restored_members>0' "$WORK/webdav-recover.json"
 cmp "$WORK/local-output/nested/source.txt" \
-  "$WORK/restored-from-webdav/multi-backup/mounted-output/nested/source.txt"
-if "$CLI" plugins mounted-backup --output webdav --mount "$RW" \
+  "$WORK/restored-from-webdav/multi-backup/webdav-native/nested/source.txt"
+if "$CLI" plugins webdav-http-backup \
+  --config "$WORK/webdav-output.json" \
   --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
   --recipient "$RECEIVER" --identity "$IDENTITY" >/dev/null 2>&1;then
-  echo 'FAIL: WebDAV B-Out overwrote existing encrypted remote object' >&2;exit 1
+  echo 'FAIL: WebDAV native API overwrote existing encrypted object' >&2;exit 1
 fi
-unset AUTH_PASS
-echo 'PASS actual TLS authenticated WebDAV B-Out, remote ciphertext HTTPS readback, age restore and no-overwrite'
+if "$CLI" plugins webdav-http-restore --config "$WORK/webdav-output.json" \
+  --filename new-webdav.tar.gz.age --identity "$IDENTITY" \
+  --destination "$WORK/restored-from-webdav" >/dev/null 2>&1;then
+  echo 'FAIL: WebDAV native restore overwrote existing local directory' >&2;exit 1
+fi
+unset MULTI_BACKUP_WEBDAV_PASSWORD AUTH_PASS
+echo 'PASS genuine TLS-authenticated WebDAV API ciphertext create-only B-Out, independent GET, sha256 marker and age restore'
 
 echo "PASS authentic TLS+basic-auth rclone WebDAV server, real read-only davfs2 mount, Rust encrypted backup/verify/byte-for-byte local restore"
-echo "NOT CERTIFIED real server-side snapshots, cache ETag fidelity, full metadata, WebDAV output/remote restore"
+echo "NOT CERTIFIED remote ETag/ACL metadata, large transfers and provider-specific WebDAV locking/HA; mounted davfs2 RW is not a durable B-Out"

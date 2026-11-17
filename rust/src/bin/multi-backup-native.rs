@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, ssh_input, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -15,6 +15,8 @@ fn usage() -> &'static str {
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins ssh-backup --config OWNER_ONLY_SSH.json --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label LABEL [--top-namespace NS] [--json] (pinned host key, single version-attested remote file into age chunks)\n\
+       multi-backup-native plugins webdav-http-backup --config OWNER_ONLY_WEBDAV.json --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--json] (native trusted HTTPS conditional create-only PUT and independent GET; env MULTI_BACKUP_WEBDAV_PASSWORD)\n\
+       multi-backup-native plugins webdav-http-restore --config OWNER_ONLY_WEBDAV.json --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_LOCAL_DIR [--json]\n\
        multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount EXACT_MOUNT --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins mounted-restore --input MOUNT_PROVIDER --mount EXACT_MOUNT --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_DIR [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins s3-object-backup --config S3.json --object-key KEY --version-id VERSION --sha256 RAW_SHA256 --root EXISTING_CHUNK_STORE --identity AGE_ID --label LABEL [--top-namespace NS] [--json] (B-In versioned S3 / Ceph RGW / RustFS -> age chunk store)\n\
@@ -165,6 +167,29 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             flags.get("--top-namespace").copied().unwrap_or(""))?;
         if json {println!("{}",serde_json::to_string_pretty(&backup)?);}
         else {println!("Pinned SSH input encrypted and verified: {}",backup.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="webdav-http-backup" {
+        if password_stdin {return Err("WebDAV credentials must use environment variable".into());}
+        accepted(&flags,&["--config","--source","--filename","--recipient","--identity"])?;
+        let cfg=webdav_output::Config::load(Path::new(required(&flags,"--config")?))?;
+        let receipt=webdav_output::backup_directory(cfg,
+            Path::new(required(&flags,"--source")?),
+            required(&flags,"--filename")?,required(&flags,"--recipient")?,
+            Path::new(required(&flags,"--identity")?))?;
+        if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
+        else {println!("WebDAV encrypted upload confirmed by independent HTTPS GET: {}",receipt.remote_file);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="webdav-http-restore" {
+        if password_stdin {return Err("WebDAV credentials must use environment variable".into());}
+        accepted(&flags,&["--config","--filename","--identity","--destination"])?;
+        let cfg=webdav_output::Config::load(Path::new(required(&flags,"--config")?))?;
+        let members=webdav_output::restore_archive(cfg,
+            required(&flags,"--filename")?,Path::new(required(&flags,"--identity")?),
+            Path::new(required(&flags,"--destination")?))?;
+        if json {println!("{}",serde_json::json!({"restored_members":members,"provider":"webdav"}));}
+        else {println!("WebDAV remote archive authenticated, {} members restored into NEW destination",members);}
         return Ok(());
     }
     if family=="plugins" && command=="mounted-backup" {

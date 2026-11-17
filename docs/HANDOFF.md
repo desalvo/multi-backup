@@ -991,3 +991,8 @@ Rust exact-source Lustre Rocky9 QEMU real FULL -> age -> restore and mounted B-O
 ## r188 S3 Ceph RGW B-In field handoff
 
 Added pinned-version S3 B-In to scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh (genuine 3-OSD/3-MON Ceph). Run only with approved existing Ceph CI gate, once, on exact SHA, after ongoing CephFS lab job finishes. It asserts older version despite newer current object, independent SHA256, age-chunk restore, negative wrong-hash. Do not claim PASS before actual run; no main merge or RC publishing.
+
+
+## r189 WebDAV transport handoff
+
+FUSE/davfs2 mounted B-Out was false-positive: writes acknowledged locally but independent HTTPS GET remained empty for >120s (#43994077483 FAIL). Do not mark mount-based WebDAV output durable. Added \`rust/src/webdav_output.rs\` native direct HTTPS WebDAV provider, conditional \`PUT If-None-Match: *\`, required independent GET of encrypted file and sidecar, sidecar commit last, safe fresh-target remote restore. Password only \`MULTI_BACKUP_WEBDAV_PASSWORD\`. Extended real WebDAV CI script to exercise direct native API, negative duplicate and restore. Await exact SHA CI, don't claim PASS until green. See r182 field readiness.

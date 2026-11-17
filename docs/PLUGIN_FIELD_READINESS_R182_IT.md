@@ -74,3 +74,17 @@ One-line English commit summary: Harden DAVFS2 create-only ciphertext publicatio
 Esteso il test CI già esistente `scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh` nello stesso cluster Rook/Ceph 3-OSD: upload di oggetto versionato in bucket Object Lock COMPLIANCE, secondo upload che cambia la versione corrente, B-In Rust con `versionId` originale + SHA-256 indipendente, encryption age chunk store, restore byte-identico e rifiuto SHA manomesso. **Non dichiarare PASS della nuova estensione** finché non è stata eseguita dal job di laboratorio sul nuovo SHA. Non avviare automaticamente un secondo costoso cluster mentre il collaudo CephFS è ancora in corso.
 
 One-line English commit summary: Extend genuine multi-OSD Ceph RGW lab with version-pinned S3 encrypted input and byte-verified recovery.
+
+
+## r189 — WebDAV API nativo, writeback verificabile
+
+Il test B-Out WebDAV via RW davfs2 **è fallito realmente** [#43994077483](https://github.com/desalvo/multi-backup/actions/runs/43994077483): anche dopo 120s il server TLS non esponeva i byte indicati dal FUSE cache. Il mount WebDAV *read-only* B-In rimane valido, ma non attribuiamo la durabilità di un upload ai semplici syscall del mount.
+
+Nuovo \`rust/src/webdav_output.rs\`, CLI \`plugins webdav-http-backup\` e \`plugins webdav-http-restore\`:
+- file JSON private 0600: \`{"endpoint":"https://localhost:18920/","username":"mbci"}\`; password fornita soltanto da variabile \`MULTI_BACKUP_WEBDAV_PASSWORD\`. TLS con CA verificata, zero redirect, nessun URL credenziale o HTTP.
+- \`archive::create\` cifra prima localmente con age senza staging plaintext; verifica con la private identity; API \`HEAD\` deve attestare assenza remota; \`PUT\` esige \`If-None-Match: *\` e HTTP 201; nuova \`GET\` indipendente deve confermare ogni byte del ciphertext; la SHA-256 sidecar è caricata **solo dopo** il risultato positivo e anch'essa riletta/controllata.
+- Restore native: download HTTP del sidecar e ciphertext, verifica SHA-256 ed età cifratura, estrazione solo in directory nuova non esistente. Nessun DELETE o overwrite API, niente segreti su CLI/log.
+- Il workflow WebDAV reale esistente è esteso a prove positive/negative contro il vero server TLS rclone; **ci sarà un nuovo CI PASS soltanto quando avrà esito verde**, indipendente dal precedente FUSE FAIL.
+- L'HTTP precondition \`If-None-Match\` deve essere rispettata dal server; la promozione a produzione richiede semantiche server ben verificate, fault injection e trasferimento multipart/ripresa.
+
+One-line English commit summary: Implement encrypted WebDAV native conditional PUT with independent HTTPS GET and safe create-only restore after FUSE writeback failure.

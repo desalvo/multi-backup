@@ -1,4 +1,4 @@
-name: Multi Backup - real authenticated WebDAV RO input and encrypted RW output
+name: Multi Backup - real authenticated WebDAV RO input and native encrypted HTTPS B-Out
 on:
   push:
     branches: ["feature/**"]
@@ -8,6 +8,7 @@ on:
       - "rust/src/chunk_store.rs"
       - "rust/src/archive.rs"
       - "rust/src/mounted_output.rs"
+      - "rust/src/webdav_output.rs"
       - "rust/Cargo.toml"
       - "rust/Cargo.lock"
       - "scripts/test-real-webdav-r046.sh"
@@ -34,12 +35,12 @@ jobs:
           bash -n scripts/test-real-webdav-r046.sh
       - name: Build compiled Rust native plugin dispatcher
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
-      - name: Actual HTTPS WebDAV RO input and RW ciphertext B-Out with independent HTTPS GET
+      - name: Genuine HTTPS WebDAV mounted RO input, native conditional PUT and independent GET restore
         env:
           RUNNER_ENVIRONMENT: github-hosted
         run: bash scripts/test-real-webdav-r046.sh
       - name: Record honest field boundary
         if: success()
         run: |
-          echo "PASS real HTTPS Basic Auth WebDAV RO input and RW create-only age B-Out with independent remote HTTPS ciphertext GET, SHA-256 and isolated recovery." >> "$GITHUB_STEP_SUMMARY"
-          echo "NOT CERTIFIED provider-specific ETag/ACL/xattr, remote service failure/fencing, large uploads or production snapshot semantics." >> "$GITHUB_STEP_SUMMARY"
+          echo "PASS genuine HTTPS Basic Auth WebDAV RO davfs2 input and DIRECT HTTPS create-only conditional PUT of age ciphertext, independent server GET, checksum-last and safe restore." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED server-side DAV ETag/ACL/xattr semantics, multipart/resumable large files, production snapshot locking or WebDAV FUSE writeback durability." >> "$GITHUB_STEP_SUMMARY"
