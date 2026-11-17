@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, worm_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, worm_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, ovirt_imageio, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -23,6 +23,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins dropbox-upload --archive VERIFIED.tar.gz.age --remote-path /New/Archive.tar.gz.age [--json] (B-Out Dropbox: create-only encrypted upload)\n\
        multi-backup-native plugins dropbox-backup --source LOCAL_DIR --remote-path /New/Archive.tar.gz.age --recipient AGE_PUBLIC [--json] (B-Out encrypted, no plaintext archive)\n\
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
+       multi-backup-native plugins ovirt-imageio-backup --config OWNER_ONLY_OVIRT_IMAGEIO.json --root ENCRYPTED_STORE --identity AGE_PRIVATE --label LABEL [--json] (read-only pre-issued READY oVirt VM disk imageio ticket, SHA-256 pinned; no remote VM restore)\n\
        multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
        multi-backup-native plugins pve-task-status --config-json OWNER_ONLY_PVE.json --node NODE --upid PVE_UPID [--json] (read-only status)\n\
@@ -234,6 +235,18 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--destination")?))?;
         if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
         else {println!("Restored {} verified Oracle RMAN media pieces to NEW path",receipt.pieces);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="ovirt-imageio-backup" {
+        if password_stdin{return Err("oVirt IMAGEIO requires externally authorized owner-only session JSON".into());}
+        accepted(&flags,&["--config","--root","--identity","--label"])?;
+        let config=ovirt_imageio::Config::load(Path::new(required(&flags,"--config")?))?;
+        let receipt=ovirt_imageio::backup(&config,
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--label")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&receipt)?);}
+        else{println!("oVirt READY VM imageio disk sealed to verified age chunks: {}",receipt.id);}
         return Ok(());
     }
     if family=="plugins" && command=="ssh-backup" {
