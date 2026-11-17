@@ -12,6 +12,8 @@ cleanup(){
  set +e
  sudo iscsiadm -m node -T "$IQN" -p 127.0.0.1:3260 --logout >/dev/null 2>&1 || :
  sudo tgtadm --lld iscsi --mode target --op delete --tid 1 >/dev/null 2>&1 || :
+ sudo iscsiadm -m node -T "iqn.2026-11.example.invalid:mb-new-lun" -p 127.0.0.1:3260 --logout >/dev/null 2>&1 || :
+ sudo tgtadm --lld iscsi --mode target --op delete --tid 10001 >/dev/null 2>&1 || :
  sudo rm -rf -- "$WORK"
 }
 trap cleanup EXIT
@@ -64,4 +66,18 @@ if sudo "$CLI" plugins iscsi-snapshot-backup --snapshot-json "$WORK/source.json"
  echo "FAIL: writable LUN accepted" >&2;exit 1
 fi
 sudo blockdev --setro "$DEV"
+mkdir -p "$WORK/new-lun"
+sudo "$CLI" plugins iscsi-restore-new-tgt --root "$WORK/store" \
+ --identity "$WORK/identity" --id "$SNAP" --backing-dir "$WORK/new-lun" \
+ --target-iqn "iqn.2026-11.example.invalid:mb-new-lun" --target-id 10001 \
+ --json > "$WORK/new-lun.json"
+jq -e '.created_new_lun==true and .verified_remote_block_readback==true and .bytes==8388608 and .remote_san_certified==false' "$WORK/new-lun.json"
+test -b "$(readlink -f /dev/disk/by-path/ip-127.0.0.1:3260-iscsi-iqn.2026-11.example.invalid:mb-new-lun-lun-1)"
+sudo cmp "$WORK/lun.img" "$WORK/new-lun/mb-new-lun-10001.img"
+if sudo "$CLI" plugins iscsi-restore-new-tgt --root "$WORK/store" \
+ --identity "$WORK/identity" --id "$SNAP" --backing-dir "$WORK/new-lun" \
+ --target-iqn "iqn.2026-11.example.invalid:mb-new-lun" --target-id 10001 >/dev/null 2>&1;then
+ echo 'FAIL: existing iSCSI target accepted duplicate restore' >&2;exit 1
+fi
+echo "PASS real NEW iSCSI LUN B-Out over kernel SCSI with independent SHA256 device readback"
 echo "PASS real iSCSI target and kernel initiator, pinned read-only LUN and age backup, offline NEW-image restore, negative tests"
