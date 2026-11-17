@@ -1115,6 +1115,13 @@ impl NativeApp {
                             ui.label(format!("Restore output: {:?}",descriptor.restore_output));
                         });
                         ui.label(RichText::new(descriptor.notes).color(MUTED).small());
+                        if let Some(scope)=descriptor.ready_scope {
+                            ui.label(RichText::new(format!("READY LIMITATO A: {scope}"))
+                                .color(Color32::from_rgb(34,125,75)).small().strong());
+                        } else {
+                            ui.label(RichText::new("NON READY: Preview/Planned nel perimetro indicato")
+                                .color(MUTED).small());
+                        }
                         ui.label(RichText::new(format!("Coerenza: {}",descriptor.consistency))
                             .color(MUTED).small());
                         if matches!(descriptor.id,"github"|"dropbox"){
@@ -2311,8 +2318,17 @@ mod provider_gui_tests{
     #[test]
     fn no_catalog_source_is_implicitly_production_ready(){
         assert!(!plugins::CATALOG.is_empty());
-        assert!(plugins::CATALOG.iter().all(|p|
-            p.backup_input!=plugins::Stage::Ready &&
-            p.backup_output!=plugins::Stage::Ready));
+        let ready=plugins::CATALOG.iter().filter(|p|
+            matches!(p.backup_input,plugins::Stage::Ready) ||
+            matches!(p.backup_output,plugins::Stage::Ready)).collect::<Vec<_>>();
+        assert_eq!(ready.iter().map(|p|p.id).collect::<Vec<_>>(),
+            vec!["posix","postgresql"]);
+        assert!(ready.iter().all(|p|p.ready_scope.is_some()),
+            "Every visible Ready label must reveal the exact supported scope");
+        assert!(plugins::CATALOG.iter().filter(|p|p.ready_scope.is_none())
+            .all(|p|p.backup_input!=plugins::Stage::Ready &&
+                     p.backup_output!=plugins::Stage::Ready));
+        assert!(ready[0].ready_scope.unwrap().contains("content_only"));
+        assert!(ready[1].ready_scope.unwrap().contains("single_database"));
     }
 }
