@@ -59,6 +59,41 @@ fi
 mkdir -p "$WORK/source/nested"
 echo "Ceph actual multi-node encrypted backup test" > "$WORK/source/nested/example.txt"
 dd if=/dev/urandom of="$WORK/source/data.bin" bs=1024 count=256 status=none
+# r188: real Ceph RGW *B-In* reads a fixed object version into Rust age
+# encrypted chunks, even if the current object has already changed.
+S3_SOURCE_KEY=ceph/real/ci/r188/source-versioned.bin
+OLD_VERSION="$(s3 put-object --bucket "$BUCKET" --key "$S3_SOURCE_KEY" \
+  --body "$WORK/source/data.bin" --query VersionId --output text)"
+test -n "$OLD_VERSION" && test "$OLD_VERSION" != None && test "$OLD_VERSION" != null
+printf 'later Ceph RGW object version\n' > "$WORK/latest-s3-source.txt"
+NEW_VERSION="$(s3 put-object --bucket "$BUCKET" --key "$S3_SOURCE_KEY" \
+  --body "$WORK/latest-s3-source.txt" --query VersionId --output text)"
+test -n "$NEW_VERSION" && test "$NEW_VERSION" != "$OLD_VERSION"
+DIGEST="$(sha256sum "$WORK/source/data.bin" | awk '{print $1}')"
+mkdir -p "$WORK/s3-import-store"
+"$CLI" storage init --root "$WORK/s3-import-store" --recipient "$PUB" >/dev/null
+"$CLI" plugins s3-object-backup --config "$WORK/ceph.json" \
+  --object-key r188/source-versioned.bin --version-id "$OLD_VERSION" \
+  --sha256 "$DIGEST" --root "$WORK/s3-import-store" \
+  --identity "$WORK/key.age" --label "Real Ceph RGW pinned S3 B-In" \
+  --json > "$WORK/s3-import.json"
+IMPORT_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "$WORK/s3-import.json")"
+"$CLI" storage verify --root "$WORK/s3-import-store" --identity "$WORK/key.age" \
+  --id "$IMPORT_ID" >/dev/null
+"$CLI" storage restore --root "$WORK/s3-import-store" \
+  --identity "$WORK/key.age" --id "$IMPORT_ID" \
+  --destination "$WORK/s3-import-recovered"
+cmp "$WORK/source/data.bin" \
+  "$WORK/s3-import-recovered/s3/$BUCKET/$S3_SOURCE_KEY"
+if "$CLI" plugins s3-object-backup --config "$WORK/ceph.json" \
+  --object-key r188/source-versioned.bin --version-id "$OLD_VERSION" \
+  --sha256 "$(printf '0%.0s' {1..64})" \
+  --root "$WORK/s3-import-store" --identity "$WORK/key.age" \
+  --label "Wrong digest must fail" >/dev/null 2>&1;then
+  echo "FAIL: genuine Ceph RGW B-In accepted wrong independent SHA256" >&2;exit 1
+fi
+echo "PASS: genuine Ceph RGW S3 B-In pinned older version, encrypted chunk restore and bad-hash rejection"
+
 "$CLI" s3-vault backup --config "$WORK/ceph.json" --source "$WORK/source" > "$WORK/record.json"
 read -r ID VERSION < <(python3 - "$WORK/record.json" <<'PY'
 import json,sys

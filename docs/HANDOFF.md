@@ -986,3 +986,8 @@ New real WebDAV RW (TLS Basic Auth, independent GET bypassing davfs2 cache) and 
 ## r187 provider lab status handoff
 
 Rust exact-source Lustre Rocky9 QEMU real FULL -> age -> restore and mounted B-Out PASSED (#43993244568). Real SSHFS RW age B-Out PASSED (#43992703261). Oracle Free RMAN PDB piece VALIDATE PASSED (#43992293341), AFS actual KDC cell PASSED earlier (#43747477666 with same module/blob). CephFS true Rook MDS/FUSE lab #43992291655 still running at last check. WebDAV #43993669335 failed only independent HTTPS immediate readback due davfs2 deferred writeback; r187 adds bounded independent remote GET tests for both ciphertext and sidecar. WebDAV adapter uses O_EXCL, encrypted-only stage and sidecar last, no deletion/retry. Require new exact-SHA WebDAV CI before promotion. No RC2/main merge and no universal Stage::Ready.
+
+
+## r188 S3 Ceph RGW B-In field handoff
+
+Added pinned-version S3 B-In to scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh (genuine 3-OSD/3-MON Ceph). Run only with approved existing Ceph CI gate, once, on exact SHA, after ongoing CephFS lab job finishes. It asserts older version despite newer current object, independent SHA256, age-chunk restore, negative wrong-hash. Do not claim PASS before actual run; no main merge or RC publishing.

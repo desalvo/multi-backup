@@ -1055,3 +1055,10 @@ Existing authenticated TLS rclone WebDAV/davfs2 live workflow extended with a ge
 Verified real QEMU Rocky9 Lustre Rust encrypted B-In/B-Out and bytewise create-only recovery (#43993244568 PASS), and authenticated SSHFS RW B-Out (#43992703261 PASS); Oracle Free PDB RMAN pieces (#43992293341 PASS), AFS genuine cell (#43747477666 PASS with identical adapter). WebDAV davfs2 could not use hardlink rename; native WebDAV B-Out now writes ciphertext-only through O_EXCL and its SHA256 marker LAST; CI verifies independently over HTTPS with bounded retries because FUSE writeback can be deferred. Do not call WebDAV independent durability PASS before the next CI completes. CephFS Rook 3-OSD field still running. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.
 
 One-line English commit summary: Add fail-closed DAVFS2 ciphertext publication and real HTTP verification after proven Lustre/SSHFS acceptance.
+
+
+## r188 — Real Ceph RGW versioned S3 input acceptance prepared
+
+Existing 3-MON/3-OSD Rook Ceph RGW S3 WORM live acceptance now includes dedicated S3 B-In from an explicitly pinned old version under a newer current version, independent SHA256, age chunks and bytewise restore; wrong hash refuses commit. Lab execution on the updated SHA is still pending; keep source role Preview. This extends the same lab, never starts a duplicate mock. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.
+
+One-line English commit summary: Extend genuine multi-OSD Ceph RGW lab with version-pinned S3 encrypted input and byte-verified recovery.

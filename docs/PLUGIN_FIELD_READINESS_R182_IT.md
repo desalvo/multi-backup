@@ -67,3 +67,10 @@ One-line English commit summary: Provision genuine CI CephFS and Lustre labs for
 - **AFS** [#43747477666](https://github.com/desalvo/multi-backup/actions/runs/43747477666) genuine KDC/VLDB/volserver cell PASS with exact unchanged adapter module; no need to duplicate costly physical VM CI on every PR.
 
 One-line English commit summary: Harden DAVFS2 create-only ciphertext publication and enforce independent HTTPS availability checks while preserving real Lustre, SSHFS, Oracle and AFS acceptance evidence.
+
+
+## r188 — Ceph RGW S3 B-In reale (gated)
+
+Esteso il test CI già esistente `scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh` nello stesso cluster Rook/Ceph 3-OSD: upload di oggetto versionato in bucket Object Lock COMPLIANCE, secondo upload che cambia la versione corrente, B-In Rust con `versionId` originale + SHA-256 indipendente, encryption age chunk store, restore byte-identico e rifiuto SHA manomesso. **Non dichiarare PASS della nuova estensione** finché non è stata eseguita dal job di laboratorio sul nuovo SHA. Non avviare automaticamente un secondo costoso cluster mentre il collaudo CephFS è ancora in corso.
+
+One-line English commit summary: Extend genuine multi-OSD Ceph RGW lab with version-pinned S3 encrypted input and byte-verified recovery.
