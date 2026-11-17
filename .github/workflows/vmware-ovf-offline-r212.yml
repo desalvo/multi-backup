@@ -1,0 +1,35 @@
+name: Multi Backup - real VMDK age encrypted offline file acceptance r212
+on:
+  push:
+    branches: ['feature/r212-vmware-native-provider-and-field-gates']
+    paths:
+      - 'rust/src/vmware_ovf.rs'
+      - 'scripts/ci/vmware-ovf-offline-r212.sh'
+      - '.github/workflows/vmware-ovf-offline-r212.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vmdk-verified-age:
+    name: Native qemu VMDK binary, age chunks, independent raw disk readback and unsafe denial
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install VMDK and encryption prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq qemu-utils
+          bash -n scripts/ci/vmware-ovf-offline-r212.sh
+      - name: Rust native verified source test
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib vmware_ovf
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Real OVF VMDK age encryption and readback
+        run: bash scripts/ci/vmware-ovf-offline-r212.sh
+      - name: Scoped audit
+        if: success()
+        run: |
+          echo 'PASS actual qemu VMDK bytes, native encrypted chunk restore, original RAW comparison and negative cases' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT certified vCenter/ESXi API, VADP CBT or VM boot' >> "$GITHUB_STEP_SUMMARY"
