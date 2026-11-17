@@ -1007,3 +1007,10 @@ FUSE/davfs2 mounted B-Out was false-positive: writes acknowledged locally but in
 First native HTTPS WebDAV test [#43994967648](https://github.com/desalvo/multi-backup/actions/runs/43994967648) **FAILED CLOSED** at \`HEAD\` before any remote write. The native ureq 2.x \`tls\` feature trusts bundled Mozilla roots by default and does not see the disposable CA installed by \`update-ca-certificates\`. Enable the supported ureq \`native-certs\` feature, retaining TLS certificate validation and zero redirects. Transport failures now report ONLY the safe error kind, not URL credentials or token; no \`danger_accept_invalid_certs\` or insecure HTTP fallback. Retest the real TLS WebDAV provider on new SHA before any PASS. Independent PUT/GET and checksum-last remain mandatory.
 
 One-line English commit summary: Honor system-trusted CA certificates for native WebDAV HTTPS without relaxing TLS verification.
+
+
+## r192 — WebDAV native IPv4 lab preflight
+
+The new direct HTTP/WebDAV adapter compiled successfully, but CI [#43995446149](https://github.com/desalvo/multi-backup/actions/runs/43995446149) still failed closed at HEAD with \`ureq::Transport::ConnectionFailed\` (before any writes). The disposable HTTPS server is explicitly bound to \`127.0.0.1\`, while the URL used \`localhost\` and may select IPv6 ::1; the server certificate includes IP SAN 127.0.0.1. The lab now targets the explicit HTTPS **IPv4 loopback** and logs the safe ureq transport reason. TLS remains validated with OS-installed CA, no insecure fallbacks. Await real HTTPS conditional PUT/GET CI PASS before promotion. The registered WebDAV mounted B-In remains separately proven on davfs2 RO.
+
+One-line English commit summary: Pin real WebDAV TLS field host to IPv4 loopback while retaining certificate validation and safe diagnostics.

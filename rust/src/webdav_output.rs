@@ -110,7 +110,7 @@ impl Client {
             Err(ureq::Error::Status(404,_))=>Ok(()),
             Ok(_)=>Err("WebDAV remote ciphertext/marker already exists".into()),
             Err(ureq::Error::Status(status,_))=>Err(format!("WebDAV HEAD rejected with HTTP status {status}; no write attempted").into()),
-            Err(ureq::Error::Transport(failure))=>Err(format!("WebDAV HEAD TLS/transport failure ({:?}); no write attempted",failure.kind()).into())
+            Err(ureq::Error::Transport(failure))=>Err(format!("WebDAV HEAD TLS/transport failure ({:?}: {}); no write attempted",failure.kind(),failure.message().unwrap_or("no detailed reason")).into())
         }
     }
     fn put_create_only(&self,name:&str,source:&Path)->Result<()>{

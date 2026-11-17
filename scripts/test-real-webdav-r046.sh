@@ -152,7 +152,7 @@ python3 - "$WORK/webdav-output.json" <<'PY'
 import json,os,sys
 path=sys.argv[1]
 with open(path,"x",encoding="utf-8") as target:
-    json.dump({"endpoint":"https://localhost:18920/","username":"mbci"},target)
+    json.dump({"endpoint":"https://127.0.0.1:18920/","username":"mbci"},target)
 os.chmod(path,0o600)
 PY
 export MULTI_BACKUP_WEBDAV_PASSWORD="$AUTH_PASS"
