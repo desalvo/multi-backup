@@ -173,7 +173,10 @@ def main():
     powered_off=False
     try:
         print("ATTESTED: three physical host DMI identities and pinned HTTPS Redfish BMC",flush=True)
-        bmc[index].power("ForceOff");powered_off=True
+        # If the HTTPS response is lost AFTER BMC accepted ForceOff, the
+        # PowerOn recovery must still be attempted in finally.
+        powered_off=True
+        bmc[index].power("ForceOff")
         wait_for("Real primary hardware PowerState=Off",
                  lambda:bmc[index].status().get("PowerState")=="Off",100)
         def new_primary():
@@ -189,8 +192,17 @@ def main():
             bmc[index].power("On")
             print("RECOVERY: Redfish PowerOn issued to exactly one test host",flush=True)
     wait_for("BMC PowerState On",lambda:bmc[index].status().get("PowerState")=="On",180)
-    wait_for("Old physical node rejoining Patroni quorum",
-             lambda:len({leader(h) for h in hosts})==1,300)
+    def healthy_rejoin():
+        leads=[leader(h) for h in hosts]
+        if len(set(leads))!=1 or leads[0]==lead:return False
+        rows=members(hosts[index])
+        return all(str(m.get("State",m.get("state",""))).lower() in
+                   ("running","streaming") for m in rows) and any(
+                   m.get("Member",m.get("member"))==lead and
+                   str(m.get("Role",m.get("role",""))).lower() not in
+                   ("leader","primary") for m in rows)
+    wait_for("Old physical node rejoined as healthy replica of surviving leader",
+             healthy_rejoin,300)
     if hardware(hosts[index])["boot"]==hw[index]["boot"]:
         raise RuntimeError("No physical kernel boot-id change despite power fault")
     print("PASS 3 bare-metal nodes, real physical power fault, Patroni fencing and recovery",flush=True)
