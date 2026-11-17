@@ -39,6 +39,8 @@ pub mod iscsi_snapshot;
 pub mod pve_media;
 #[cfg(target_os="linux")]
 pub mod pve_guest_restore;
+#[cfg(target_os="linux")]
+pub mod pbs_pve_guest_restore;
 pub mod pbs_native;
 pub mod fs_metadata_archive;
 pub mod agent_protocol;
