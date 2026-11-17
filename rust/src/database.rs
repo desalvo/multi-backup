@@ -6,11 +6,16 @@
 use crate::{chunk_store::{BackupKind,LogicalBackup,Store},
     execution_policy::{ExecutionLimits,ThrottledReader,ThrottledWriter}};
 use serde::{Deserialize,Serialize};
-use std::{fs,io::Write,path::{Path,PathBuf},process::{Command,Stdio}};
+use std::{fs,io::{Read,Write},path::{Path,PathBuf},process::{Command,Stdio},
+          time::Duration};
+use serde_json::Value;
+use url::Url;
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
 #[serde(rename_all="snake_case")]
 pub enum Engine { Postgresql, Mysql }
+#[derive(Clone,Debug,PartialEq,Eq)]
+struct PatroniEvidence{ leader:String,timeline:u64,members:usize }
 impl Engine {
     fn id(self)->&'static str {
         match self {Self::Postgresql=>"postgresql",Self::Mysql=>"mysql"}
@@ -32,6 +37,11 @@ pub struct Profile {
     /// Optional real Galera membership preflight, enforced before/after dump.
     /// This does not replace consistency proofs for concurrent DDL.
     #[serde(default)] pub galera_expected_nodes:Option<u16>,
+    /// An OPTIONAL fail-closed leader-lock guard for genuine Patroni-managed
+    /// PostgreSQL backup. Bare hostname never certifies HA consistency.
+    /// HTTPS must use an OS-trusted CA; HTTP is never accepted here.
+    #[serde(default)] pub patroni_api:Option<String>,
+    #[serde(default)] pub patroni_expected_members:Option<u16>,
 }
 fn ident(s:&str)->bool {
     !s.is_empty() && s.len()<=63 &&
@@ -60,6 +70,22 @@ impl Profile {
                  c==b'.'||c==b'-'){
             return Err("Unsafe database identity, endpoint or port".into());
         }
+        if self.patroni_api.is_some()!=self.patroni_expected_members.is_some(){
+            return Err("Patroni URL and expected membership must be supplied together".into());
+        }
+        if let Some(count)=self.patroni_expected_members{
+            if self.engine!=Engine::Postgresql || !(2..=32).contains(&count){
+                return Err("Patroni requires PostgreSQL and 2..32 expected members".into());
+            }
+            let api=Url::parse(self.patroni_api.as_deref().unwrap())
+                .map_err(|_|"Invalid Patroni HTTPS authority")?;
+            if api.scheme()!="https" || api.host_str()!=Some(self.host.as_str()) ||
+               api.username()!="" || api.password().is_some() ||
+               api.query().is_some() || api.fragment().is_some() ||
+               api.path()!="/" {
+                return Err("Patroni REST must be the exact PostgreSQL host over trusted HTTPS root".into());
+            }
+        }
         if let Some(count)=self.galera_expected_nodes {
             if self.engine!=Engine::Mysql || !(2..=64).contains(&count){
                 return Err("Galera membership guard requires MariaDB and 2..64 nodes".into());
@@ -72,6 +98,61 @@ impl Profile {
         }
         Ok(())
     }
+    /// Read-only Patroni leader guard, never equivalent to a distributed
+    /// snapshot barrier. The /primary 200 endpoint requires a local primary
+    /// holding a leader lock. /cluster must corroborate expected membership.
+    fn check_patroni(&self)->Result<Option<PatroniEvidence>,String>{
+        let Some(api)=self.patroni_api.as_deref() else {return Ok(None)};
+        let n=self.patroni_expected_members.ok_or("Patroni expected size missing")? as usize;
+        let endpoint=Url::parse(api).map_err(|_|"Invalid configured Patroni URL")?;
+        let client=ureq::AgentBuilder::new().redirects(0)
+            .timeout_connect(Duration::from_secs(10))
+            .timeout_read(Duration::from_secs(15)).build();
+        let get=|route:&str|->Result<Value,String>{
+            let mut url=endpoint.clone();
+            url.set_path(route);
+            let response=client.get(url.as_str()).set("Accept","application/json")
+                .call().map_err(|_|"Patroni quorum or leader-lock verification failed")?;
+            if response.status()!=200{
+                return Err("Patroni REST must return 200 only for healthy leadership".into());
+            }
+            let mut body=Vec::new();
+            response.into_reader().take(65_537).read_to_end(&mut body)
+                .map_err(|_|"Patroni health response unreadable")?;
+            if body.len()>65_536{return Err("Patroni health JSON exceeds bound".into());}
+            serde_json::from_slice(&body).map_err(|_|"Patroni status is not JSON".into())
+        };
+        let primary=get("/primary")?;
+        if primary["role"]!="primary" || primary["state"]!="running"{
+            return Err("Patroni refuses backup on replica or stale-primary state".into());
+        }
+        let leader=primary.pointer("/patroni/name")
+            .and_then(Value::as_str).ok_or("Patroni primary lacks member identity")?;
+        if leader.len()>128||leader.is_empty(){return Err("Unsafe Patroni leader name".into());}
+        let timeline=primary["timeline"].as_u64()
+            .ok_or("Patroni primary lacks timeline")?;
+        let cluster=get("/cluster")?;
+        let members=cluster["members"].as_array()
+            .ok_or("Patroni cluster lacks members")?;
+        if members.len()!=n{return Err("Patroni membership is not at required quorum size".into());}
+        let leaders=members.iter().filter(|x|{
+            x["role"]=="leader" || x["role"]=="primary"
+        }).collect::<Vec<_>>();
+        if leaders.len()!=1 || leaders[0]["name"]!=leader ||
+           leaders[0]["state"]!="running"{
+            return Err("Patroni cluster leadership contradicts local /primary".into());
+        }
+        let mut unique=std::collections::HashSet::new();
+        for member in members{
+            let name=member["name"].as_str().ok_or("Nameless Patroni member")?;
+            if !unique.insert(name){return Err("Patroni membership duplicates a member".into());}
+            if !matches!(member["state"].as_str(),Some("running")|Some("streaming")){
+                return Err("Patroni member is not healthy".into());
+            }
+        }
+        Ok(Some(PatroniEvidence{leader:leader.to_owned(),timeline,members:n}))
+    }
+
     /// Only a genuine Galera Synced Primary member at the expected cluster
     /// size can publish a snapshot under an explicit Galera profile.
     fn check_galera(&self)->Result<(),String>{
@@ -156,6 +237,7 @@ pub fn backup(profile:&Profile,root:&Path,identity:&Path,label:&str,
               limits:&ExecutionLimits)->Result<LogicalBackup,String>{
     profile.validate()?;limits.validate()?;limits.check_host()?;
     profile.check_galera()?;
+    let initial_patroni=profile.check_patroni()?;
     let mut cmd=match profile.engine {
         Engine::Postgresql=>{
             let mut c=profile.command("pg_dump");profile.connection(&mut c);
@@ -182,7 +264,11 @@ pub fn backup(profile:&Profile,root:&Path,identity:&Path,label:&str,
         BackupKind::Full,None,||{
             if child.wait().map_err(|e|e.to_string())?.success(){
                 profile.check_galera().map_err(|e|
-                    format!("Galera membership changed during backup: {e}"))
+                    format!("Galera membership changed during backup: {e}"))?;
+                if profile.check_patroni()? != initial_patroni {
+                    return Err("Patroni leader/timeline/healthy membership changed during dump; incomplete backup rejected".into());
+                }
+                Ok(())
             } else {
                 Err("Database dump exited nonzero; incomplete data rejected".into())
             }
@@ -282,6 +368,19 @@ pub fn restore_new(profile:&Profile,root:&Path,identity:&Path,id:&str,
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]fn patroni_guard_refuses_replica_and_insecure_authority(){
+        let mut p=Profile{engine:Engine::Postgresql,host:"primary.example.test".to_owned(),
+            port:5432,user:"postgres".to_owned(),database:"testdb".to_owned(),
+            credentials_file:PathBuf::from("/irrelevant"),
+            tls_ca_file:None,galera_expected_nodes:None,
+            patroni_api:Some("http://primary.example.test:8008/".to_owned()),
+            patroni_expected_members:Some(3)};
+        assert!(p.validate().is_err());
+        p.patroni_api=Some("https://other.example.test:8008/".to_owned());
+        assert!(p.validate().is_err());
+        p.patroni_api=None;
+        assert!(p.validate().is_err());
+    }
     #[test]fn reject_untrusted_database_identifiers(){
         assert!(!ident("x;DELETE FROM table"));
         assert!(!ident("a-b"));
