@@ -26,9 +26,9 @@ def validate(catalog: list[dict], backup: dict, restore: dict, sha: str, run: st
         raise PromotionError("RC evidence needs a real GitHub Actions run ID")
     if len(catalog) != TOTAL or len({p.get("id") for p in catalog}) != TOTAL:
         raise PromotionError("Plugin inventory changed unexpectedly")
-    expected = {"unsupported", "planned", "preview", "experimental", "ready"}
+    valid_stage_values = {"unsupported", "planned", "preview", "experimental", "ready"}
     for p in catalog:
-        if any(p.get(f) not in expected for f in FIELDS):
+        if any(p.get(f) not in valid_stage_values for f in FIELDS):
             raise PromotionError("Unknown or missing capability state")
         states = tuple(p[f] for f in FIELDS)
         scoped = "ready" in states
