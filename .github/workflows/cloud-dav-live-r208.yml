@@ -1,0 +1,45 @@
+name: Multi Backup - real ownCloud/Nextcloud HTTPS authenticated ciphertext acceptance
+on:
+  push:
+    branches: ["feature/r208-owncloud-nextcloud-webdav-output"]
+    paths:
+      - "rust/src/cloud_dav.rs"
+      - "rust/src/bin/multi-backup-native.rs"
+      - "rust/src/plugins.rs"
+      - "scripts/ci/cloud-dav-live-r208.sh"
+      - ".github/workflows/cloud-dav-live-r208.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-cloud-dav-real-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-provider:
+    name: Genuine ${{ matrix.provider }} server behind TLS, age PUT/GET and recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [owncloud, nextcloud]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actual Linux TLS reverse proxy and age encryption dependencies
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update -qq
+          sudo apt-get install -y nginx curl openssl ca-certificates jq age
+          bash -n scripts/ci/cloud-dav-live-r208.sh
+      - name: Compile native Rust vendor profile and strict TLS tests
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib cloud_dav
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Genuine Docker application installation and HTTPS ciphertext roundtrip
+        run: bash scripts/ci/cloud-dav-live-r208.sh '${{ matrix.provider }}'
+      - name: Scope and certification boundary
+        if: success()
+        run: |
+          echo "PASS genuine vendor server product-attested via TLS status.php, independent authenticated DAV PROPFIND/PUT/GET, age encryption, no overwrite and verified new local restore." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED native source file revisions, shares, ACL, calendars, database, trash or HA." >> "$GITHUB_STEP_SUMMARY"
