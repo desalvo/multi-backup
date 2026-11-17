@@ -1,0 +1,11 @@
+<network>
+  <!-- Isolated lab network: no <forward> permitted. No Internet routing. -->
+  <name>mb-r213-isolated</name>
+  <bridge name="virbr213" stp="on" delay="0"/>
+  <domain name="mb-r213.test"/>
+  <ip address="192.168.213.1" netmask="255.255.255.0">
+    <dhcp>
+      <range start="192.168.213.100" end="192.168.213.170"/>
+    </dhcp>
+  </ip>
+</network>

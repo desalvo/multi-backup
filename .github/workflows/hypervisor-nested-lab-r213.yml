@@ -1,0 +1,85 @@
+name: Multi Backup r213 - protected nested oVirt and ESXi lab provisioning
+on:
+  push:
+    branches: ['feature/r213-ovirt-vmware-laboratories']
+    paths:
+      - 'scripts/labs/provision-hypervisor-r213.py'
+      - 'docs/labs/r213-lab-config.example.json'
+      - 'docs/labs/r213-isolated-network.xml'
+      - '.github/workflows/hypervisor-nested-lab-r213.yml'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES_CREATE_ONLY_DISPOSABLE_OVIRT_VMWARE_LAB (isolated KVM hosts, new VMs only)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mb-r213-disposable-hypervisor-lab
+  cancel-in-progress: false
+jobs:
+  hosted-planning-and-guard:
+    name: Verify safe oVirt/ESXi VM plan, XML isolation and deny CI provisioning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and read-only plan of isolated nested VM lab
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/labs/provision-hypervisor-r213.py
+          python3 - <<'PY'
+          import json,xml.etree.ElementTree as ET
+          c=json.load(open('docs/labs/r213-lab-config.example.json'))
+          assert c['network']=='mb-r213-isolated'
+          assert c['enable_esxi'] is True
+          xml=ET.parse('docs/labs/r213-isolated-network.xml').getroot()
+          assert xml.tag=='network' and xml.find('forward') is None
+          assert xml.findtext('name')==c['network']
+          PY
+          python3 scripts/labs/provision-hypervisor-r213.py plan \
+            --config docs/labs/r213-lab-config.example.json > /tmp/mb-r213-lab-plan.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/mb-r213-lab-plan.json'))
+          assert p['actually_provisioned'] is False
+          assert set(p['virtual_machines'])=={
+            'mb-r213-ovirt-engine','mb-r213-ovirt-host','mb-r213-esxi8'}
+          assert p['engine_setup_complete'] is False
+          assert p['vcenter_licensed'] is False
+          PY
+      - name: Refuse any hosted workflow attempting real lab provisioning
+        run: |
+          set -euo pipefail
+          if MB_LAB_PROVISION=YES_CREATE_ONLY_DISPOSABLE_OVIRT_VMWARE_LAB \
+            python3 scripts/labs/provision-hypervisor-r213.py provision \
+            --config docs/labs/r213-lab-config.example.json \
+            --confirm YES_CREATE_ONLY_DISPOSABLE_OVIRT_VMWARE_LAB \
+            > /tmp/mb-r213-unapproved.log 2>&1;then
+            echo 'FAIL: hosted runner provisioned guests without approval' >&2
+            exit 1
+          fi
+          grep -q 'DENIED: lab provisioning is forbidden' /tmp/mb-r213-unapproved.log
+  real-provision:
+    name: Create only new oVirt nested KVM and optional licensed-media ESXi guests
+    needs: hosted-planning-and-guard
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, multi-backup-hypervisor-lab]
+    environment: multi-backup-hypervisor-disruptive-lab
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check authorization, SHA-pinned media and isolated libvirt network
+        env:
+          MB_LAB_PROVISION: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          python3 scripts/labs/provision-hypervisor-r213.py provision \
+            --config /etc/multi-backup-ci/r213/config.json \
+            --confirm "$MB_LAB_PROVISION"
+      - name: Report setup scope
+        if: success()
+        run: |
+          echo 'New KVM guests were create-only provisioned. Engine setup or licensed VMware ESXi/VCSA installation was not silently performed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Operator must complete Engine/host networking, provider fixtures, guest data and licensed VMware credentials.' >> "$GITHUB_STEP_SUMMARY"

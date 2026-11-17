@@ -1,0 +1,40 @@
+name: Multi Backup r213 - oVirt Engine IMAGEIO trusted HTTPS protocol lab
+on:
+  push:
+    branches: ["feature/r213-ovirt-vmware-laboratories"]
+    paths:
+      - "rust/src/ovirt_imageio.rs"
+      - "scripts/ci/ovirt-https-imageio-fixture-r213.py"
+      - "scripts/ci/ovirt-https-imageio-r213.sh"
+      - ".github/workflows/ovirt-protocol-lab-r213.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-ovirt-protocol-r213
+  cancel-in-progress: true
+jobs:
+  isolated-https-protocol:
+    name: Rust oVirt exact READY disk/transfer ID, age byte fidelity, TLS and negative tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install age and generate verified HTTPS fixture prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age curl openssl ca-certificates
+          bash -n scripts/ci/ovirt-https-imageio-r213.sh
+          python3 -m py_compile scripts/ci/ovirt-https-imageio-fixture-r213.py
+      - name: Build native Rust oVirt and encrypted backup
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib ovirt_imageio
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Execute TLS fixture and independent age ciphertext recovery tests
+        run: bash scripts/ci/ovirt-https-imageio-r213.sh
+      - name: Explicit provider qualification boundary
+        if: success()
+        run: |
+          echo "PASS oVirt-like HTTPS API, exact ID/READY/IMAGEIO protocol, age byte recovery and hostile fixture refusals" >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT a real oVirt Engine or host, full VM backup/restore, guest boot or remote image ticket certificate" >> "$GITHUB_STEP_SUMMARY"
