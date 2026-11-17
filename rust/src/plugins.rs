@@ -280,9 +280,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
         "Rust MariaDB InnoDB transactional FULL logical dump and create-only restore",
         "Real MariaDB 11.4, 3-node Galera and Oracle MySQL 8.4 encrypted full dump/create-only restore are qualified in isolated CI; dedicated MariaDB ROW-binlog PITR CI also passes. Oracle MySQL GTID/binlog PITR, concurrent DDL snapshot and server/agent distributed policy remain unqualified"),
-    PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PREVIEW, NONE,
-        "Rust PostgreSQL FULL pg_dump custom format and isolated pg_restore",
-        "PostgreSQL 16 real logical age backup and create-only restore, plus separate physical base/WAL PITR CI tested. Optional Patroni same-host HTTPS /primary leader-lock, members and timeline guards added (real integrated CI required). Roles/extensions, coordinated DCS + physical PITR, three physical hosts remain unqualified"),
+    PluginDescriptor::new("postgresql", "PostgreSQL 16 (single DB FULL logical Ready scope)", DataKind::Database, READY, NONE,
+        "One PostgreSQL 16 database FULL pg_dump custom format and create-only pg_restore; never all-cluster readiness",
+        "READY ONLY for an isolated PostgreSQL 16 single-database, logical FULL dump and encrypted age roundtrip to a NEW database, with nonzero exit/credentials/overwrite denied. No --owner/--acl; no cluster roles, globals, tablespaces permissions, PITR under Patroni, online DDL, all-cluster recovery, cross-version portability, or three-host physical HA. Separate PostgreSQL WAL/PITR integration is not certified by this scoped Ready status")
+        .with_ready_scope("postgresql16_single_database_full_logical_create_only; no roles/owners/ACLs/globals/cluster-PITR/online-DDL"),
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PREVIEW, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries").with_restore_output_stage(PLAN),
@@ -517,7 +518,7 @@ mod tests {
                 .iter().any(|s|*s==Stage::Ready);
             assert_eq!(any_ready,plugin.ready_scope.is_some(),
                 "READY must have an explicit narrow scope: {}",plugin.id);
-            if any_ready {assert_eq!(plugin.id,"posix");}
+            if any_ready {assert!(matches!(plugin.id,"posix"|"postgresql"));}
         }
         let p=plan(Mode::Backup,"posix","posix").unwrap();
         assert_eq!(p.source_stage,Stage::Ready);
@@ -525,6 +526,13 @@ mod tests {
         assert!(p.executable && !p.preview_executable);
         let restore=plan(Mode::Restore,"posix","posix").unwrap();
         assert!(restore.executable && !restore.preview_executable);
+        let postgres=find("postgresql").unwrap();
+        assert_eq!(postgres.backup_input,Stage::Ready);
+        assert_eq!(postgres.restore_output,Stage::Ready);
+        assert_eq!(postgres.backup_output,Stage::Unsupported);
+        assert!(postgres.ready_scope.unwrap().contains("postgresql16_single_database"));
+        assert!(!plan(Mode::Backup,"postgresql","posix").unwrap().executable,
+            "Dedicated SQL CLI must not become a generic filesystem copier");
         assert!(p.reason.contains("metadata/ACL/xattr"));
         for provider in ["nfs","smb","cephfs","glusterfs","lustre","gpfs",
             "sshfs","webdav","s3"] {
@@ -667,8 +675,8 @@ mod tests {
         assert_eq!(find("postgresql").unwrap().kind, DataKind::Database);
         for database in ["postgresql","mysql"] {
             let d=find(database).unwrap();
-            assert_eq!(d.backup_input,Stage::Preview);
-            assert_eq!(d.restore_output,Stage::Preview);
+            assert_eq!(d.backup_input,if database=="postgresql"{Stage::Ready}else{Stage::Preview});
+            assert_eq!(d.restore_output,if database=="postgresql"{Stage::Ready}else{Stage::Preview});
             assert_eq!(d.restore_input,Stage::Unsupported);
             assert!(!plan(Mode::Backup,database,"posix").unwrap().preview_executable,
                 "Dedicated DB commands must not be misrepresented as generic executor");
