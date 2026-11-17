@@ -6,7 +6,7 @@ umask 077
 test "$RUNNER_ENVIRONMENT" = github-hosted
 PROVIDER="$1"
 case "$PROVIDER" in
- owncloud) IMAGE=owncloud/server:10.16.7; PORT=19120; HTTP=18120;;
+ owncloud) IMAGE=owncloud/server:11.1.0; PORT=19120; HTTP=18120;;
  nextcloud) IMAGE=nextcloud:32-apache; PORT=19121; HTTP=18121;;
  *) echo 'Only genuine owncloud|nextcloud Docker provider accepted' >&2;exit 1;;
 esac
@@ -95,7 +95,10 @@ for i in $(seq 1 90);do
      '.installed==true and .maintenance!=true and (.productname|ascii_downcase)==$provider' \
      "$W/status.json" >/dev/null 2>&1;then READY=1;break;fi
  if test "$(docker inspect -f '{{.State.Running}}' "$NAME")" != true;then
-  echo 'FAIL: cloud provider container exited during initialization' >&2;exit 1
+  echo 'FAIL: cloud provider container exited during initialization' >&2
+  docker inspect -f 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$NAME" >&2 || :
+  docker logs --tail 35 "$NAME" 2>&1 | sed -e "s/$PASSWORD/[redacted]/g" | tail -30 >&2 || :
+  exit 1
  fi
  sleep 5
 done
