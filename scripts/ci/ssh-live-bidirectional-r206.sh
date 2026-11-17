@@ -37,9 +37,9 @@ KbdInteractiveAuthentication no
 StrictModes no
 PermitRootLogin no
 AllowUsers $RUNNER_NAME
-UsePAM no
+UsePAM yes
 Subsystem sftp internal-sftp
-LogLevel ERROR
+LogLevel VERBOSE
 EOF
 sudo mkdir -p /run/sshd
 sudo /usr/sbin/sshd -f "$W/sshd.conf" -E "$W/sshd.log"
@@ -55,7 +55,11 @@ done
 ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes \
  -o UserKnownHostsFile="$W/known_hosts" -o GlobalKnownHostsFile=/dev/null \
  -o IdentitiesOnly=yes -i "$W/client" -p "$PORT" \
- "$RUNNER_NAME@127.0.0.1" "test -d $W/remote"
+ "$RUNNER_NAME@127.0.0.1" "test -d $W/remote" || {
+ echo 'FAIL: real disposable sshd rejected pinned-key login' >&2
+ sudo tail -20 "$W/sshd.log" | sed -E 's/(SHA256:)[A-Za-z0-9+/=]+/\\1[redacted]/g' >&2 || :
+ exit 1
+}
 jq -n --arg host 127.0.0.1 --arg user "$RUNNER_NAME" \
  --arg key "$W/client" --arg known "$W/known_hosts" \
  --arg dir "$W/remote" --argjson port "$PORT" \
