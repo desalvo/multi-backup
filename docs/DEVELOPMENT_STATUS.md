@@ -1112,3 +1112,7 @@ One-line English commit summary: Add real CephFS concurrent snapshot ACL/xattr-p
 
 ## r198 — iSCSI kernel-snapshot B-In isolated from destructive LUN recovery
 Added a native Rust read-only iSCSI source with strict Linux udev target IQN/LUN identity, ID_SERIAL/WWID, block RO bit, pinned byte count, independent SHA256 and encrypted age chunk store. Offline restore creates a NEW raw image file, not an existing iSCSI LUN. Real target/initiator acceptance is separately gated; do not promote this adapter to production or advertise iSCSI output until a fresh target-side LUN allocation/fencing protocol is implemented and tested. One-line English commit summary: Add fail-closed native iSCSI snapshot input and offline encrypted recovery with strict kernel device attestation.
+
+
+## r201 — native Linux localhost TGT new-LUN restore
+New-LUN B-Out creates an exclusive private backing file and a previously nonexistent local TGT target (unique IQN/TID), logs into the actual Linux iSCSI initiator, validates device path and byte capacity, writes age-verified chunks through the genuine kernel block device, then independently reads/hash-verifies every byte. A repeat must refuse an existing target. Scope restricted to disposable localhost target; remote SAN, multipath, CHAP, physical fencing and live-VM consistency remain unqualified until external labs. One-line English commit summary: Add create-only authentic Linux TGT iSCSI LUN B-Out with full SCSI readback CI.
