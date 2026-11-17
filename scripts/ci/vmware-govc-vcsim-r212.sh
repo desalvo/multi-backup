@@ -127,6 +127,20 @@ for f in sorted(d.iterdir()):
  body+=f"SHA256({f.name})= {hashlib.sha256(f.read_bytes()).hexdigest()}\n"
 (d/"mb-test.mf").write_text(body)
 PY
+# Independent govc import.spec check and a disposable fixture-import probe.
+# This is safe because vcsim lives only on this runner and test VM names are
+# unique; it gives a meaningful upstream error before native orchestration.
+if ! "$GOBIN/govc" import.spec "$PACKAGE/mb-test.ovf" > "$TMP/ovf-import-spec.json" 2>"$TMP/ovf-spec-error";then
+  echo "FAIL: official govc import.spec rejected disposable test OVF" >&2
+  sed -n '1,18p' "$TMP/ovf-spec-error" >&2
+  exit 1
+fi
+if ! "$GOBIN/govc" import.ovf -m=true -name="mb-sim-upstream-probe" -ds="$DS" -pool="$POOL" -folder=/DC0/vm "$PACKAGE/mb-test.ovf" \
+ >"$TMP/upstream-import.log" 2>"$TMP/upstream-import.err"; then
+  echo "FAIL: official govc simulator rejected OVF package, before native Multi Backup" >&2
+  sed -n '1,24p' "$TMP/upstream-import.err" >&2
+  exit 1
+fi
 PIN="$(python3 - <<'PY'
 import os,hashlib
 from pathlib import Path
