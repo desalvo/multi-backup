@@ -88,6 +88,40 @@ pub fn backup(provider:&str,source:&Path,store_root:&Path,key:&Path,
         archive_bytes:bytes,encrypted:true,
         restores_acl_xattr:true,snapshot_consistency_attested:true})
 }
+// On filesystems whose FUSE server does not support renameat2
+// RENAME_NOREPLACE, the reserved NEW directory must still retain the PAX
+// root-level ACL/xattr attributes (not only its descendant files).
+#[cfg(target_os="linux")]
+fn copy_root_xattrs(from:&Path,to:&Path)->Result<()>{
+    use std::{ffi::CString,os::unix::ffi::OsStrExt,ptr};
+    let a=CString::new(from.as_os_str().as_bytes())?;
+    let b=CString::new(to.as_os_str().as_bytes())?;
+    let size=unsafe{libc::llistxattr(a.as_ptr(),ptr::null_mut(),0)};
+    if size<0{return Err(format!("Cannot enumerate PAX root ACL/xattrs: {}",
+                               std::io::Error::last_os_error()).into());}
+    if size>1_048_576{return Err("PAX root xattr name list exceeds limit".into());}
+    let mut names=vec![0u8;size as usize];
+    if size==0{return Ok(());}
+    let n=unsafe{libc::llistxattr(a.as_ptr(),names.as_mut_ptr().cast(),names.len())};
+    if n!=size{return Err("PAX root xattr name inventory changed".into());}
+    for part in names.split(|&x|x==0).filter(|x|!x.is_empty()){
+        let name=CString::new(part)?;
+        let bytes=unsafe{libc::lgetxattr(a.as_ptr(),name.as_ptr(),ptr::null_mut(),0)};
+        if bytes<0||bytes>16_777_216{
+            return Err("PAX root xattr value missing or exceeds bound".into());
+        }
+        let mut value=vec![0u8;bytes as usize];
+        let got=unsafe{libc::lgetxattr(a.as_ptr(),name.as_ptr(),
+                         value.as_mut_ptr().cast(),value.len())};
+        if got!=bytes{return Err("PAX root xattr value changed".into());}
+        if unsafe{libc::lsetxattr(b.as_ptr(),name.as_ptr(),
+                     value.as_ptr().cast(),value.len(),0)}!=0{
+            return Err(format!("PAX root ACL/xattr publication failed: {}",
+                               std::io::Error::last_os_error()).into());
+        }
+    }
+    Ok(())
+}
 // Publishing a new directory MUST be atomic no-replace, not POSIX rename
 // (which silently replaces an existing empty directory after a race).
 #[cfg(target_os="linux")]
@@ -123,6 +157,7 @@ fn publish_new(source:&Path,target:&Path)->Result<()>{
             fs::rename(item.path(),target.join(item.file_name()))?;
         }
         fs::set_permissions(target,fs::metadata(source)?.permissions())?;
+        copy_root_xattrs(source,target)?;
         Ok(())
     })();
     if let Err(e)=publication{
