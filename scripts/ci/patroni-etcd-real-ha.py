@@ -365,6 +365,12 @@ def main():
             if dcs_sync_candidate(root, initial) != candidate:
                 raise RuntimeError("DCS sync candidate changed; refuse unsafe leader kill")
             print("Witness committed on DCS-confirmed synchronous primary", flush=True)
+            # Optional native Rust B-In integration is installed ONLY by
+            # dedicated CI code on its own isolated runner; HA baseline
+            # behavior, cluster election and fault-injection stay unchanged.
+            db_hook = globals().get("db_consistency_guard_hook")
+            if db_hook is not None:
+                db_hook(root, initial, processes)
             if os.environ.get("MULTI_BACKUP_HA_NETWORK_ISOLATION_REQUIRED") == "true":
                 drill = globals().get("network_fault_drill")
                 if drill is None:
