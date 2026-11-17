@@ -1067,3 +1067,7 @@ One-line English commit summary: Extend genuine multi-OSD Ceph RGW lab with vers
 ## r189 — Native HTTPS WebDAV ciphertext B-Out and R-In
 
 Real davfs2 RW CI failed independent remote GET even after bounded 120s, demonstrating deferred FUSE writeback is not sufficient as verified B-Out. Native \`webdav_output.rs\` now uses strict HTTPS BasicAuth scoped config, age-encrypted local-only staging, conditional create-only PUT, exact encrypted remote GET SHA256/size verification and checksum-marker-last. Dedicated CLI also restores remote verified ciphertext to NEW local directory. Real HTTPS rclone server CI rerun required. See docs/PLUGIN_FIELD_READINESS_R182_IT.md. One-line English commit summary: Implement encrypted WebDAV native conditional PUT with independent HTTPS GET and safe create-only restore after FUSE writeback failure.
+
+
+## r190 — Fix Ceph Tentacle actual-MDS status parser
+CephFS first real cluster lab #43992291655 provisioned 3 real OSDs, MON quorum, 1 active MDS, PGs active+clean but CI falsely failed on JSON output shape (`mdsmap` list rather than dict). Fix readiness detection recursively across Ceph versions and rerun genuine Lustre/CephFS field with S3 Ceph RGW B-In. Preserve fail-closed on no active MDS; no synthetic skips. One-line English commit summary: Accept Ceph Tentacle list/dict MDS status while requiring an actual active CephFS daemon.

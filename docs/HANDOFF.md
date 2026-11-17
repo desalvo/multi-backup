@@ -996,3 +996,7 @@ Added pinned-version S3 B-In to scripts/ci/ceph-rgw-s3-object-lock-acceptance.sh
 ## r189 WebDAV transport handoff
 
 FUSE/davfs2 mounted B-Out was false-positive: writes acknowledged locally but independent HTTPS GET remained empty for >120s (#43994077483 FAIL). Do not mark mount-based WebDAV output durable. Added \`rust/src/webdav_output.rs\` native direct HTTPS WebDAV provider, conditional \`PUT If-None-Match: *\`, required independent GET of encrypted file and sidecar, sidecar commit last, safe fresh-target remote restore. Password only \`MULTI_BACKUP_WEBDAV_PASSWORD\`. Extended real WebDAV CI script to exercise direct native API, negative duplicate and restore. Await exact SHA CI, don't claim PASS until green. See r182 field readiness.
+
+
+## r190 CephFS lab failure and retry
+#43992291655 on SHA 6cbddea3: cluster actually healthy (3 MON quorum, 3 OSD up/in, 1 MDS+standby), but new script `cephfs-kind-real-r182.sh` assumed mdsmap dict and retried until failure. Updated recursive CephFS JSON parser supports list/dict and still rejects inactive MDS. Rerun once on exact new SHA, including latest genuine Ceph RGW versioned B-In. CI PASS not yet attained; source remains Preview.

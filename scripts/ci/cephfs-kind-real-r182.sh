@@ -31,11 +31,19 @@ for n in $(seq 1 75);do
     python3 - "$TEMP/fs-status.json" <<'PY'
 import json,sys
 data=json.load(open(sys.argv[1]))
-mds=data.get("mdsmap",{}).get("info",{})
-active=any(m.get("state")=="up:active" for m in mds.values())
-if not active:
-    active=any(m.get("state") in ["active","up:active"] for m in data.get("mds",[]))
-if not active:
+# Ceph "fs status -f json" is NOT stable as a dict across releases:
+# Ceph Tentacle 20 emits mdsmap as a LIST. Recurse through objects,
+# requiring an actual active MDS entry, not just a Filesystem CRD.
+def active_mds(item):
+    if isinstance(item,dict):
+        state=item.get("state")
+        if state in ("active","up:active","up:active (resolve)"):
+            return True
+        return any(active_mds(v) for v in item.values())
+    if isinstance(item,list):
+        return any(active_mds(v) for v in item)
+    return False
+if not active_mds(data):
     raise SystemExit(1)
 PY
   then READY=1;break;fi

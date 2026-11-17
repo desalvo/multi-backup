@@ -88,3 +88,8 @@ Nuovo \`rust/src/webdav_output.rs\`, CLI \`plugins webdav-http-backup\` e \`plug
 - L'HTTP precondition \`If-None-Match\` deve essere rispettata dal server; la promozione a produzione richiede semantiche server ben verificate, fault injection e trasferimento multipart/ripresa.
 
 One-line English commit summary: Implement encrypted WebDAV native conditional PUT with independent HTTPS GET and safe create-only restore after FUSE writeback failure.
+
+
+## r190 — CephFS MDS JSON parser fix; lab truly healthy
+
+First 3-OSD Rook/Ceph CephFS CI [#43992291655](https://github.com/desalvo/multi-backup/actions/runs/43992291655) **FAILED** solely on the MDS readiness parser: Ceph Tentacle v20 returns `mdsmap` as a JSON list, while the Python checker assumed a mapping (`AttributeError: 'list' object has no attribute 'get'`). The CI diagnostic **proved** MON quorum 3, OSDs 3 up/in, MDS 1/1 up + hot standby, and 137 PGs active+clean; this is evidence that a real filesystem was created, not that backup/restore E2E completed. The new r190 parser recursively checks real active MDS entries in either list or dict; avoid arbitrary sleep/fake PASS. Rerun the *same actual 3-OSD lab* on new SHA, including version-pinned Ceph RGW S3 B-In r188.
