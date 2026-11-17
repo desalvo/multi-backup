@@ -1,0 +1,37 @@
+name: Multi Backup - real two-principal WORM IAM r211
+on:
+  push:
+    branches: ['feature/r211-provider-field-certification']
+    paths:
+      - 'scripts/ci/s3-worm-minio-principal-r211.sh'
+      - '.github/workflows/s3-worm-iam-real-r211.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  genuine-minio-iam:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Prepare pinned real provider, client, crypto and safety gate
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age jq
+          python3 -m pip install 'awscli>=1.42,<2'
+          bash -n scripts/ci/s3-worm-minio-principal-r211.sh
+          python3 scripts/ci/validate-worm-iam-r210.py
+      - name: Build exact native source revision
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib s3_vault
+          cargo test --manifest-path rust/Cargo.toml --lib worm_vault
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Real MinIO independent IAM negative and recovery test
+        run: bash scripts/ci/s3-worm-minio-principal-r211.sh
+      - name: Retain honest certificate boundary
+        if: success()
+        run: echo 'Two MinIO non-admin users IAM policy field test PASS; physical three-domain host failure and multi-backend credentials remain untested' >> "$GITHUB_STEP_SUMMARY"
