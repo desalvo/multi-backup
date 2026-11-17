@@ -96,4 +96,9 @@ kubectl -n rook-ceph cp "$ROOT/rust/target/debug/multi-backup-native" \
 kubectl -n rook-ceph cp "$ROOT/tests/cephfs/rook-real-client-r182.sh" \
   mb-ci-cephfs-client:/tmp/cephfs-acceptance.sh
 kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash /tmp/cephfs-acceptance.sh
+if [ "${MB_RBD_LAB:-0}" = 1 ];then
+  kubectl -n rook-ceph cp "$ROOT/tests/cephfs/rook-real-rbd-r195.sh" \
+    mb-ci-cephfs-client:/tmp/rbd-acceptance.sh
+  kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash /tmp/rbd-acceptance.sh
+fi
 echo 'PASS: real 3 OSD CephFS MDS, actual client mounts, Rust encrypted full and ciphertext output'
