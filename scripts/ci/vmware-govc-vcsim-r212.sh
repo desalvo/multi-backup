@@ -130,12 +130,12 @@ PY
 # Independent govc import.spec check and a disposable fixture-import probe.
 # This is safe because vcsim lives only on this runner and test VM names are
 # unique; it gives a meaningful upstream error before native orchestration.
-if ! "$GOBIN/govc" import.spec "$PACKAGE/mb-test.ovf" > "$TMP/ovf-import-spec.json" 2>"$TMP/ovf-spec-error";then
+if ! timeout --signal=TERM --kill-after=5s 30s "$GOBIN/govc" import.spec "$PACKAGE/mb-test.ovf" > "$TMP/ovf-import-spec.json" 2>"$TMP/ovf-spec-error";then
   echo "FAIL: official govc import.spec rejected disposable test OVF" >&2
   sed -n '1,18p' "$TMP/ovf-spec-error" >&2
   exit 1
 fi
-if ! "$GOBIN/govc" import.ovf -m=true -name="mb-sim-upstream-probe" -ds="$DS" -pool="$POOL" -folder=/DC0/vm "$PACKAGE/mb-test.ovf" \
+if ! timeout --signal=TERM --kill-after=5s 50s "$GOBIN/govc" import.ovf -m=true -name="mb-sim-upstream-probe" -ds="$DS" -pool="$POOL" -folder=/DC0/vm "$PACKAGE/mb-test.ovf" \
  >"$TMP/upstream-import.log" 2>"$TMP/upstream-import.err"; then
   echo "FAIL: official govc simulator rejected OVF package, before native Multi Backup" >&2
   sed -n '1,24p' "$TMP/upstream-import.err" >&2
@@ -169,7 +169,7 @@ fi
 ID="$(jq -er .id "$TMP/backup.json")"
 jq -e '.encrypted==true and .offline_only==true and .source_provenance_attested==false and .vadp_cbt_certified==false' "$TMP/backup.json" >/dev/null
 NAME=mb-sim-new-r212
-"$NATIVE" plugins vmware-ovf-restore-new --profile-json "$TMP/target.json" \
+timeout --signal=TERM --kill-after=5s 70s "$NATIVE" plugins vmware-ovf-restore-new --profile-json "$TMP/target.json" \
  --root "$TMP/store" --identity "$TMP/private" --id "$ID" \
  --stage-root "$TMP/staging" --new-vm "$NAME" \
  --confirm-new-vm "vmware:$NAME:$DS" --json >"$TMP/result.json"
