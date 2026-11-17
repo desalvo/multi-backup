@@ -378,6 +378,92 @@ pub fn backup_with_progress<F: FnMut(usize, usize, &str)>(
     }
     Ok(result)
 }
+/// Exact ONE-repository live GitHub B-In. Does not enumerate/modify other repos.
+/// Git mirror (all refs + LFS) and sensitive metadata are encrypted separately.
+pub fn backup_single_repository(output:&Path,recipient:&str,identity:&Path,
+                                slug:&str)->GithubResult<Value>{
+    safe_slug(slug)?;
+    if !recipient.starts_with("age1") || recipient.len()<24{
+        return Err(err("Scoped GitHub backup requires a public age recipient"));
+    }
+    private_dir(output)?;
+    let stage=TempDir::new_in(output)?;
+    let git_root=stage.path().join("git");
+    private_dir(&git_root)?;
+    let repository_name=slug.rsplit('/').next().ok_or_else(||err("Invalid GitHub repository"))?;
+    let mirror=git_root.join(format!("{repository_name}.git"));
+    // Read-only authenticated GitHub API and Git mirror; no repo mutation.
+    let remote=api(&format!("/repos/{slug}"))?;
+    if remote["full_name"].as_str()!=Some(slug){
+        return Err(err("Authenticated GitHub repository identity mismatch"));
+    }
+    checked_clone(slug,&mirror)?;
+    let hash=fingerprint(&mirror)?;
+    let target=output.join("repositories").join(slug).join("native-snapshots");
+    private_dir(&target)?;
+    let archive_path=target.join(format!("{hash}.tar.gz.age"));
+    if fs::symlink_metadata(&archive_path).is_err(){
+        archive::create(&git_root,&archive_path,recipient,
+                        &format!("multi-backup/repositories/{slug}/git"))?;
+    }
+    verify_existing_archive(&archive_path)?;
+    let git_members=archive::verify(&archive_path,identity)?;
+    if git_members==0{return Err(err("Empty GitHub clone ciphertext"));}
+
+    // Metadata from GitHub authenticated API is encrypted, not kept plain.
+    let meta_stage=TempDir::new_in(output)?;
+    let meta_root=meta_stage.path().join("metadata");
+    private_dir(&meta_root)?;
+    json_file(&meta_root.join("repository.json"),&remote)?;
+    let refs=run_capture("git",&["-C",mirror.to_str()
+          .ok_or_else(||err("Non-UTF8 Git mirror path"))?,
+          "for-each-ref","--format=%(refname):%(objectname)"],None)?;
+    let mut refs_file=File::create(meta_root.join("references.txt"))?;
+    refs_file.write_all(&refs)?;refs_file.sync_all()?;drop(refs_file);
+    let meta_folder=output.join("metadata").join("repositories").join(slug);
+    private_dir(&meta_folder)?;
+    let meta_path=meta_folder.join(format!("{hash}-metadata.tar.gz.age"));
+    if fs::symlink_metadata(&meta_path).is_err(){
+        archive::create(&meta_root,&meta_path,recipient,
+                        &format!("multi-backup/repositories/{slug}/metadata"))?;
+    }
+    verify_existing_archive(&meta_path)?;
+    let meta_members=archive::verify(&meta_path,identity)?;
+    if meta_members<2{return Err(err("Incomplete authenticated GitHub metadata"));}
+
+    Ok(json!({"provider":"github","repository":slug,
+        "fingerprint_sha256":hash,"encrypted":true,
+        "git_archive":archive_path.display().to_string(),
+        "metadata_archive":meta_path.display().to_string(),
+        "git_members":git_members,"metadata_members":meta_members,
+        "remote_modified":false,"verified":true}))
+}
+
+/// Restore full Git mirror into strictly NEW local directory; git fsck verifies
+/// the restored object graph. Does not write/create a GitHub remote repository.
+pub fn restore_single_offline(archive_path:&Path,identity:&Path,
+                              destination:&Path,slug:&str)->GithubResult<Value>{
+    safe_slug(slug)?;
+    if !destination.is_absolute() || fs::symlink_metadata(destination).is_ok(){
+        return Err(err("GitHub offline restore requires a NEW absolute directory"));
+    }
+    verify_existing_archive(archive_path)?;
+    let expected=archive::verify(archive_path,identity)?;
+    let members=archive::extract(archive_path,identity,destination)?;
+    if expected!=members.len()||members.is_empty(){
+        return Err(err("GitHub mirror member count failed verification"));
+    }
+    let repo_name=slug.rsplit('/').next().ok_or_else(||err("Invalid repo name"))?;
+    let mirror=destination.join("multi-backup").join("repositories")
+        .join(slug).join("git").join(format!("{repo_name}.git"));
+    if !mirror.is_dir(){return Err(err("Authenticated Git mirror missing in restore"));}
+    run_capture("git",&["-C",mirror.to_str()
+        .ok_or_else(||err("Non-UTF8 restored Git mirror"))?,"fsck","--full"],None)?;
+    Ok(json!({"provider":"github","repository":slug,"restored_members":members.len(),
+        "full_git_fsck":true,"create_only_local_restore":true,
+        "remote_repository_recreated":false}))
+}
+
 pub fn backup(output: &Path, recipient: &str, resume: bool, max_runs: usize)
     -> GithubResult<Value> {
     backup_with_progress(output, recipient, resume, max_runs, |_,_,_|{})
