@@ -7,7 +7,12 @@ import re
 from pathlib import Path
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
-ALLOWED = "content_only_quiesced_regular_files"
+READY_SCOPES = {
+    "posix": ("content_only_quiesced_regular_files",
+              ("ready","ready","ready","ready")),
+    "postgresql": ("postgresql16_single_database_full_logical_create_only",
+                   ("ready","unsupported","unsupported","ready")),
+}
 FIELDS = ("backup_input", "backup_output", "restore_input", "restore_output")
 TOTAL = 33
 
@@ -30,15 +35,16 @@ def validate(catalog: list[dict], backup: dict, restore: dict, sha: str, run: st
         if scoped != bool(p.get("ready_scope")):
             raise PromotionError("Missing or fabricated Ready capability scope")
         if scoped:
-            if p.get("id") != "posix" or ALLOWED not in p["ready_scope"]:
-                raise PromotionError("Non-POSIX provider cannot claim full Ready")
-            if any(state != "ready" for state in states):
-                raise PromotionError("POSIX Ready scope must be symmetric")
+            expected = READY_SCOPES.get(p.get("id"))
+            if expected is None or expected[0] not in p["ready_scope"]:
+                raise PromotionError("Uncertified provider cannot claim a Ready scope")
+            if states != expected[1]:
+                raise PromotionError("READY roles exceed explicitly tested provider capability")
         elif p.get("ready_scope") is not None:
             raise PromotionError("Preview provider has a Ready claim")
     promoted = [p["id"] for p in catalog if p["backup_input"] == "ready"]
-    if promoted != ["posix"]:
-        raise PromotionError("Exactly one narrowly qualified Ready source is permitted in r214")
+    if promoted != ["posix","postgresql"]:
+        raise PromotionError("Exactly the qualified POSIX and PostgreSQL scopes are permitted")
     for direction, evidence in (("backup", backup), ("restore", restore)):
         if (evidence.get("mode") != direction or
             evidence.get("source_plugin") != "posix" or
@@ -53,7 +59,7 @@ def validate(catalog: list[dict], backup: dict, restore: dict, sha: str, run: st
     return {
         "schema": 1, "source_sha": sha, "actions_run_id": int(run),
         "plugin_count": TOTAL, "ready_scoped_plugins": promoted,
-        "ready_scope": catalog[[p["id"] for p in catalog].index("posix")]["ready_scope"],
+        "ready_scopes": {p["id"]:p["ready_scope"] for p in catalog if p["backup_input"]=="ready"},
         "all_plugins_ready": False,
         "release_channel": "rc-preflight-not-published",
         "rc_publication_authorized": False,
@@ -64,7 +70,9 @@ def validate(catalog: list[dict], backup: dict, restore: dict, sha: str, run: st
         "notes": (
             "POSIX Ready means only quiescent regular-file byte content: "
             "no ownership, mode, mtime, ACL, xattr, hardlinks, symlinks, empty dirs "
-            "or application-consistent live snapshots. Remaining 32 providers "
+            "or application-consistent live snapshots. PostgreSQL 16 Ready " 
+            "only covers a single full logical database dump and create-only restore, "
+            "never roles/ACL/globals/PITR under Patroni. Remaining 31 providers "
             "cannot be promoted without specific field acceptance. "
             "No release is created by preflight."
         )
@@ -85,7 +93,7 @@ def main():
         json.loads(args.restore_plan.read_text(encoding="utf-8")),
         args.source_sha,args.run_id)
     args.output.write_text(json.dumps(report,sort_keys=True,indent=2)+"\n",encoding="utf-8")
-    print("PASS single-SHA RC preflight; EXACTLY ONE READY scoped plugin (POSIX regular-file bytes)")
+    print("PASS single-SHA RC preflight; EXACTLY TWO scoped Ready plugins (POSIX file bytes, PostgreSQL 16 full logical DB)")
     print("NOT A RELEASE: real-provider field gates and cross-platform packages remain OPEN")
 
 if __name__=="__main__":
