@@ -254,8 +254,9 @@ for file in "$WORK/cdb-pieces/"*.bkp;do
 done
 # The Oracle RMAN catalog references exactly the original media location:
 # remove ALL unencrypted originals, replace them with Rust-recovered media.
-docker exec -u oracle "$NAME" sh -c 'rm -f /tmp/mb-oracle-ci/{cdb,arch,ctl}_*.bkp' ||
- docker exec -u oracle "$NAME" sh -c 'rm -f /tmp/mb-oracle-ci/cdb_*.bkp /tmp/mb-oracle-ci/arch_*.bkp /tmp/mb-oracle-ci/ctl_*.bkp'
+docker exec -u oracle "$NAME" sh -c 'rm -f /tmp/mb-oracle-ci/cdb_*.bkp /tmp/mb-oracle-ci/arch_*.bkp /tmp/mb-oracle-ci/ctl_*.bkp'
+# The physically recovered files must be the age-deciphered copies.
+docker exec -u oracle "$NAME" sh -c 'test -z "$(find /tmp/mb-oracle-ci -type f -name "*.bkp" -print -quit)"'
 docker cp "$WORK/cdb-recovered/oracle/rman/." "$NAME:/tmp/mb-oracle-ci/" >/dev/null
 docker exec -u root "$NAME" sh -c 'chown -R oracle:oinstall /tmp/mb-oracle-ci && chmod 0700 /tmp/mb-oracle-ci && chmod 0600 /tmp/mb-oracle-ci/*.bkp'
 rm -rf -- "$WORK/cdb-pieces" "$WORK/cdb-recovered"
