@@ -1,5 +1,10 @@
 name: Multi Backup - real MinIO S3 Object Lock Rust acceptance
 on:
+  workflow_call:
+    inputs:
+      run_under_scoped_ready:
+        required: true
+        type: boolean
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -10,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   minio-real:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-minio-ci'
+    if: inputs.run_under_scoped_ready == true || github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-minio-ci'
     name: Actual MinIO server, Compliance Object Lock, encrypted Rust restore
     runs-on: ubuntu-24.04
     timeout-minutes: 55

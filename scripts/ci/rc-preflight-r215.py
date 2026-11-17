@@ -24,7 +24,7 @@ READY_ROLES = {
 }
 # These are genuine operational field tests, not unit tests or static declarations.
 # The workflow requires all five to complete SUCCESS *on the current source SHA*.
-MANDATORY_LABS = ("mysql84", "ceph_rbd_cephfs", "iscsi_tgt", "oracle_free", "minio_worm_iam")
+MANDATORY_LABS = ("mysql84", "ceph_rbd_cephfs", "iscsi_tgt", "oracle_free", "minio_worm_iam", "minio_s3_object")
 
 class PromotionError(ValueError):
     pass
@@ -113,7 +113,7 @@ def main():
         args.source_sha,args.run_id,
         json.loads(args.field_gates.read_text()))
     args.output.write_text(json.dumps(result,indent=2,sort_keys=True)+"\n")
-    print(f"PASS exact-SHA pre-RC: {len(READY_ROLES)} bounded READY providers, all five real field labs passed")
+    print(f"PASS exact-SHA pre-RC: {len(READY_ROLES)} bounded READY providers, all six real field labs passed")
     print("NO release authorized; remaining full-VM/physical HA and cross-platform installer gates are open")
 
 if __name__=="__main__":

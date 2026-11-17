@@ -1,4 +1,4 @@
-name: Multi Backup r215 - 9 scoped READY, five real field labs, single-SHA nonpublishing RC gate
+name: Multi Backup r215 - 9 scoped READY, six real field labs, single-SHA nonpublishing RC gate
 on:
   push:
     branches: ["feature/r215-scoped-provider-ready-and-rc"]
@@ -20,6 +20,7 @@ on:
       - ".github/workflows/cephfs-kind-real-r182.yml"
       - ".github/workflows/oracle-free-live.yml"
       - ".github/workflows/s3-worm-iam-real-r211.yml"
+      - ".github/workflows/s3-minio-live-r048.yml"
       - "scripts/ci/rc-preflight-r215.py"
       - "tests/test_rc_preflight_r215.py"
       - ".github/workflows/software-readiness-r168.yml"
@@ -64,6 +65,12 @@ jobs:
     name: Real MinIO COMPLIANCE Object Lock with two independent IAM users
     uses: ./.github/workflows/s3-worm-iam-real-r211.yml
 
+  minio_s3_object:
+    name: Genuine version-pinned MinIO S3 object SHA256 age source import
+    uses: ./.github/workflows/s3-minio-live-r048.yml
+    with:
+      run_under_scoped_ready: true
+
   rc-security-policy:
     name: RC preflight policy negatives and limited publish rights
     runs-on: ubuntu-24.04
@@ -100,7 +107,8 @@ jobs:
   current-sha-linux-candidate:
     name: Exact-commit signed-by-age Linux native preview bundle (NOT published RC)
     needs: [scoped_ready, full-software, real-database-roundtrip,
-            mysql84, ceph_rbd_cephfs, iscsi_tgt, oracle_free, minio_worm_iam, rc-security-policy]
+            mysql84, ceph_rbd_cephfs, iscsi_tgt, oracle_free, minio_worm_iam,
+            minio_s3_object, rc-security-policy]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -116,10 +124,11 @@ jobs:
           ISCSI_RESULT: ${{ needs.iscsi_tgt.result }}
           ORACLE_RESULT: ${{ needs.oracle_free.result }}
           VAULT_RESULT: ${{ needs.minio_worm_iam.result }}
+          OBJECT_RESULT: ${{ needs.minio_s3_object.result }}
         run: |
           set -euo pipefail
           for value in "$POSIX_RESULT" "$SOFTWARE_RESULT" "$DATABASE_RESULT" "$POLICY_RESULT" \
-            "$MYSQL84_RESULT" "$CEPH_RESULT" "$ISCSI_RESULT" "$ORACLE_RESULT" "$VAULT_RESULT"; do
+            "$MYSQL84_RESULT" "$CEPH_RESULT" "$ISCSI_RESULT" "$ORACLE_RESULT" "$VAULT_RESULT" "$OBJECT_RESULT"; do
             if test "$value" != success;then
               echo "DENIED RC artifact: required current-SHA suite conclusion is $value" >&2
               exit 1
@@ -144,6 +153,7 @@ jobs:
           ISCSI_RESULT: ${{ needs.iscsi_tgt.result }}
           ORACLE_RESULT: ${{ needs.oracle_free.result }}
           VAULT_RESULT: ${{ needs.minio_worm_iam.result }}
+          OBJECT_RESULT: ${{ needs.minio_s3_object.result }}
         run: |
           set -euo pipefail
           mkdir -p preview
@@ -157,9 +167,10 @@ jobs:
               'iscsi_tgt':os.environ['ISCSI_RESULT'],
               'oracle_free':os.environ['ORACLE_RESULT'],
               'minio_worm_iam':os.environ['VAULT_RESULT'],
+              'minio_s3_object':os.environ['OBJECT_RESULT'],
           }
           if any(evidence[k]!='success' for k in
-                 ('mysql84','ceph_rbd_cephfs','iscsi_tgt','oracle_free','minio_worm_iam')):
+                 ('mysql84','ceph_rbd_cephfs','iscsi_tgt','oracle_free','minio_worm_iam','minio_s3_object')):
               raise SystemExit('Missing/failed same-run provider field acceptance')
           with open('preview/field-gates.json','x') as f:
               json.dump(evidence,f,sort_keys=True,indent=2)
