@@ -6,8 +6,8 @@ umask 077
 test "$RUNNER_ENVIRONMENT" = github-hosted
 PROVIDER="$1"
 case "$PROVIDER" in
- owncloud) IMAGE=owncloud/server:11.1.0; PORT=19120; HTTP=18120;;
- nextcloud) IMAGE=nextcloud:32-apache; PORT=19121; HTTP=18121;;
+ owncloud) IMAGE=owncloud/server:11.1.0; PORT=19120; HTTP=18120; ACCOUNT=mbci;;
+ nextcloud) IMAGE=nextcloud:32-apache; PORT=19121; HTTP=18121; ACCOUNT=ci;;
  *) echo 'Only genuine owncloud|nextcloud Docker provider accepted' >&2;exit 1;;
 esac
 CLI=rust/target/debug/multi-backup-native
@@ -75,16 +75,16 @@ if test "$PROVIDER" = owncloud;then
   -e OWNCLOUD_DOMAIN="127.0.0.1:$PORT" \
   -e OWNCLOUD_TRUSTED_DOMAINS="127.0.0.1,localhost" \
   -e OWNCLOUD_DB_TYPE=sqlite \
-  -e OWNCLOUD_ADMIN_USERNAME=ci -e OWNCLOUD_ADMIN_PASSWORD="$PASSWORD" \
+  -e OWNCLOUD_ADMIN_USERNAME="$ACCOUNT" -e OWNCLOUD_ADMIN_PASSWORD="$PASSWORD" \
   "$IMAGE" >/dev/null
  DAV="https://127.0.0.1:$PORT/remote.php/webdav/"
 else
  docker run -d --name "$NAME" -p "127.0.0.1:$HTTP:80" \
-  -e NEXTCLOUD_ADMIN_USER=ci -e NEXTCLOUD_ADMIN_PASSWORD="$PASSWORD" \
+  -e NEXTCLOUD_ADMIN_USER="$ACCOUNT" -e NEXTCLOUD_ADMIN_PASSWORD="$PASSWORD" \
   -e SQLITE_DATABASE=nextcloud \
   -e NEXTCLOUD_TRUSTED_DOMAINS="127.0.0.1 localhost" \
   "$IMAGE" >/dev/null
- DAV="https://127.0.0.1:$PORT/remote.php/dav/files/ci/"
+ DAV="https://127.0.0.1:$PORT/remote.php/dav/files/$ACCOUNT/"
 fi
 STATUS="https://127.0.0.1:$PORT/status.php"
 READY=0
@@ -109,15 +109,15 @@ if test "$READY" != 1;then
  exit 1
 fi
 # Probe actual provider-authenticated DAV user collection (not plain WebDAV mock).
-curl -fsS -u "ci:$PASSWORD" -X PROPFIND -H 'Depth: 0' \
+curl -fsS -u "$ACCOUNT:$PASSWORD" -X PROPFIND -H 'Depth: 0' \
  --output "$W/dav-prop.xml" "$DAV" >/dev/null
 grep -Eiq 'multistatus|propstat' "$W/dav-prop.xml"
 if curl -fsS -X PROPFIND -H 'Depth: 0' "$DAV" >/dev/null 2>&1;then
  echo 'FAIL: unauthenticated provider account exposed DAV files' >&2;exit 1
 fi
 jq -n --arg provider "$PROVIDER" --arg endpoint "$DAV" \
- --arg status "$STATUS" \
- '{provider:$provider,endpoint:$endpoint,status_url:$status,username:"ci"}' >"$W/owner.json"
+ --arg status "$STATUS" --arg user "$ACCOUNT" \
+ '{provider:$provider,endpoint:$endpoint,status_url:$status,username:$user}' >"$W/owner.json"
 export MULTI_BACKUP_WEBDAV_PASSWORD="$PASSWORD"
 age-keygen -o "$W/key" >/dev/null 2>&1
 RECIPIENT=$(age-keygen -y "$W/key")
