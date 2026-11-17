@@ -1,5 +1,6 @@
 name: Multi Backup - genuine Oracle MySQL 8.4 encrypted B-In/restore acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/r209-worm-vault-db-patroni-ovirt"]
     paths:
