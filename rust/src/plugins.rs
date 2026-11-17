@@ -843,7 +843,7 @@ mod tests {
     fn oracle_rman_is_database_input_not_generic_output() {
         let d=find("oracle").unwrap();
         assert_eq!(d.kind,DataKind::Database);
-        assert_eq!(d.backup_input,Stage::Planned);
+        assert_eq!(d.backup_input,Stage::Preview);
         assert_eq!(d.backup_output,Stage::Unsupported);
         assert_eq!(d.restore_output,Stage::Planned);
         assert_eq!(d.restore_input,Stage::Unsupported);
