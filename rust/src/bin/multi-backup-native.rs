@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, ssh_input, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -14,6 +14,7 @@ fn usage() -> &'static str {
        multi-backup-native updates activate-portable --active DIR --candidate DIR --rollback NEW_DIR --binary REL --expected-sha256 SHA (APP STOPPED; portable only)\n\
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
+       multi-backup-native plugins ssh-backup --config OWNER_ONLY_SSH.json --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label LABEL [--top-namespace NS] [--json] (pinned host key, single version-attested remote file into age chunks)\n\
        multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount EXACT_MOUNT --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins mounted-restore --input MOUNT_PROVIDER --mount EXACT_MOUNT --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_DIR [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins s3-object-backup --config S3.json --object-key KEY --version-id VERSION --sha256 RAW_SHA256 --root EXISTING_CHUNK_STORE --identity AGE_ID --label LABEL [--top-namespace NS] [--json] (B-In versioned S3 / Ceph RGW / RustFS -> age chunk store)\n\
@@ -152,6 +153,20 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family=="plugins" && command=="ssh-backup" {
+        if password_stdin {return Err("SSH requires a pinned external key file, not console password".into());}
+        accepted(&flags,&["--config","--root","--identity","--label","--top-namespace"])?;
+        plugins::plan(plugins::Mode::Backup,"ssh","posix")?;
+        let cfg=ssh_input::Config::load(Path::new(required(&flags,"--config")?))?;
+        let backup=ssh_input::backup_file(&cfg,
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--label")?,
+            flags.get("--top-namespace").copied().unwrap_or(""))?;
+        if json {println!("{}",serde_json::to_string_pretty(&backup)?);}
+        else {println!("Pinned SSH input encrypted and verified: {}",backup.id);}
+        return Ok(());
+    }
     if family=="plugins" && command=="mounted-backup" {
         if password_stdin {return Err("Mounted B-Out accepts only age recipient and separate key path".into());}
         accepted(&flags,&["--output","--mount","--source","--filename","--recipient",

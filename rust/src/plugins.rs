@@ -274,8 +274,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PLAN, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
-    PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
-        "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
+    PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PLAN,
+        "Pinned SSH host key, exact remote-file digest and length, no shell escape",
+        "Native authenticated SSH B-In streams one digest-and-length-pinned file into age-encrypted chunks; SCP/SFTP directory operations and B-Out remain planned")
+        .with_restore_output_stage(PLAN),
     PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PREVIEW,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",
         "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport; existing exact RW SSHFS mount may receive encrypted create-only archive B-Out"),
@@ -505,7 +507,7 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 24);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if entry.id=="s3" {
+            if matches!(entry.id,"s3"|"ssh") {
                 // Native pinned-object backup source does NOT confer a
                 // generic restore-to-S3 capability; keep this direction
                 // planned until a write adapter is qualified.

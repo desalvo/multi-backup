@@ -34,7 +34,7 @@ NFS/SMB e GPFS protocollo non provano il funzionamento di GPFS nativo IBM.
 | Proxmox VE | Planned | Unsupported | media vzdump+task validato, export criptato VM/CT, restore |
 | Proxmox Backup Server | Planned | Planned | datastore export verification, restore CT/VM/host su host di prova |
 | Oracle RMAN | Planned | Unsupported | RMAN reale online/offline, ARCHIVELOG, dump age e restore |
-| SSH/SCP/SFTP | Planned | Planned | stream autenticato con hostkey pinned, non-overwrite, restore E2E |
+| SSH/SCP/SFTP | Preview (singolo file via SSH firmato con SHA256) | Planned | OpenSSH reale in CI con host key pinned, SHA e age chunk stream; SCP/SFTP directory/B-Out restano Planned |
 | WebDAV | Preview mounted RO | Preview mounted RW age | server HTTPS RW, ETag/PROPFIND, davfs2 cache coherence |
 | NFS | Preview mounted RO | Preview mounted RW age | server NFS v3/v4 con ripristino e HA/corruzione test |
 | SMB/Samba | Preview mounted RO | Preview mounted RW age | SMB3 ACL/ADS/consistency oltre a encrypted archive |
@@ -69,3 +69,8 @@ is a later Stable concern; rollback installation and production signing remain
 separate gates.
 
 One-line English commit summary: Add authenticated mount-bound encrypted backup destinations and verified create-only recovery for NFS, SMB, WebDAV, CephFS, GlusterFS, Lustre, GPFS and SSHFS.
+
+
+## r180 — ingresso SSH con verifica crittografica
+
+Adapter Rust `ssh_input.rs`: host e utente validati, pinned known_hosts 0600, identità SSH 0600, percorso remoto assoluto con lessico privo di metacaratteri, nessuna shell interpolation, trasferimento in streaming su `ssh -T`. Un SHA-256 e una dimensione fissati dal chiamante vengono controllati **prima** della pubblicazione del manifest age. Il codice rifiuta output incompleti, exit code non zero, host key falsa e chiavi non autorizzate. CLI dedicata `plugins ssh-backup --config OWNER_ONLY.json --root STORE --identity AGE_ID --label NAME`. L'integrazione con il vero OpenSSH server è stata aggiunta al test precedente `ssh-sshfs-live-integration.yml`. SCP e SFTP rimangono test di protocollo, non adapter B-In certificati; nessun B-Out SSH diretto.

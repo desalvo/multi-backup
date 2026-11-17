@@ -29,6 +29,7 @@ pub mod account_restore;
 pub mod scheduler;
 pub mod mount_probe;
 pub mod mounted_output;
+pub mod ssh_input;
 pub mod afs_volume;
 pub mod database;
 pub mod agent_protocol;

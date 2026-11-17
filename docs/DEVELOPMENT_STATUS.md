@@ -1028,3 +1028,8 @@ One-line English commit summary: Add pinned S3 input and create-only Dropbox out
 ## r179 — protocol-mounted encrypted backup output and restore source
 
 See `docs/PROVIDER_PLUGIN_READINESS_R179_IT.md`. Added dedicated Rust exact-mounted NFS/SMB/WebDAV/CephFS/GlusterFS/Lustre/GPFS-CES/SSHFS encrypted create-only output and remote encrypted readback into a new local directory; instrumented existing NFS/Samba/GlusterFS live workflow. The remaining requested SAN, Oracle, Proxmox, cloud E2E requirements are **not** complete. No overall Ready or RC2 claim. One-line English commit summary: Add safe ciphertext-only mounted output with real network field tests and fail-closed restore.
+
+
+## r180 — pinned SSH stream adapter
+
+Native `ssh_input.rs` streams an exact remote read-only file over strict pinned OpenSSH host keys into encrypted chunk store. The supplied SHA256/length and SSH process success must pass before publish. Existing real OpenSSH CI expanded to test encrypted byte-identical restore and wrong-digest fail-closed. SCP/SFTP B-In batch and any direct SSH B-Out are still Planned; no cross-remote backups claimed. One-line English commit summary: Add strictly pinned SSH B-In streaming encryption, independent digest checks and real-sshd acceptance.

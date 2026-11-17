@@ -111,6 +111,53 @@ if ssh -F "$WORK/bad_client_config" mbtest true >/dev/null 2>&1; then
     echo 'FAIL: unauthorized SSH key accepted' >&2; exit 1
 fi
 if [ "$MODE" = protocol ]; then
+    # B-In uses exactly the verified SSH server and pinned host credentials.
+    CLI=rust/target/debug/multi-backup-native
+    test -x "$CLI"
+    age-keygen -o "$WORK/stream-age-identity" >/dev/null 2>&1
+    RECIPIENT=$(sed -n 's/^# public key: //p' "$WORK/stream-age-identity" | head -1)
+    "$CLI" storage init --root "$WORK/stream-store" --recipient "$RECIPIENT"
+    REMOTE_HASH="$(sha256sum "$WORK/remote/scp-sftp.dat" | awk '{print $1}')"
+    REMOTE_BYTES="$(stat -c %s "$WORK/remote/scp-sftp.dat")"
+    export WORK NAME PORT REMOTE_HASH REMOTE_BYTES
+    python3 - <<'PY'
+import os,json
+root=os.environ["WORK"]
+cfg={
+    "host":"127.0.0.1","port":int(os.environ["PORT"]),
+    "user":os.environ["NAME"],
+    "identity_file":root+"/client_key",
+    "known_hosts_file":root+"/known_hosts",
+    "remote_file":root+"/remote/scp-sftp.dat",
+    "expected_sha256":os.environ["REMOTE_HASH"],
+    "expected_bytes":int(os.environ["REMOTE_BYTES"])
+}
+with open(root+"/ssh-source.json","x") as handle: json.dump(cfg,handle)
+os.chmod(root+"/ssh-source.json",0o600)
+PY
+    "$CLI" plugins ssh-backup --config "$WORK/ssh-source.json" \
+      --root "$WORK/stream-store" --identity "$WORK/stream-age-identity" \
+      --label "Pinned genuine OpenSSH B-In" --json > "$WORK/ssh-import.json"
+    SSH_IMPORT_ID="$(jq -er .id "$WORK/ssh-import.json")"
+    "$CLI" storage restore --root "$WORK/stream-store" \
+      --identity "$WORK/stream-age-identity" --id "$SSH_IMPORT_ID" \
+      --destination "$WORK/ssh-recovered"
+    cmp "$WORK/remote/scp-sftp.dat" \
+      "$WORK/ssh-recovered/ssh/127.0.0.1/$NAME/${WORK#/}/remote/scp-sftp.dat"
+    # Supplying an untrusted digest must never publish a valid backup.
+    python3 - "$WORK/ssh-source.json" <<'PY'
+import sys,json
+p=sys.argv[1]
+with open(p) as f: c=json.load(f)
+c["expected_sha256"]="0"*64
+with open(p,"w") as f: json.dump(c,f)
+PY
+    if "$CLI" plugins ssh-backup --config "$WORK/ssh-source.json" \
+      --root "$WORK/stream-store" --identity "$WORK/stream-age-identity" \
+      --label "Refuse bad digest" >/dev/null 2>&1;then
+      echo "FAIL: OpenSSH B-In accepted wrong independently pinned SHA256" >&2;exit 1
+    fi
+    echo "PASS genuine pinned SSH B-In, age chunked recovery and SHA tamper rejection"
     echo "PASS real SSH stdout, SCP(SFTP default), legacy SCP, explicit SFTP; pinned host and unauthorized client refused"
     exit 0
 fi

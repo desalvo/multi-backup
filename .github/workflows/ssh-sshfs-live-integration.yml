@@ -4,6 +4,7 @@ on:
     branches: ["feature/**"]
     paths:
       - 'rust/src/remote_restore.rs'
+      - 'rust/src/ssh_input.rs'
       - 'rust/src/plugin_executor.rs'
       - 'rust/src/mount_probe.rs'
       - 'rust/src/chunk_store.rs'
@@ -27,7 +28,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openssh-client openssh-server age jq
-      - name: Test real sshd, legacy SCP, SCP-over-SFTP and explicit SFTP
+      - name: Build native SSH encrypted streaming adapter
+        run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Test real SSH/SCP/SFTP and pinned SSH encrypted B-In
         run: bash scripts/test-real-ssh-sshfs.sh protocol
   sshfs-native-recovery:
     name: Real FUSE SSHFS read-only snapshot to encrypted Rust restore
