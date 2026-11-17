@@ -8,7 +8,10 @@ test "$(id -u)" -ne 0
 REPO_ROOT="$1"
 test -f "$REPO_ROOT/tests/lustre/ltvm-guest-rust-r182.sh"
 test -x "$REPO_ROOT/rust/target/x86_64-unknown-linux-musl/release/multi-backup-native"
-command -v age && command -v age-keygen && command -v sg
+: "${MB_LUSTRE_AGE_STATIC_DIR:?Required pinned, locally-built static age tools}"
+test -x "$MB_LUSTRE_AGE_STATIC_DIR/age"
+test -x "$MB_LUSTRE_AGE_STATIC_DIR/age-keygen"
+command -v sg
 # Static guest-native binary only. No ABI/glibc drift masked by a script.
 BIN="$REPO_ROOT/rust/target/x86_64-unknown-linux-musl/release/multi-backup-native"
 file "$BIN" | grep -Eqi '(static|statically linked)'
@@ -21,8 +24,8 @@ cleanup(){
 }
 trap cleanup EXIT
 cp "$BIN" "$STAGE/multi-backup-native"
-cp "$(command -v age)" "$STAGE/age"
-cp "$(command -v age-keygen)" "$STAGE/age-keygen"
+cp "$MB_LUSTRE_AGE_STATIC_DIR/age" "$STAGE/age"
+cp "$MB_LUSTRE_AGE_STATIC_DIR/age-keygen" "$STAGE/age-keygen"
 # Go age helpers on Ubuntu are usually static; refuse cross-distro glibc.
 for name in age age-keygen;do
   file "$STAGE/$name" | grep -Eqi '(static|statically linked)' ||

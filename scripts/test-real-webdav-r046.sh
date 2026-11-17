@@ -131,7 +131,12 @@ done
 curl -fsS -u "mbci:$AUTH_PASS" https://localhost:18920/nested/data.txt >/dev/null
 printf '%s %s %s\n' 'https://localhost:18920/' mbci "$AUTH_PASS" | sudo tee -a /etc/davfs2/secrets >/dev/null
 sudo chmod 0600 /etc/davfs2/secrets
-sudo mount -t davfs -o rw https://localhost:18920/ "$RW"
+sudo mount -t davfs -o "rw,uid=$(id -u),gid=$(id -g),file_mode=0600,dir_mode=0700" https://localhost:18920/ "$RW"
+# davfs2 mounted with sudo is root-owned unless the CI user's UID/GID are
+# explicit; a hidden tempfile must be writable without running the Rust
+# backup process as root.
+test -w "$RW" && touch "$RW/.mb-write-probe"
+rm -f -- "$RW/.mb-write-probe"
 "$CLI" plugins probe --plugin webdav --mount "$RW" --json \
   | jq -e '.rw_mount_option == true and (.fs_type == "fuse.davfs" or .fs_type == "fuse")'
 if "$CLI" plugins mounted-backup --output webdav --mount "$RO" \

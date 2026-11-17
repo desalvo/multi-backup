@@ -18,6 +18,8 @@ jobs:
     name: Genuine Lustre kernel/MDT/OST under KVM, actual Rust FULL/verify/restore and ciphertext B-Out
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      MB_LUSTRE_AGE_STATIC_DIR: ${{ runner.temp }}/mb-age-static
     steps:
       - uses: actions/checkout@v4
       - name: Require genuine KVM, static Rust and safe test scripts
@@ -33,8 +35,17 @@ jobs:
       - name: Install genuine age helpers and static guest cross compiler
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y age musl-tools file
+          sudo apt-get install -y age musl-tools file golang-go
           rustup target add x86_64-unknown-linux-musl
+      - name: Compile version-pinned static age tools (never run host glibc binary in Rocky guest)
+        run: |
+          set -euo pipefail
+          mkdir -p "$MB_LUSTRE_AGE_STATIC_DIR"
+          go version
+          CGO_ENABLED=0 GOBIN="$MB_LUSTRE_AGE_STATIC_DIR" go install filippo.io/age/cmd/age@v1.2.1 filippo.io/age/cmd/age-keygen@v1.2.1
+          for binary in age age-keygen; do
+            file "$MB_LUSTRE_AGE_STATIC_DIR/$binary" | grep -Eqi '(static|statically linked)'
+          done
       - name: Compile exact-source static native Rust binary for Rocky9 Lustre QEMU
         run: |
           cargo build --manifest-path rust/Cargo.toml --release --target x86_64-unknown-linux-musl --bin multi-backup-native
