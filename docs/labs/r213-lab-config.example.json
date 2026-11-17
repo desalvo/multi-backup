@@ -1,0 +1,14 @@
+{
+  "network": "mb-r213-isolated",
+  "engine_image": "/srv/multi-backup-lab-media/AlmaLinux-9-GenericCloud.qcow2",
+  "host_image": "/srv/multi-backup-lab-media/AlmaLinux-9-GenericCloud.qcow2",
+  "engine_user_data": "/etc/multi-backup-ci/r213/ovirt-engine-user-data.yaml",
+  "host_user_data": "/etc/multi-backup-ci/r213/ovirt-host-user-data.yaml",
+  "esxi_iso": "/srv/multi-backup-lab-media/VMware-ESXi-8-licensed-media.iso",
+  "sha256": {
+    "engine_image": "0000000000000000000000000000000000000000000000000000000000000000",
+    "host_image": "0000000000000000000000000000000000000000000000000000000000000000",
+    "esxi_iso": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "enable_esxi": true
+}

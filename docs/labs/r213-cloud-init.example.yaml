@@ -1,0 +1,16 @@
+#cloud-config
+# Replace this public-key placeholder and persist a private 0600 copy per VM.
+hostname: mb-r213-replace-me
+manage_etc_hosts: true
+ssh_pwauth: false
+disable_root: true
+users:
+  - name: mb-lab
+    lock_passwd: true
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    groups: [wheel]
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - REPLACE_WITH_OPERATOR_ED25519_PUBLIC_KEY
+package_update: false
+package_upgrade: false
