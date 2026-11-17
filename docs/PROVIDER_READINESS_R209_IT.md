@@ -18,7 +18,7 @@
 ## Collaudo oVirt autentico necessario
 Il workflow manuale `.github/workflows/ovirt-real-field-r209.yml` usa runner self-hosted `multi-backup-ovirt-field` su ambiente approvato `multi-backup-ovirt-readonly-lab`, solo VM di test isolate. Il runner unprivileged deve avere:
 - `/etc/multi-backup-ci/allow-disposable-ovirt` con testo `DEDICATED_OVIRT_VM_BACKUP_FIXTURE_ONLY`.
-- Configurazione `/etc/multi-backup-ci/ovirt-field/backup-image.json` proprietario runner 0600 con URL Engine HTTPS, bearer token a scope limitato, `vm_id`, `backup_id`, `disk_id`, `transfer_id`, `transfer_url`, `expected_sha256`, `expected_bytes`. Non mettere token in secrets CI nei comandi o nella documentazione.
+- Configurazione `/etc/multi-backup-ci/ovirt-field/backup-image.json` proprietario runner 0600 con URL Engine HTTPS, bearer token a scope limitato, `vm_id`, `backup_id`, `disk_id`, `transfer_id`, `transfer_url`, `expected_sha256`, `expected_bytes`, `expected_format` (`raw` oppure `qcow2`, con `qemu-img info` indipendente). Non mettere token in secrets CI nei comandi o nella documentazione.
 - Una VM reale oVirt non produttiva con backup `READY` e transfer IMAGEIO di DOWNLOAD già avviato. La fase/URL e i dischi devono essere corrispondenti e ancora disponibili; non riutilizzare volumi o VMIDs di produzione.
 - `age-keygen`, `qemu-img`, `jq`, Rust; il job ricrea il disco in una directory NEW e verifica SHA/size e `qemu-img check`, rifiuta chiavi sbagliate e collisioni. **NON** avvia né modifica VM sull'Engine. Per certificare un VM backup completo serviranno OVF, tutti i dischi, restore su VM nuova, boot e verifica guest.
 
@@ -29,3 +29,6 @@ Su Linux, un processo locale con root sul server che contiene i file può manome
 Il catalogo completo resta di **33 provider, 32 B-In e 26 B-Out**. Altri provider ancora incomplete: Google Drive, OneDrive, HDFS, Alfresco, Kubernetes, VMware VM, Fibre Channel, NVMe-oF, oVirt restore, PVE/PBS field completo e GPFS nativo. È **tecnicamente scorretto** dichiarare la RC completa o gli adapter generici tutti `Ready` senza test reali di backup e ripristino in ogni direzione.
 
 One-line English commit summary: Add externally enforced WORM vault and genuine database/PITR field gates, enforce Patroni leader-lock safety, and introduce read-only attested oVirt IMAGEIO backup preview.
+
+### r209.6 — fedeltà oVirt IMAGEIO disk format
+A differenza di un archivio VMA PVE, un trasferimento IMAGEIO oVirt può essere RAW oppure QCOW2. Il profilo ora richiede `expected_format: "raw"|"qcow2"` e il file recuperato mantiene l'estensione corrispondente. La validazione sul laboratorio fisico usa `qemu-img info` per confrontare il formato reale e `qemu-img check` quando è QCOW2; non tratta per errore un RAW come QCOW2. È una protezione di contratto, **non** una certificazione provider sul quale la CI autenticata rimane SKIPPED.
