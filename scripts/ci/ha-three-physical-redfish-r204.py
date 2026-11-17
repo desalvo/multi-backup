@@ -41,7 +41,10 @@ printf 'chassis=%s\\n' "$(cat /sys/class/dmi/id/chassis_serial)"
 if systemd-detect-virt -q;then echo 'physical=NO';else echo 'physical=YES';fi
 """
 def hardware(host):
-    data=dict(line.split("=",1) for line in ssh(host,HARDWARE).splitlines())
+    lines=[line.split("=",1) for line in ssh(host,HARDWARE).splitlines()]
+    if len(lines)!=6 or any(len(line)!=2 for line in lines):
+        raise RuntimeError("Duplicate or malformed bare-metal attestation")
+    data=dict(lines)
     if set(data)!={"name","machine","boot","uuid","chassis","physical"}:
         raise RuntimeError("Incomplete bare-metal DMI/boot proof")
     if data["physical"]!="YES" or len(canonical(data["uuid"]))!=32 or \
@@ -125,8 +128,8 @@ def main():
     if len(set(hosts))!=3 or any(not HOST.fullmatch(h) for h in hosts):
         raise RuntimeError("Expected three distinct physical host addresses")
     meta=CONFIG.lstat()
-    if not stat.S_ISREG(meta.st_mode) or meta.st_uid!=0 or meta.st_mode&0o077:
-        raise RuntimeError("Lab hardware allowlist must be root-owned mode 0600")
+    if not stat.S_ISREG(meta.st_mode) or meta.st_uid!=0 or meta.st_mode&0o037:
+        raise RuntimeError("Lab allowlist must be root-owned 0640, group-readable by dedicated CI runner")
     config=json.loads(CONFIG.read_text())
     if sorted(config.get("hosts",{}))!=sorted(hosts):
         raise RuntimeError("Selected hosts are not exactly those approved in lab allowlist")
