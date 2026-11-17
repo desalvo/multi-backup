@@ -224,4 +224,28 @@ if "$CLI" plugins restore --input posix --output sshfs --root "$WORK/store" \
     --destination "$WORK/mount-rw/new-recovery"; then
     echo 'FAIL: SSHFS restore overwrote existing target' >&2; exit 1
 fi
+# r183: genuine SSHFS RW mount B-Out with ciphertext and remote age readback.
+mkdir -p "$WORK/mounted-output-input/nested"
+printf 'authenticated remote SSHFS age B-Out\n' > "$WORK/mounted-output-input/nested/hello.txt"
+"$CLI" plugins mounted-backup --output sshfs \
+  --mount "$WORK/mount-rw" --source "$WORK/mounted-output-input" \
+  --filename verified-sshfs.tar.gz.age --recipient "$RECIPIENT" \
+  --identity "$WORK/identity" --json > "$WORK/mounted-output-receipt.json"
+jq -e '.create_only == true and .encrypted == true and (.verified_members == .source_members)' \
+  "$WORK/mounted-output-receipt.json"
+test -f "$WORK/remote-rw/verified-sshfs.tar.gz.age"
+test -f "$WORK/remote-rw/verified-sshfs.tar.gz.age.sha256"
+"$CLI" plugins mounted-restore --input sshfs \
+  --mount "$WORK/mount-rw" --filename verified-sshfs.tar.gz.age \
+  --identity "$WORK/identity" --destination "$WORK/mounted-sshfs-recovered"
+cmp "$WORK/mounted-output-input/nested/hello.txt" \
+  "$WORK/mounted-sshfs-recovered/multi-backup/mounted-output/nested/hello.txt"
+if "$CLI" plugins mounted-backup --output sshfs \
+  --mount "$WORK/mount-rw" --source "$WORK/mounted-output-input" \
+  --filename verified-sshfs.tar.gz.age --recipient "$RECIPIENT" \
+  --identity "$WORK/identity" >/dev/null 2>&1; then
+    echo 'FAIL SSHFS B-Out overwrote an existing encrypted archive' >&2; exit 1
+fi
+echo 'PASS genuine SSHFS B-Out encrypted archive, remote readback and create-only age recovery'
+
 echo "PASS genuine FUSE SSHFS RO source -> Rust age store -> isolated RW SSHFS restore, strict mount type and no overwrite"

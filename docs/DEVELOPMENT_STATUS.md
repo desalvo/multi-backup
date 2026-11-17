@@ -1043,3 +1043,8 @@ RBD and PVE B-Out can now be selected in the planner but remain non-executable S
 ## r182 — Genuine Rook/CephFS 3-OSD field CI, Lustre/KVM native Rust roundtrip and Oracle Free verification
 
 Created genuine CephFS Rook MDS/OSD/Kubernetes FUSE client E2E and genuine Lustre Rocky9 KVM Rust static native FULL/verify/restore + mounted-output E2E CI. Reuses proven Ceph and Lustre labs; no fake mounts or green PASS without actual CI. Oracle Free RMAN/PDB real CI previously PASS; now verifies wrong-age-key refusal and retriggers. OpenAFS **was field-certified** at #43747477666 with exact unchanged AFS Rust module and field script; preserve scope. See docs/PLUGIN_FIELD_READINESS_R182_IT.md. One-line English commit summary: Exercise CephFS and Lustre real lab encrypted backup and recovery, requalify Oracle Free, and recognize verified OpenAFS cell acceptance.
+
+
+## r183 — Real WebDAV and SSHFS mounted B-Out acceptance
+
+Existing authenticated TLS rclone WebDAV/davfs2 live workflow extended with a genuine second writable server/mount, create-only age remote B-Out, independently fetched HTTPS ciphertext, age restore, RO denial and overwrite checks. Existing OpenSSH/SSHFS live workflow extended with real SSHFS RW age B-Out/readback/restore, no-overwrite. No claim before exact-SHA CI. See docs/PLUGIN_FIELD_READINESS_R182_IT.md. One-line English commit summary: Qualify genuine WebDAV and SSHFS encrypted output against writable authenticated remote services.

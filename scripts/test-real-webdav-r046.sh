@@ -10,10 +10,13 @@ WORK=$(mktemp -d "$HOME/.mb-webdav-r046.XXXXXXXX")
 RO="$WORK/ro"; ROOT="$WORK/export"; STORE="$WORK/age-store"; IDENTITY="$WORK/age-identity"
 mkdir -p "$RO" "$ROOT/nested"
 SERVER_PID=""
+WRITE_PID=""
 cleanup() {
   set +e
+  if test -n "${RW:-}" && mountpoint -q "$RW"; then sudo umount "$RW"; fi
   if mountpoint -q "$RO"; then sudo umount "$RO"; fi
   if [ -n "$SERVER_PID" ]; then kill "$SERVER_PID" 2>/dev/null || :; wait "$SERVER_PID" 2>/dev/null || :; fi
+  if [ -n "$WRITE_PID" ]; then kill "$WRITE_PID" 2>/dev/null || :; wait "$WRITE_PID" 2>/dev/null || :; fi
   sudo rm -rf -- "$WORK"
 }
 trap cleanup EXIT
@@ -108,5 +111,56 @@ if "$CLI" plugins restore --input posix --output webdav --root "$STORE" \
   --identity "$IDENTITY" --id "$SNAPSHOT" --destination "$RO/not-supported" >/dev/null 2>&1; then
   echo "FAIL unimplemented WebDAV output allowed" >&2; exit 1
 fi
+# r183: independent genuine HTTPS/Basic Auth RW WebDAV server and
+# actual davfs2 RW mounted B-Out with exact ciphertext downloaded over HTTP.
+# No production DAV endpoint or personal cloud account involved.
+RW="$WORK/rw"
+mkdir -p "$RW" "$WORK/local-output/nested"
+printf 'real authenticated RW WebDAV age output\n' > "$WORK/local-output/nested/source.txt"
+AUTH_PASS="$(sudo awk '$1=="https://localhost:18919/" {print $3}' /etc/davfs2/secrets | tail -1)"
+test -n "$AUTH_PASS"
+rclone serve webdav "$ROOT" --addr 127.0.0.1:18920 \
+  --cert "$WORK/webdav.crt" --key "$WORK/webdav.key" \
+  --htpasswd "$WORK/htpasswd" --min-tls-version tls1.2 \
+  > "$WORK/write-server.log" 2>&1 &
+WRITE_PID=$!
+for n in $(seq 1 30);do
+  if curl -fsS -u "mbci:$AUTH_PASS" https://localhost:18920/nested/data.txt >/dev/null 2>&1;then break;fi
+  sleep 1
+done
+curl -fsS -u "mbci:$AUTH_PASS" https://localhost:18920/nested/data.txt >/dev/null
+printf '%s %s %s\n' 'https://localhost:18920/' mbci "$AUTH_PASS" | sudo tee -a /etc/davfs2/secrets >/dev/null
+sudo chmod 0600 /etc/davfs2/secrets
+sudo mount -t davfs -o rw https://localhost:18920/ "$RW"
+"$CLI" plugins probe --plugin webdav --mount "$RW" --json \
+  | jq -e '.rw_mount_option == true and (.fs_type == "fuse.davfs" or .fs_type == "fuse")'
+if "$CLI" plugins mounted-backup --output webdav --mount "$RO" \
+  --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
+  --recipient "$RECEIVER" --identity "$IDENTITY" >/dev/null 2>&1;then
+  echo 'FAIL: WebDAV B-Out accepted read-only davfs2 mount' >&2;exit 1
+fi
+"$CLI" plugins mounted-backup --output webdav --mount "$RW" \
+  --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
+  --recipient "$RECEIVER" --identity "$IDENTITY" --json > "$WORK/webdav-out.json"
+jq -e '.create_only and .encrypted and (.verified_members == .source_members)' "$WORK/webdav-out.json"
+test -f "$RW/new-webdav.tar.gz.age.sha256"
+sync
+# Independently read over HTTPS, bypassing FUSE/davfs2 cache.
+curl --fail --silent --show-error -u "mbci:$AUTH_PASS" \
+  https://localhost:18920/new-webdav.tar.gz.age -o "$WORK/https-downloaded.tar.gz.age"
+cmp "$RW/new-webdav.tar.gz.age" "$WORK/https-downloaded.tar.gz.age"
+"$CLI" plugins mounted-restore --input webdav --mount "$RW" \
+  --filename new-webdav.tar.gz.age --identity "$IDENTITY" \
+  --destination "$WORK/restored-from-webdav"
+cmp "$WORK/local-output/nested/source.txt" \
+  "$WORK/restored-from-webdav/multi-backup/mounted-output/nested/source.txt"
+if "$CLI" plugins mounted-backup --output webdav --mount "$RW" \
+  --source "$WORK/local-output" --filename new-webdav.tar.gz.age \
+  --recipient "$RECEIVER" --identity "$IDENTITY" >/dev/null 2>&1;then
+  echo 'FAIL: WebDAV B-Out overwrote existing encrypted remote object' >&2;exit 1
+fi
+unset AUTH_PASS
+echo 'PASS actual TLS authenticated WebDAV B-Out, remote ciphertext HTTPS readback, age restore and no-overwrite'
+
 echo "PASS authentic TLS+basic-auth rclone WebDAV server, real read-only davfs2 mount, Rust encrypted backup/verify/byte-for-byte local restore"
 echo "NOT CERTIFIED real server-side snapshots, cache ETag fidelity, full metadata, WebDAV output/remote restore"

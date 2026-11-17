@@ -976,3 +976,8 @@ RBD/PVE B-Out upgraded from Unsupported to Planned ONLY, no runtime executor. Re
 ## r182 field-CI lab handoff
 
 Branch feature/r182-cephfs-lustre-oracle-field-ci stacked on PR #33. New CephFS kind workflow uses existing real 3 MON/3 OSD Rook RGW cluster + MDS CephFS and isolated Ubuntu client pod; actual Rust age encrypted B-In and B-Out via fuse.ceph-fuse. New Lustre workflow uses pinned LTVM genuine Rocky9 guest, compile same SHA static Rust and pass SHA256-verified binaries over ephemeral bridge; actual Rust Lustre B-In/B-Out and restore. Oracle Free workflow rerun with additional wrong-age-key negative on real RMAN pieces. Historical real AFS certified #43747477666 unchanged adapter module+test script. Only mark green when exact-SHA runs succeed, not on scripted lab existence. See docs/PLUGIN_FIELD_READINESS_R182_IT.md.
+
+
+## r183 remote mounted output CI handoff
+
+New real WebDAV RW (TLS Basic Auth, independent GET bypassing davfs2 cache) and real SSHFS RW encrypted B-Out acceptance tests extend existing provider CI without mocks or duplicate servers. Check exact-SHA workflows webdav-live-r046.yml and ssh-sshfs-live-integration.yml; if unsupported remote FUSE rename/link returns errors, do not suppress; fix actual no-overwrite staging. docs/PLUGIN_FIELD_READINESS_R182_IT.md updated.

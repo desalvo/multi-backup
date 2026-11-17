@@ -49,3 +49,9 @@ Il workflow esistente oracle-free-live.yml deve essere rilanciato sul nuovo SHA 
 **Regola:** CI PASS deve riferirsi a un test effettivamente eseguito e riuscito, non alla presenza dello script. AFS e Oracle hanno già risultati reali conclusi; CephFS/Lustre E2E non sono automaticamente verdi perché viene predisposto il laboratorio.
 
 One-line English commit summary: Provision genuine CI CephFS and Lustre labs for Rust encrypted backup/restore, retest Oracle Free and record verified OpenAFS field evidence.
+
+## r183 — aggiunta CI reale B-Out WebDAV e SSHFS
+
+- \`scripts/test-real-webdav-r046.sh\`: oltre al RO server originale usa un **secondo server rclone WebDAV HTTPS RW** su 127.0.0.1 con autenticazione, monta con vero davfs2, esegue l'output cifrato create-only, conferma la ricevuta, effettua **GET HTTPS indipendente dalla cache FUSE** confrontandone i byte e verifica recovery age su directory nuova. Rifiuta mount RO e sovrascrittura; certificazione ancora subordinata all'esito del workflow \`webdav-live-r046.yml\`.
+- \`scripts/test-real-ssh-sshfs.sh\`: riusa vero OpenSSH con hostkey pinned e client FUSE SSHFS RW, cifra archivio age con il nuovo B-Out montato, verifica readback e recovery locale, rifiuta overwrite; certificazione subordinata a \`ssh-sshfs-live-integration.yml\`.
+- Questi sono adapter ciphertext-only su mount, non API WebDAV native con ETag/lock completo o un SFTP B-Out generico. Nessun PASS senza CI eseguita.

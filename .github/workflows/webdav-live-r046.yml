@@ -1,4 +1,4 @@
-name: Multi Backup - actual authenticated WebDAV davfs2 Rust backup
+name: Multi Backup - real authenticated WebDAV RO input and encrypted RW output
 on:
   push:
     branches: ["feature/**"]
@@ -33,12 +33,12 @@ jobs:
           bash -n scripts/test-real-webdav-r046.sh
       - name: Build compiled Rust native plugin dispatcher
         run: cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
-      - name: Actual loopback TLS WebDAV with htpasswd and verified FUSE mount
+      - name: Actual HTTPS WebDAV RO input and RW ciphertext B-Out with independent HTTPS GET
         env:
           RUNNER_ENVIRONMENT: github-hosted
         run: bash scripts/test-real-webdav-r046.sh
       - name: Record honest field boundary
         if: success()
         run: |
-          echo "PASS authentic authenticated HTTPS WebDAV server, davfs2 FUSE RO client, Rust age-encrypted backup, verify and bytewise local recovery." >> "$GITHUB_STEP_SUMMARY"
-          echo "NOT CERTIFIED provider API ETag, durable remote snapshot, ACL/xattr, target WebDAV restore, disconnected-client faults." >> "$GITHUB_STEP_SUMMARY"
+          echo "PASS real HTTPS Basic Auth WebDAV RO input and RW create-only age B-Out with independent remote HTTPS ciphertext GET, SHA-256 and isolated recovery." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED provider-specific ETag/ACL/xattr, remote service failure/fencing, large uploads or production snapshot semantics." >> "$GITHUB_STEP_SUMMARY"
