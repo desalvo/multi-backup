@@ -8,6 +8,8 @@ on:
       - 'tests/cephfs/rook-real-client-r182.sh'
       - 'tests/cephfs/rook-real-rbd-r195.sh'
       - 'rust/src/rbd_native.rs'
+      - 'rust/src/fs_metadata_archive.rs'
+      - 'tests/cephfs/rook-real-metadata-r196.sh'
       - 'scripts/ci/ceph-rgw-kind-cluster.sh'
   workflow_dispatch:
 permissions:
@@ -55,6 +57,7 @@ jobs:
         env:
           MB_CEPHFS_LAB: "1"
           MB_RBD_LAB: "1"
+          MB_FSMETA_LAB: "1"
           RUNNER_ENVIRONMENT: github-hosted
         run: bash scripts/ci/ceph-rgw-kind-cluster.sh
       - name: Report certification boundary
@@ -62,4 +65,4 @@ jobs:
         run: |
           echo 'PASS real CephFS encrypted Rust B-In/B-Out plus pinned RBD snapshot export and NEW image import/readback in same genuine 3-OSD cluster.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Also reused existing real Ceph RGW S3 WORM suite on the same disposable cluster.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'NOT CERTIFIED: guest quiescing, synchronized file/block snapshots, ACL/xattrs, physical fault tolerance, production fencing or long-term cluster operation.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'ACL/xattr and concurrent CephFS .snap subtree tested by separate genuine FUSE/PAX step; still no physical-host failure certification, cross-provider atomic group snapshot, or production fencing.' >> "$GITHUB_STEP_SUMMARY"
