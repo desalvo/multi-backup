@@ -1,0 +1,42 @@
+name: Multi Backup - real Patroni three-node TLS leader-guarded native PostgreSQL database acceptance
+on:
+  push:
+    branches: ["feature/r209-worm-vault-db-patroni-ovirt"]
+    paths:
+      - "scripts/ci/patroni-db-real-r209.py"
+      - "scripts/ci/patroni-etcd-real-ha.py"
+      - ".github/workflows/patroni-db-real-r209.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-native-patroni-real-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-patroni-native-db:
+    name: Genuine 3x PG16 Patroni TLS/etcd leader-locked age backup and NEW DB restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision actual isolated PostgreSQL 16 Patroni etcd mTLS service tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            age jq postgresql-16 postgresql-client-16 patroni python3-psycopg2 \
+            python3-etcd etcd-server etcd-client openssl iproute2 iptables util-linux ca-certificates
+          python3 -m py_compile scripts/ci/patroni-db-real-r209.py scripts/ci/patroni-etcd-real-ha.py
+      - name: Compile exact checked-out Rust database adapter
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib database
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Real TLS/leader-lock Patroni PG dump, encrypted recovery and HA failover
+        run: python3 scripts/ci/patroni-db-real-r209.py
+      - name: Record precise verification scope
+        if: success()
+        run: |
+          echo "PASS real 3 PostgreSQL16 Patroni/etcd TLS members, synchronous witness, /primary lock, immutable age database stream, new target, replica refusal and leader failover." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED 3 independent physical hosts, simultaneous power failures or Patroni physical WAL/PITR orchestration." >> "$GITHUB_STEP_SUMMARY"
