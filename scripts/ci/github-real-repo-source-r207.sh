@@ -33,9 +33,13 @@ MIRROR="$W/restored-new/multi-backup/repositories/desalvo/multi-backup/git/multi
 test -d "$MIRROR"
 git -C "$MIRROR" fsck --full
 git -C "$MIRROR" show-ref --verify refs/heads/main
-# Metadata archive is decrypted only into a pipe; no plaintext metadata persists.
-age -d -i "$W/agekey" "$META" | gzip -dc | tar tf - | grep -q 'repository.json'
-age -d -i "$W/agekey" "$META" | gzip -dc | tar tf - | grep -q 'references.txt'
+# Decrypt metadata into a pipe; list only member NAMES to private scratch.
+# grep -q directly in a pipe can issue SIGPIPE to upstream gzip/tar and
+# spuriously fail an otherwise valid archive under pipefail.
+age -d -i "$W/agekey" "$META" | gzip -dc | tar tf - > "$W/meta-member-list.txt"
+grep -q 'repository.json' "$W/meta-member-list.txt"
+grep -q 'references.txt' "$W/meta-member-list.txt"
+echo 'PASS real GitHub remote mirror and separately encrypted metadata archive contents'
 if "$CLI" plugins github-repository-restore-offline \
  --repository "$GITHUB_REPOSITORY" --archive "$ARCHIVE" \
  --identity "$W/agekey" --destination "$W/restored-new" >/dev/null 2>&1;then
