@@ -20,6 +20,9 @@ def fixture():
     plugins[0].update(id="posix",backup_input="ready",backup_output="ready",
                       restore_input="ready",restore_output="ready",
                       ready_scope="content_only_quiesced_regular_files; no ACL/xattr")
+    plugins[1].update(id="postgresql",backup_input="ready",backup_output="unsupported",
+                      restore_input="unsupported",restore_output="ready",
+                      ready_scope="postgresql16_single_database_full_logical_create_only; no roles")
     def plan(mode):
         return dict(mode=mode,source_plugin="posix",destination_plugin="posix",
                     source_stage="ready",destination_stage="ready",
@@ -32,16 +35,25 @@ class RcTest(unittest.TestCase):
     def test_positive_scoped_ready(self):
         data=fixture()
         result=mod.validate(*data,SHA,RUN)
-        self.assertEqual(result["ready_scoped_plugins"],["posix"])
+        self.assertEqual(result["ready_scoped_plugins"],["posix","postgresql"])
         self.assertFalse(result["rc_publication_authorized"])
         self.assertFalse(result["all_plugins_ready"])
 
     def test_extra_unqualified_provider_refused(self):
         a,b,r=fixture()
-        a[1]["backup_input"]="ready"
-        a[1]["ready_scope"]="false-full-certification"
+        a[2]["backup_input"]="ready"
+        a[2]["ready_scope"]="false-full-certification"
         with self.assertRaises(mod.PromotionError):
             mod.validate(a,b,r,SHA,RUN)
+
+
+    def test_postgresql_cannot_grant_generic_write_or_complete_cluster_claim(self):
+        a,b,r=fixture()
+        for k,v in (("backup_output","ready"),("restore_input","ready")):
+            corrupted=copy.deepcopy(a)
+            corrupted[1][k]=v
+            with self.subTest(field=k),self.assertRaises(mod.PromotionError):
+                mod.validate(corrupted,b,r,SHA,RUN)
 
     def test_catalog_missing_entry_refused(self):
         a,b,r=fixture()
