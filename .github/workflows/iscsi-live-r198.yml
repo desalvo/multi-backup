@@ -1,0 +1,41 @@
+name: Multi Backup - real iSCSI target initiator pinned snapshot test
+on:
+  push:
+    branches: ["feature/r198-iscsi-snapshot-native-field","feature/r211-provider-field-certification"]
+    paths:
+      - "rust/src/iscsi_snapshot.rs"
+      - "rust/src/iscsi_new_lun.rs"
+      - "scripts/ci/iscsi-live-r198.sh"
+      - ".github/workflows/iscsi-live-r198.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-iscsi-real-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-iscsi:
+    name: Genuine Linux kernel iSCSI target+initiator, encrypted backup/recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install target, initiator and native encryption requirements
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo apt-get update -qq
+          sudo apt-get install -y tgt open-iscsi age jq xxd kmod
+          bash -n scripts/ci/iscsi-live-r198.sh
+      - name: Compile actual Rust plugin and run negative unit tests
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib iscsi_snapshot
+          cargo test --manifest-path rust/Cargo.toml --lib iscsi_new_lun
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Real network iSCSI kernel LUN and encrypted copy
+        run: bash scripts/ci/iscsi-live-r198.sh
+      - name: Record strict certification boundaries
+        if: success()
+        run: |
+          echo "PASS real iSCSI target+initiator B-In and NEW locally provisioned TGT LUN B-Out, byte-for-byte readback and overwrite refusal." >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT CERTIFIED: remote SAN LUN create, CHAP/multipath, physical-host fencing and live guest/LVM consistency." >> "$GITHUB_STEP_SUMMARY"
