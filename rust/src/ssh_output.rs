@@ -15,7 +15,8 @@ type Result<T>=std::result::Result<T,Box<dyn std::error::Error+Send+Sync>>;
 pub struct Config{
     pub host:String,pub port:u16,pub user:String,
     pub identity_file:PathBuf,pub known_hosts_file:PathBuf,
-    pub remote_directory:String
+    pub remote_directory:String,
+    #[serde(default)]pub transport:Option<String>
 }
 #[derive(Serialize)]
 pub struct Receipt{
@@ -62,6 +63,11 @@ impl Config{
            !path(&self.remote_directory){
             return Err("SSH B-Out requires pinned host, user, port and safe absolute base directory".into());
         }
+        if let Some(t)=self.transport.as_deref(){
+            if !matches!(t,"ssh"|"sftp"){
+                return Err("SSH B-Out transport must be ssh or sftp".into());
+            }
+        }
         secret(&self.identity_file)?;
         secret(&self.known_hosts_file)?;
         Ok(())
@@ -85,6 +91,32 @@ impl Config{
         cmd.stderr(Stdio::null()).stdout(Stdio::piped());
         Ok(cmd)
     }
+    fn sftp(&self,batch:&str)->Result<()>{
+        self.validate()?;
+        let mut process=Command::new("sftp");
+        process.args(["-b","-","-P"]).arg(self.port.to_string())
+            .arg("-i").arg(&self.identity_file);
+        for flag in ["BatchMode=yes","StrictHostKeyChecking=yes",
+            "IdentitiesOnly=yes","PreferredAuthentications=publickey",
+            "PasswordAuthentication=no","ConnectTimeout=15","ForwardAgent=no",
+            "LogLevel=ERROR","GlobalKnownHostsFile=/dev/null"]{
+            process.arg("-o").arg(flag);
+        }
+        process.arg("-o").arg(format!("UserKnownHostsFile={}",self.known_hosts_file.display()));
+        process.arg(format!("{}@{}",self.user,self.host))
+            .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut child=process.spawn()?;
+        let written=(||->Result<()>{
+            child.stdin.as_mut().ok_or("SFTP batch stdin absent")?
+                .write_all(batch.as_bytes())?;
+            Ok(())
+        })();
+        drop(child.stdin.take());
+        if written.is_err(){let _=child.kill();let _=child.wait();return written;}
+        if !child.wait()?.success(){return Err("Pinned SFTP batch refused; no overwrite or shell fallback".into());}
+        Ok(())
+    }
+    fn is_sftp(&self)->bool{self.transport.as_deref()==Some("sftp")}
     fn new_path(&self,name:&str)->Result<(String,String,String)>{
         if !archive_name(name){return Err("Unsafe SSH ciphertext archive filename".into());}
         let dirname=&name[..name.len()-".tar.gz.age".len()];
@@ -152,10 +184,17 @@ pub fn backup(c:&Config,source:&Path,name:&str,recipient:&str,identity:&Path)->R
     let (size,sha)=hash_file(&local)?;
     // Atomically reserve ONE NEW remote directory. No --force, no rm.
     // This fails if another backup already owns the basename.
-    run(c,&format!("set -eu; umask 077; test -d {} && test ! -L {}; mkdir -m 0700 {}",
-       c.remote_directory,c.remote_directory,folder))?;
-    upload(c,&ciphertext,&local)?;
-    let (remote_size,remote_sha)=readback(c,&ciphertext,size)?;
+    let (remote_size,remote_sha)=if c.is_sftp(){
+        c.sftp(&format!("mkdir {folder}\nput {} {ciphertext}\n",local.display()))?;
+        let remote_copy=temp.path().join("downloaded.tar.gz.age");
+        c.sftp(&format!("get {ciphertext} {}\n",remote_copy.display()))?;
+        hash_file(&remote_copy)?
+    }else{
+        run(c,&format!("set -eu; umask 077; test -d {} && test ! -L {}; mkdir -m 0700 {}",
+           c.remote_directory,c.remote_directory,folder))?;
+        upload(c,&ciphertext,&local)?;
+        readback(c,&ciphertext,size)?
+    };
     if size!=remote_size||sha!=remote_sha{
         return Err("Remote SSH independently downloaded ciphertext differs".into());
     }
@@ -166,12 +205,20 @@ pub fn backup(c:&Config,source:&Path,name:&str,recipient:&str,identity:&Path)->R
     if side_text.split_whitespace().next()!=Some(&sha){
         return Err("SSH upload sidecar did not match independently hashed ciphertext".into());
     }
-    upload(c,&marker,&side)?;
     let (m_size,m_sha)=hash_file(&side)?;
-    if readback(c,&marker,m_size)?!=(m_size,m_sha){
+    let remote_marker=if c.is_sftp(){
+        c.sftp(&format!("put {} {marker}\n",side.display()))?;
+        let marker_copy=temp.path().join("readback.sha256");
+        c.sftp(&format!("get {marker} {}\n",marker_copy.display()))?;
+        hash_file(&marker_copy)?
+    }else{
+        upload(c,&marker,&side)?;
+        readback(c,&marker,m_size)?
+    };
+    if remote_marker!=(m_size,m_sha){
         return Err("Remote SSH checksum marker failed independent readback".into());
     }
-    Ok(Receipt{provider:"ssh",remote_directory:folder,archive:name.into(),
+    Ok(Receipt{provider:if c.is_sftp(){"sftp"}else{"ssh"},remote_directory:folder,archive:name.into(),
         bytes:size,sha256:sha,encrypted:true,create_only:true,
         independent_remote_readback:true,restored_members:members})
 }
@@ -181,7 +228,13 @@ pub fn restore(c:&Config,name:&str,identity:&Path,destination:&Path)->Result<usi
         return Err("SSH encrypted recovery requires NEW absolute destination".into());
     }
     let temp=TempDir::new()?;let local=temp.path().join(name);
-    let bytes_from_marker={
+    let bytes_from_marker=if c.is_sftp(){
+        let local_marker=temp.path().join("remote.sha256");
+        c.sftp(&format!("get {marker} {}\\n",local_marker.display()).replace("\\n","\n"))?;
+        let b=fs::read(local_marker)?;
+        if b.len()>4096{return Err("SFTP checksum marker too large".into());}
+        b
+    }else{
         let mut proc=c.ssh(&format!("set -eu; cat {marker}"))?.stdin(Stdio::null()).spawn()?;
         let mut result=Vec::new();
         let collected=proc.stdout.take().ok_or("SSH marker pipe missing")?
@@ -196,13 +249,17 @@ pub fn restore(c:&Config,name:&str,identity:&Path,destination:&Path)->Result<usi
     if expected.len()!=64||!expected.bytes().all(|b|b.is_ascii_hexdigit()){
         return Err("Invalid SSH marker format".into());
     }
-    let mut proc=c.ssh(&format!("set -eu; cat {ciphertext}"))?.stdin(Stdio::null()).spawn()?;
-    let mut dest=OpenOptions::new().write(true).create_new(true).open(&local)?;
-    let count=std::io::copy(&mut proc.stdout.take().ok_or("SSH GET pipe missing")?
-        .take(1_099_511_627_777),&mut dest)?;
-    dest.sync_all()?;drop(dest);
-    if count>1_099_511_627_776||!proc.wait()?.success(){
-        return Err("SSH remote archive read failed or exceeded size limit".into());
+    if c.is_sftp(){
+        c.sftp(&format!("get {ciphertext} {}\n",local.display()))?;
+    }else{
+        let mut proc=c.ssh(&format!("set -eu; cat {ciphertext}"))?.stdin(Stdio::null()).spawn()?;
+        let mut dest=OpenOptions::new().write(true).create_new(true).open(&local)?;
+        let count=std::io::copy(&mut proc.stdout.take().ok_or("SSH GET pipe missing")?
+            .take(1_099_511_627_777),&mut dest)?;
+        dest.sync_all()?;drop(dest);
+        if count>1_099_511_627_776||!proc.wait()?.success(){
+            return Err("SSH remote archive read failed or exceeded size limit".into());
+        }
     }
     let (_,sha)=hash_file(&local)?;
     if sha!=expected{return Err("SSH remote marker failed SHA256 integrity".into());}
