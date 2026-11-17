@@ -4,6 +4,7 @@ on:
     branches: ["feature/**"]
     paths:
       - 'rust/src/s3_vault.rs'
+      - 'rust/src/worm_vault.rs'
       - 'rust/src/archive.rs'
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
@@ -18,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   rustfs-real:
-    name: Real RustFS 1.0.3 S3 COMPLIANCE WORM + Rust age verify/restore
+    name: Real RustFS 1.0.3 S3 COMPLIANCE WORM + Vault age verify/restore
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -36,6 +37,7 @@ jobs:
       - name: Build and unit test native Rust S3 vault with rustfs provider
         run: |
           cargo test --manifest-path rust/Cargo.toml --lib s3_vault
+          cargo test --manifest-path rust/Cargo.toml --lib worm_vault
           cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
       - name: Test actual RustFS WORM server, not mock, with negative deletions
         run: bash scripts/ci/s3-worm-rustfs-live.sh

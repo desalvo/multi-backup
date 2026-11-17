@@ -264,14 +264,14 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "API object resourceVersion, CSI VolumeSnapshots and etcd/CRD scope", "Never capture Secrets without explicit policy; cluster restore requires name remapping"),
     PluginDescriptor::new("vmware", "VMware vSphere", DataKind::Virtualization, PLAN, NONE,
         "VM-only VADP/CBT snapshot and config inventory", "CT disabled unless a specific vSphere version offers documented native CT types AND matching backup and restore modes, independently certified; NO guest-agent/container-runtime CT fallback. Restore into new VM/datastore; license/API checks apply"),
-    PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PLAN, NONE,
-        "VM-only Engine API snapshot and volume exports", "CT disabled unless the deployed oVirt Engine exposes vendor-documented native CT types AND matching backup and restore modes, independently certified; historical feature proposals are insufficient. NO guest-agent/container-runtime CT fallback"),
+    PluginDescriptor::new("ovirt", "oVirt / RHV", DataKind::Virtualization, PREVIEW, NONE,
+        "VM-only Engine API READY backup and versioned imageio disk download", "Native read-only IMAGEIO VM disk B-In needs independently preissued READY Engine backup and matching transfer URL, VM/disk UUIDs, SHA256+byte count and trusted HTTPS; records one QCOW2 disk in age store, with offline create-only recovery. NO native VM restore, no multi-disk/OVF completeness, no VM create/start, CT disabled (oVirt has no native supported CT). NO guest-agent/container-runtime CT fallback"),
     PluginDescriptor::new("mysql", "MySQL / MariaDB", DataKind::Database, PREVIEW, NONE,
         "Rust MariaDB InnoDB transactional FULL logical dump and create-only restore",
-        "Requires client-installed mariadb-dump/mariadb, private credentials, TLS CA for remote; no binlog PITR, DDL snapshot certification or Oracle MySQL acceptance"),
+        "Real MariaDB 11.4, 3-node Galera and Oracle MySQL 8.4 encrypted full dump/create-only restore are qualified in isolated CI; dedicated MariaDB ROW-binlog PITR CI also passes. Oracle MySQL GTID/binlog PITR, concurrent DDL snapshot and server/agent distributed policy remain unqualified"),
     PluginDescriptor::new("postgresql", "PostgreSQL", DataKind::Database, PREVIEW, NONE,
         "Rust PostgreSQL FULL pg_dump custom format and isolated pg_restore",
-        "Requires client-installed pg_dump/pg_restore, private credentials, TLS CA for remote; WAL/PITR and roles/extensions parity still open"),
+        "PostgreSQL 16 real logical age backup and create-only restore, plus separate physical base/WAL PITR CI tested. Optional Patroni same-host HTTPS /primary leader-lock, members and timeline guards added (real integrated CI required). Roles/extensions, coordinated DCS + physical PITR, three physical hosts remain unqualified"),
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PREVIEW, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Dedicated Rust B-In ingests only nonempty local RMAN .bkp pieces into age-encrypted chunks and restores piece files to a NEW directory. Real RMAN generation and RESTORE VALIDATE run separately against an Oracle Free lab. Physical PDB/CDB restore, ARCHIVELOG/PITR orchestration and restore-to-Oracle remain unqualified; never ship Oracle binaries").with_restore_output_stage(PLAN),
@@ -285,7 +285,7 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware append-only vault PREVIEW",
         DataKind::ProtectedVault, NONE, PREVIEW,
         "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
-        "Compiled dedicated Rust vault-store backup and verified create-only restore, GUI and authenticated server API; no delete or overwrite API. External WORM is NOT enforced or certified by this application"),
+        "Local immutable_vault remains ONLY app-level append-only and is NOT root-resistant. Dedicated vault-worm requires genuine external S3 Object Lock COMPLIANCE, versioned immutable manifest+objects, pinned receipt version and verified age restore. External root/host and credentials remain separate attack surfaces; physical independence not certified"),
 ];
 
 pub fn find(id: &str) -> Option<&'static PluginDescriptor> {
@@ -572,7 +572,8 @@ mod tests {
     fn vmware_and_ovirt_ct_are_disabled_until_native_api_certification() {
         for id in ["vmware","ovirt"] {
             let adapter=find(id).expect("Hypervisor catalog entry required");
-            assert_eq!(adapter.backup_input,Stage::Planned);
+            assert_eq!(adapter.backup_input,
+                if id=="ovirt"{Stage::Preview}else{Stage::Planned});
             assert_eq!(adapter.backup_output,Stage::Unsupported);
             assert!(adapter.notes.contains("CT disabled"));
             assert!(adapter.notes.contains("NO guest-agent/container-runtime CT fallback"));

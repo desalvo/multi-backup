@@ -150,6 +150,66 @@ fi
 "$NATIVE" s3-vault restore --config "$TMP/rustfs.json" --id "$ID" \
   --manifest-version "$MANIFEST_VER" --identity "$TMP/key.age" --destination "$TMP/pinned-restore"
 cmp "$TMP/source/binary.bin" "$TMP/pinned-restore/multi-backup/s3-vault/$ID/binary.bin"
+# r209: anti-ransomware vault MUST use a genuinely external COMPLIANCE
+# authority, never the application's local append-only filesystem policy.
+"$NATIVE" vault-worm preflight --config "$TMP/rustfs.json" >"$TMP/worm-preflight.json"
+python3 - "$TMP/worm-preflight.json" <<'PY'
+import json,sys
+p=json.load(open(sys.argv[1]))
+assert p["externally_enforced_object_lock"] is True
+assert p["same_host_root_compromise_certified"] is False
+assert p["protected_manifest_version_required"] is True
+PY
+if "$NATIVE" vault-worm preflight --config "$TMP/not-worm.json" >/dev/null 2>&1;then
+ echo 'FAIL: locked vault accepted an actual unprotected S3 bucket' >&2;exit 1
+fi
+"$NATIVE" vault-worm backup --config "$TMP/rustfs.json" \
+ --source "$TMP/source" --identity "$TMP/key.age" >"$TMP/worm-receipt.json"
+read -r WORM_ID WORM_VER < <(python3 - "$TMP/worm-receipt.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))
+assert r["attestation"]["externally_enforced_object_lock"]
+assert not r["attestation"]["same_host_root_compromise_certified"]
+m=r["record"]["manifest_version"]
+assert m and r["record"]["archive_version"] and r["record"]["files"]>0
+print(r["record"]["id"],m)
+PY
+)
+WORM_OBJECT="ci/rustfs/r050/snapshots/$WORM_ID.tar.gz.age"
+WORM_MANIFEST="ci/rustfs/r050/manifests/$WORM_ID.json"
+if s3 delete-object --bucket "$BUCKET" --key "$WORM_OBJECT" \
+ --version-id "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["record"]["archive_version"])' "$TMP/worm-receipt.json")" >/dev/null 2>&1;then
+ echo 'FAIL: externally locked backup version deleted under credentials' >&2;exit 1
+fi
+s3 delete-object --bucket "$BUCKET" --key "$WORM_MANIFEST" >/dev/null
+if "$NATIVE" vault-worm verify --config "$TMP/rustfs.json" --id "$WORM_ID" \
+ --identity "$TMP/key.age" >/dev/null 2>&1;then
+ echo 'FAIL: a protected WORM vault accepted an unpinned manifest' >&2;exit 1
+fi
+"$NATIVE" vault-worm verify --config "$TMP/rustfs.json" \
+ --id "$WORM_ID" --manifest-version "$WORM_VER" \
+ --identity "$TMP/key.age" >"$TMP/worm-verified.json"
+"$NATIVE" vault-worm restore --config "$TMP/rustfs.json" \
+ --id "$WORM_ID" --manifest-version "$WORM_VER" \
+ --identity "$TMP/key.age" --destination "$TMP/worm-new-restored" \
+ >"$TMP/worm-restored.json"
+cmp "$TMP/source/nested/hello.txt" \
+ "$TMP/worm-new-restored/multi-backup/s3-vault/$WORM_ID/nested/hello.txt"
+cmp "$TMP/source/binary.bin" \
+ "$TMP/worm-new-restored/multi-backup/s3-vault/$WORM_ID/binary.bin"
+if "$NATIVE" vault-worm restore --config "$TMP/rustfs.json" \
+ --id "$WORM_ID" --manifest-version "$WORM_VER" \
+ --identity "$TMP/wrong.age" --destination "$TMP/unauthorized-worm" >/dev/null 2>&1;then
+ echo 'FAIL: protected vault accepted an unrelated age key' >&2;exit 1
+fi
+if "$NATIVE" vault-worm restore --config "$TMP/rustfs.json" \
+ --id "$WORM_ID" --manifest-version "$WORM_VER" \
+ --identity "$TMP/key.age" --destination "$TMP/worm-new-restored" >/dev/null 2>&1;then
+ echo 'FAIL: protected vault overwrote a prior recovered directory' >&2;exit 1
+fi
+echo 'PASS actual RustFS immutable COMPLIANCE anti-ransomware vault, pinned age receipt, undeletable encrypted version, remote delete-marker rescue and verified NEW restore'
+echo 'NOT CERTIFIED physical host loss, same-host root compromise, compromise of remote service implementation or encryption-key loss'
+
 # r178 B-In: genuine pinned-version object import to age-encrypted chunk
 # store, not a mock or mutable "latest version" read.
 INPUT_KEY=ci/rustfs/r050/source-versioned.txt
