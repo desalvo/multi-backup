@@ -2,7 +2,7 @@
 //! the primary development path; Python data migration is optional.
 #[cfg(target_os="linux")]
 use multi_backup_core::{iscsi_snapshot, iscsi_new_lun, pve_media, pve_guest_restore, pbs_pve_guest_restore, pbs_native};
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, worm_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, ovirt_imageio, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, worm_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, vmware_ovf, ovirt_imageio, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -26,6 +26,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins dropbox-backup --source LOCAL_DIR --remote-path /New/Archive.tar.gz.age --recipient AGE_PUBLIC [--json] (B-Out encrypted, no plaintext archive)\n\
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
        multi-backup-native plugins ovirt-imageio-backup --config OWNER_ONLY_OVIRT_IMAGEIO.json --root ENCRYPTED_STORE --identity AGE_PRIVATE --label LABEL [--json] (read-only pre-issued READY oVirt VM disk imageio ticket, SHA-256 pinned; no remote VM restore)\n\
+       multi-backup-native plugins vmware-ovf-backup --profile-json EXPORT_0600.json --root AGE_STORE --identity AGE_KEY --stage-root PRIVATE_ENCRYPTED_TMP --label LABEL [--json] (powered-off VM OVF+VMDK encrypted; no VADP/CBT or live VMs)\n\
+       multi-backup-native plugins vmware-ovf-restore-new --profile-json IMPORT_0600.json --root AGE_STORE --identity AGE_KEY --id BACKUP_ID --stage-root PRIVATE_ENCRYPTED_TMP --new-vm NEW_NAME --confirm-new-vm vmware:NEW_NAME:DATASTORE [--json] (create-only new powered-off VM; no overwrite, no boot proof)\n\
        multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
        multi-backup-native plugins pve-task-status --config-json OWNER_ONLY_PVE.json --node NODE --upid PVE_UPID [--json] (read-only status)\n\
@@ -174,6 +176,30 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let family = args[0].as_str();
     let command = args[1].as_str();
     let (flags, json, password_stdin) = options(&args[2..])?;
+    if family=="plugins" && command=="vmware-ovf-backup" {
+        if password_stdin{return Err("VMware export requires separate owner-only profile and age identity".into());}
+        accepted(&flags,&["--profile-json","--root","--identity","--stage-root","--label"])?;
+        let p=vmware_ovf::Profile::load(Path::new(required(&flags,"--profile-json")?))?;
+        let r=vmware_ovf::backup(&p,Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),required(&flags,"--label")?,
+            Path::new(required(&flags,"--stage-root")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("VMware encrypted offline OVF created: {} (live VM and CBT not certified)",r.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="vmware-ovf-restore-new" {
+        if password_stdin{return Err("VMware new VM requires separate owner-only import principal".into());}
+        accepted(&flags,&["--profile-json","--root","--identity","--id","--stage-root",
+            "--new-vm","--confirm-new-vm"])?;
+        let p=vmware_ovf::Profile::load(Path::new(required(&flags,"--profile-json")?))?;
+        let r=vmware_ovf::restore_new(&p,Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),required(&flags,"--id")?,
+            Path::new(required(&flags,"--stage-root")?),required(&flags,"--new-vm")?,
+            required(&flags,"--confirm-new-vm")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("VMware NEW offline VM imported from encrypted OVF: {}",r.id);}
+        return Ok(());
+    }
     if family=="plugins" && command=="metadata-snapshot-backup" {
         if password_stdin {return Err("Metadata backup requires file-based age identity".into());}
         accepted(&flags,&["--input","--source","--root","--identity","--label",

@@ -22,6 +22,7 @@ pub mod s3_vault;
 pub mod plugins;
 pub mod virtualization_inventory;
 pub mod hypervisor_inventory;
+pub mod vmware_ovf;
 pub mod ovirt_imageio;
 pub mod protected_config;
 pub mod plugin_executor;
