@@ -311,7 +311,7 @@ fn safe_extract(archive:&Path,dest:&Path)->Result<PathBuf>{
         if declared==0 {return Err("Empty VMware tar member".into())}
         bytes=bytes.checked_add(declared).ok_or("VMware tar size overflow")?;
         if bytes>MAX_OVF_BYTES{return Err("VMware tar exceeds maximum size".into())}
-        let file=dest.join(name);
+        let file=dest.join(&name);
         let mut out=OpenOptions::new().write(true).create_new(true).open(&file)?;
         let written=io::copy(&mut item,&mut out)?;
         if written!=declared{return Err("VMware tar member truncated".into())}
