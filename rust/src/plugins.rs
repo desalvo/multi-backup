@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if matches!(entry.id,"s3"|"ssh"|"oracle") {
+            if matches!(entry.id,"s3"|"ssh"|"oracle"|"iscsi") {
                 // A dedicated native source/media adapter does not grant a
                 // database/cloud restore target; those roles remain planned.
                 assert_eq!(entry.backup_input,Stage::Preview);
