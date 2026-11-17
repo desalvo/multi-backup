@@ -49,11 +49,21 @@ setfacl -m d:u:1001:r-x "$RW/r196-source/nested"
 sync
 mkdir "$RW/r196-source/.snap/frozen-r196"
 test -r "$RW/r196-source/.snap/frozen-r196/nested/data.txt"
+# CephFS may reject the .snap hidden subtree as a new client root.
+# First try an independent RO fuse mount, then a Linux RO bind mount
+# directly from the genuine immutable snapshot on the existing CephFS FUSE.
+# Both routes must expose the actual CephFS snapshot, never local POSIX data.
 if ! ceph-fuse --client_fs mb-ci-fs -r /r196-source/.snap/frozen-r196 \
   -o ro "$SNAP" >"$D/mount.log" 2>&1;then
-  echo "FAIL: cannot mount genuine immutable CephFS .snap subtree as an exact read-only mount" >&2
-  exit 1
+  echo 'INFO: snapshot subtree fuse -r rejected; trying genuine RO bind of immutable CephFS .snap' >&2
+  tail -8 "$D/mount.log" >&2 || :
+  mount --bind "$RW/r196-source/.snap/frozen-r196" "$SNAP" ||
+   { echo 'FAIL: cannot bind genuine native CephFS snapshot' >&2; exit 1; }
+  mount -o remount,bind,ro "$SNAP" ||
+   { echo 'FAIL: cannot enforce Linux VFS read-only snapshot bind mount' >&2; exit 1; }
 fi
+case "$(findmnt -rn -T "$SNAP" -o FSTYPE)" in fuse.ceph-fuse|ceph) ;; *)
+ echo 'FAIL: snapshot was not mounted from authentic CephFS' >&2;exit 1;; esac
 findmnt -rn -T "$SNAP" -o OPTIONS | grep -Eq '(^|,)ro(,|$)'
 # Mutations on the live source do not affect the distinct immutable snapshot.
 (
