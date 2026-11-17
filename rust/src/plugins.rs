@@ -630,23 +630,26 @@ mod tests {
         for source in catalog_for(Mode::Backup, true) {
             for target in catalog_for(Mode::Backup, false) {
                 let p=plan(Mode::Backup, source.id, target.id).unwrap();
-                assert!(!p.executable);
+                assert_eq!(p.executable,source.id=="posix"&&target.id=="posix");
                 assert!(p.confirmation_required_before_writes);
             }
         }
         for source in catalog_for(Mode::Restore, true) {
             for target in catalog_for(Mode::Restore, false) {
-                assert!(!plan(Mode::Restore, source.id, target.id).unwrap().executable);
+                assert_eq!(plan(Mode::Restore, source.id, target.id).unwrap().executable,
+                    source.id=="posix"&&target.id=="posix");
             }
         }
     }
     #[test]
     fn actual_preview_pairs_match_the_native_dispatcher(){
-        for input in ["posix","nfs","smb","gpfs","sshfs","webdav",
+        assert!(plan(Mode::Backup,"posix","posix").unwrap().executable);
+        for input in ["nfs","smb","gpfs","sshfs","webdav",
                       "cephfs","glusterfs","lustre"]{
             assert!(plan(Mode::Backup,input,"posix").unwrap().preview_executable);
         }
-        for output in ["posix","nfs","smb","sshfs","cephfs","glusterfs","lustre"]{
+        assert!(plan(Mode::Restore,"posix","posix").unwrap().executable);
+        for output in ["nfs","smb","sshfs","cephfs","glusterfs","lustre"]{
             assert!(plan(Mode::Restore,"posix",output).unwrap().preview_executable);
         }
         assert!(!plan(Mode::Backup,"afs","posix").unwrap().preview_executable,
@@ -659,7 +662,7 @@ mod tests {
     fn preview_does_not_masquerade_as_qualified_plugin() {
         let p=plan(Mode::Backup, "github", "posix").unwrap();
         assert_eq!(p.source_stage, Stage::Preview);
-        assert_eq!(p.destination_stage, Stage::Preview);
+        assert_eq!(p.destination_stage, Stage::Ready);
         assert!(!p.executable);
         assert_eq!(find("postgresql").unwrap().kind, DataKind::Database);
         for database in ["postgresql","mysql"] {
