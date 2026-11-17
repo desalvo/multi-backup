@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, cloud_dav, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -15,6 +15,8 @@ fn usage() -> &'static str {
        multi-backup-native updates rollback-portable --active DIR --rollback DIR --rejected NEW_DIR --binary REL --expected-sha256 OLD_SHA (APP STOPPED)\n\
        multi-backup-native plugins list [--role input|output] [--mode backup|restore] [--json]\n\
        multi-backup-native plugins ssh-backup --config OWNER_ONLY_SSH.json --root EXISTING_AGE_STORE --identity AGE_PRIVATE --label LABEL [--top-namespace NS] [--json] (pinned host key, single version-attested remote file into age chunks)\n\
+       multi-backup-native plugins cloud-dav-backup --config OWNER_ONLY_CLOUD.json --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--json] (ownCloud/Nextcloud authenticated HTTPS age B-Out)\n\
+       multi-backup-native plugins cloud-dav-restore --config OWNER_ONLY_CLOUD.json --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_DIR [--json]\n\
        multi-backup-native plugins webdav-http-backup --config OWNER_ONLY_WEBDAV.json --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--json] (native trusted HTTPS conditional create-only PUT and independent GET; env MULTI_BACKUP_WEBDAV_PASSWORD)\n\
        multi-backup-native plugins webdav-http-restore --config OWNER_ONLY_WEBDAV.json --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_LOCAL_DIR [--json]\n\
        multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount EXACT_MOUNT --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
@@ -247,6 +249,29 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             flags.get("--top-namespace").copied().unwrap_or(""))?;
         if json {println!("{}",serde_json::to_string_pretty(&backup)?);}
         else {println!("Pinned SSH input encrypted and verified: {}",backup.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="cloud-dav-backup" {
+        if password_stdin{return Err("Cloud DAV output requires explicit configured app password".into());}
+        accepted(&flags,&["--config","--source","--filename","--recipient","--identity"])?;
+        let config=cloud_dav::Config::load(Path::new(required(&flags,"--config")?))?;
+        let result=cloud_dav::backup(config,
+            Path::new(required(&flags,"--source")?),
+            required(&flags,"--filename")?,required(&flags,"--recipient")?,
+            Path::new(required(&flags,"--identity")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&result)?);}
+        else{println!("Cloud provider authenticated HTTPS ciphertext uploaded with independent readback");}
+        return Ok(());
+    }
+    if family=="plugins" && command=="cloud-dav-restore" {
+        if password_stdin{return Err("Cloud DAV restore requires external identity file".into());}
+        accepted(&flags,&["--config","--filename","--identity","--destination"])?;
+        let config=cloud_dav::Config::load(Path::new(required(&flags,"--config")?))?;
+        let result=cloud_dav::restore(config,required(&flags,"--filename")?,
+            Path::new(required(&flags,"--identity")?),
+            Path::new(required(&flags,"--destination")?))?;
+        if json{println!("{}",serde_json::to_string_pretty(&result)?);}
+        else{println!("Cloud provider verified archive restored to NEW local directory");}
         return Ok(());
     }
     if family=="plugins" && command=="webdav-http-backup" {
