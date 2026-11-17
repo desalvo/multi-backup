@@ -1120,3 +1120,9 @@ Added a native Rust read-only iSCSI source with strict Linux udev target IQN/LUN
 - Both **Preview only** and **not actual provider field certified**: authentic PVE/PBS services and signed/encrypted dataset not available as isolated disposable CI here; vendor restore-to-new VM/CT, PBS write-back, CT pxar metadata and live snapshots require real integration acceptance. Never claim Ready.
 
 One-line English commit summary: Add native PVE vzdump and PBS VM disk encrypted media import with strict provider evidence and offline create-only recovery.
+
+
+## r203 — direct new VM/CT restore on PVE host (Preview, physical lab still required)
+The Rust PVE destination adapter now decrypts a verified native vzdump archive into a private stage and calls locally installed qmrestore (QEMU) or pct restore (LXC) to a distinct explicitly confirmed NEW VMID. Does not pass --force, refuses existing guest IDs, randomizes MAC via --unique, never automatically starts guests or deletes a partially created guest. Requires local PVE root privileges; no claim of boot/guest data acceptance until a real PVE node with known fixtures executes restore+boot+content checks. PBS-native images are not the same as native vzdump and must be restored through a separate PBS→PVE adapter. Unit and integration tests must remain honest about this boundary.
+
+One-line English commit summary: Add guarded create-only Proxmox native qmrestore and pct restore from age encrypted vzdump artifacts.
