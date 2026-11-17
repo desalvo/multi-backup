@@ -1,9 +1,11 @@
 name: Multi Backup - PostgreSQL agents server Rust GUI single-SHA gate
 on:
   push:
-    branches: ["ci/r168-software-field-gates"]
+    branches: ["ci/r168-software-field-gates","feature/r194-oracle-rman-media-and-provider-gates"]
     paths:
       - ".github/workflows/software-readiness-r168.yml"
+      - "scripts/test-oracle-free-container.sh"
+      - "scripts/ci/cephfs-kind-real-r182.sh"
       - ".github/workflows/rust-focused.yml"
       - ".github/workflows/agent-cluster-live-pg.yml"
       - ".github/workflows/r166-desktop-xvfb.yml"
