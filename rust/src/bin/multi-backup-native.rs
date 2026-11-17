@@ -86,7 +86,7 @@ fn usage() -> &'static str {
        multi-backup-native restore github --archive ARCHIVE --identity AGE_KEY --target OWNER/NEW [--visibility private] --confirm CREATE-NEW\n\
        multi-backup-native restore github --archive ARCHIVE --vault PROTECTED.agevault --target OWNER/NEW --confirm CREATE-NEW [--password-stdin]\n\
        multi-backup-native restore dropbox --archive ARCHIVE --identity AGE_KEY --path /new/file --confirm CREATE-NEW\n\
-       multi-backup-native vault-worm preflight|backup|verify|restore --config OWNER_ONLY_S3_WORM.json [--source DIR --identity AGE_SECRET | --id ID --manifest-version PINNED_VERSION --identity AGE_SECRET --destination NEW_DIR] (MANDATORY external COMPLIANCE WORM and verified age recovery, no local pretend)\n\
+       multi-backup-native vault-worm preflight|backup|verify|restore --config OWNER_ONLY_S3_WORM.json [--source DIR (writer without private key) | --id ID --manifest-version PINNED_VERSION --identity AGE_SECRET --destination NEW_DIR] (MANDATORY external COMPLIANCE WORM and verified age recovery, no local pretend)\n\
        multi-backup-native s3-vault preflight|backup|verify|restore --config CONFIG.json [--source DIR] [--id ID --identity AGE_KEY --manifest-version PINNED_VERSION --destination NEW_DIR]\n\
        multi-backup-native vault-store init --root EXISTING_DIR --recipient age1PUBLIC\n\
        multi-backup-native vault-store backup --root VAULT_DIR --source DIR [--json]\n\
@@ -365,10 +365,9 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("{}",serde_json::to_string_pretty(&status)?);
             },
             "backup" => {
-                accepted(&flags,&["--config","--source","--identity"])?;
+                accepted(&flags,&["--config","--source"])?;
                 let r=worm_vault::backup(&config,
-                    Path::new(required(&flags,"--source")?),
-                    Path::new(required(&flags,"--identity")?))?;
+                    Path::new(required(&flags,"--source")?))?;
                 println!("{}",serde_json::to_string_pretty(&r)?);
             },
             "verify" => {

@@ -6,7 +6,7 @@
  //! Without the external service, no "ransomware-proof" state is advertised.
 use crate::s3_vault;
 use serde::Serialize;
-use std::{path::Path,fs};
+use std::path::Path;
 use url::Url;
 
 type Result<T>=std::result::Result<T,Box<dyn std::error::Error+Send+Sync>>;
@@ -19,6 +19,9 @@ pub struct Attestation {
     pub retention_days:i64,
     pub protected_manifest_version_required:bool,
     pub isolated_operator_credentials_recommended:bool,
+    pub independent_recovery_principal_required:bool,
+    pub recovery_verified:bool,
+    pub remote_iam_separation_certified:bool,
     pub same_host_root_compromise_certified:bool,
     pub guarantee:&'static str,
 }
@@ -43,12 +46,15 @@ fn allow(cfg:&s3_vault::Config)->Result<()>{
     }
     Ok(())
 }
-fn evidence(cfg:&s3_vault::Config)->Attestation{
+fn evidence(cfg:&s3_vault::Config,recovered:bool)->Attestation{
     Attestation{backend:cfg.provider.clone(),encrypted:true,
         externally_enforced_object_lock:true,
         retention_days:cfg.retention_days,
         protected_manifest_version_required:true,
         isolated_operator_credentials_recommended:true,
+        independent_recovery_principal_required:true,
+        recovery_verified:recovered,
+        remote_iam_separation_certified:false,
         same_host_root_compromise_certified:false,
         guarantee:"Remote versioned COMPLIANCE retention proved; host-side root, credentials, service operator and storage failure are separate threat boundaries"}
 }
@@ -62,40 +68,38 @@ fn pinned(record:&s3_vault::Record)->Result<()> {
 }
 pub fn preflight(cfg:&s3_vault::Config)->Result<Attestation>{
     allow(cfg)?;
-    s3_vault::preflight(cfg)?;
-    Ok(evidence(cfg))
+    s3_vault::preflight_for_role(cfg,s3_vault::CredentialRole::WormWriter)?;
+    Ok(evidence(cfg,false))
 }
-pub fn backup(cfg:&s3_vault::Config,source:&Path,
-              identity:&Path)->Result<Receipt>{
+pub fn backup(cfg:&s3_vault::Config,source:&Path)->Result<Receipt>{
     preflight(cfg)?;
-    // The caller MUST demonstrate possession of the matching private age
-    // identity before a backup is committed as a successful recoverable unit.
-    let meta=fs::symlink_metadata(identity)?;
-    if !meta.file_type().is_file() || meta.file_type().is_symlink() ||
-       meta.len()==0 || meta.len()>65536 {
-        return Err("Vault recovery identity must be a regular bounded file".into());
-    }
-    let record=s3_vault::backup(cfg,source)?;
+    // The unattended writer must never receive the private age identity.
+    // Its receipt proves locked ciphertext; recoverability is separately
+    // verified from a recovery-only host and identity.
+    let record=s3_vault::backup_for_role(cfg,source,
+        s3_vault::CredentialRole::WormWriter)?;
     pinned(&record)?;
-    let version=record.manifest_version.as_ref().ok_or("WORM manifest version missing")?;
-    s3_vault::verify_at_version(cfg,&record.id,version,identity)?;
-    Ok(Receipt{record,attestation:evidence(cfg)})
+    Ok(Receipt{record,attestation:evidence(cfg,false)})
 }
 pub fn verify(cfg:&s3_vault::Config,id:&str,manifest_version:&str,
               identity:&Path)->Result<Receipt>{
-    preflight(cfg)?;
+    allow(cfg)?;
+    s3_vault::preflight_for_role(cfg,s3_vault::CredentialRole::WormRecovery)?;
     if manifest_version.is_empty(){return Err("Vault recovery requires escrowed manifest version ID".into());}
-    let record=s3_vault::verify_at_version(cfg,id,manifest_version,identity)?;
+    let record=s3_vault::verify_at_version_for_role(cfg,id,manifest_version,identity,
+        s3_vault::CredentialRole::WormRecovery)?;
     pinned(&record)?;
-    Ok(Receipt{record,attestation:evidence(cfg)})
+    Ok(Receipt{record,attestation:evidence(cfg,true)})
 }
 pub fn restore(cfg:&s3_vault::Config,id:&str,manifest_version:&str,
                identity:&Path,destination:&Path)->Result<Receipt>{
-    preflight(cfg)?;
+    allow(cfg)?;
+    s3_vault::preflight_for_role(cfg,s3_vault::CredentialRole::WormRecovery)?;
     if manifest_version.is_empty(){return Err("Vault restore requires pinned manifest version ID".into());}
-    let record=s3_vault::restore_at_version(cfg,id,manifest_version,identity,destination)?;
+    let record=s3_vault::restore_at_version_for_role(cfg,id,manifest_version,identity,destination,
+        s3_vault::CredentialRole::WormRecovery)?;
     pinned(&record)?;
-    Ok(Receipt{record,attestation:evidence(cfg)})
+    Ok(Receipt{record,attestation:evidence(cfg,true)})
 }
 #[cfg(test)]
 mod tests{
@@ -118,8 +122,8 @@ mod tests{
         tls.retention_days=0;
         assert!(allow(&tls).is_err());
         tls.retention_days=30;
-        assert!(!evidence(&tls).same_host_root_compromise_certified);
-        assert!(evidence(&tls).protected_manifest_version_required);
+        assert!(!evidence(&tls,false).same_host_root_compromise_certified);
+        assert!(evidence(&tls,false).protected_manifest_version_required);
     }
     #[test]fn incomplete_receipts_never_publish_worm_verified(){
         let record=s3_vault::Record{schema:1,id:"0".repeat(32),

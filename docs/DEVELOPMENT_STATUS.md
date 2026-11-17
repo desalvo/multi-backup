@@ -1132,3 +1132,17 @@ On SHA `16b25052a507ee92535be2dc9919e43be040c249`, [CI #44073298429](https://git
 Do not label an arbitrary imageio byte stream QCOW2. Strict `expected_format` ("raw" or "qcow2") mandatory; use exact extension in encrypted manifest. The field lab independently probes `qemu-img info` (and `qemu-img check` for QCOW2), compares byte SHA and denies wrong key/overwrite. Real oVirt Engine field acceptance remains unperformed absent protected fixture.
 
 One-line English commit summary: Preserve explicit oVirt RAW versus QCOW2 IMAGEIO format through encrypted import and offline verification.
+
+
+## r210 — Vault WORM role separation and oVirt backup-evidence hardening (2026-11-17)
+
+- r209 inherited without merging to `main`. Development on `feature/r210-vault-credential-isolation-ovirt`. Protected release/RC status is unchanged.
+- Native Rust WORM writer now requires only public age recipient and separately scoped `MB_WORM_WRITER_*` S3 credentials, NOT a private age recovery identity. `vault-worm backup --identity` is rejected.
+- Native Rust WORM recovery requires separate `MB_WORM_RECOVERY_*` principal and private age identity. The signed S3 client rejects wrong-role operations, unscoped AWS credentials and the opposite principal in one process. Existing ambient `s3-vault` transport remains compatible.
+- New attestation distinguishes remotely locked ciphertext receipt from **independently verified recoverability**. External IAM and same-host root-compromise guarantees are still explicitly false until field certification.
+- New IAM example policies (separate writer/recovery, prefix scoping, explicit deny on delete/admin) with static CI policy validator and an Italian three-domain (A writer / B Vault / C recovery) real-fault and negative-authentication field qualification runbook in `docs/VAULT_HARDENING_R210_IT.md`.
+- oVirt IMAGEIO pre-issued READ-ONLY backup checks now require actual Engine backup disk membership, snapshot image UUID, exact transfer-to-backup binding, exact disk-format mapping and refuse incomplete incremental checkpoint chains; no actual Engine field test or VM creation/boot/complete restoration.
+- VERIFIED GitHub Actions: RustFS S3 WORM real provider [#44079837799](https://github.com/desalvo/multi-backup/actions/runs/44079837799) PASS; Rust core [#44079974782](https://github.com/desalvo/multi-backup/actions/runs/44079974782) PASS; oVirt Rust/hosted fail-closed [#44080039584](https://github.com/desalvo/multi-backup/actions/runs/44080039584) PASS (**real oVirt job not executed**); static IAM [#44080781351](https://github.com/desalvo/multi-backup/actions/runs/44080781351) PASS. Earlier superseded per-push workflow cancellations are not failures on latest tested code.
+- NOT VERIFIED: provider-side IAM denial under two independently created non-admin credentials, end-to-end oVirt Engine+IMAGEIO genuine VM guest recovery, 3 distinct physical vault/HA hosts, full 33-provider readiness. Remote backup/restore, Oracle/PVE/PBS/VMware and other planned field roles remain explicitly incomplete where no authentic acceptance exists.
+
+One-line English commit summary: Separate WORM writer and recovery authority without age private keys on backup hosts, validate scoped IAM policies, and harden oVirt disk and transfer provenance.

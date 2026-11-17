@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, env, fs::{self, File}, io::{Read, Write},
           path::Path, time::Duration as Timeout};
 use url::Url;
+use zeroize::Zeroize;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Hmac256 = Hmac<Sha256>;
@@ -157,26 +158,81 @@ impl Config {
     }
 }
 
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum CredentialRole { Ambient, WormWriter, WormRecovery }
+impl CredentialRole {
+    fn names(self)->(&'static str,&'static str,&'static str) {
+        match self {
+            Self::Ambient=>("AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN"),
+            Self::WormWriter=>("MB_WORM_WRITER_ACCESS_KEY_ID","MB_WORM_WRITER_SECRET_ACCESS_KEY","MB_WORM_WRITER_SESSION_TOKEN"),
+            Self::WormRecovery=>("MB_WORM_RECOVERY_ACCESS_KEY_ID","MB_WORM_RECOVERY_SECRET_ACCESS_KEY","MB_WORM_RECOVERY_SESSION_TOKEN"),
+        }
+    }
+    fn permits(self,cfg:&Config,method:&str,key:Option<&str>,query:&[(&str,&str)])->bool {
+        if self==Self::Ambient {return true;}
+        let bucket=method=="GET" && key.is_none() &&
+            (query==[("versioning","")]||query==[("object-lock","")]);
+        if bucket{return true;}
+        let Some(key)=key else{return false;};
+        let snap=cfg.object_key("snapshots/");
+        let man=cfg.object_key("manifests/");
+        if !valid_key(key)||!(key.starts_with(&snap)||key.starts_with(&man)){return false;}
+        let version=query.len()==1 && query[0].0=="versionId" && !query[0].1.is_empty();
+        let retention=query.len()==2 &&
+            query.iter().any(|(k,v)|*k=="retention"&&v.is_empty()) &&
+            query.iter().any(|(k,v)|*k=="versionId"&&!v.is_empty());
+        match self{
+            Self::WormWriter=>(method=="PUT"&&query.is_empty()) ||
+                (method=="GET"&&retention) ||
+                (method=="GET"&&key.starts_with(&man)&&version),
+            Self::WormRecovery=>method=="GET"&&(version||retention),
+            Self::Ambient=>true,
+        }
+    }
+}
 struct Client {
-    cfg: Config, access: String, secret: String, token: Option<String>,
+    cfg: Config, access: String, secret: String, token: Option<String>, role: CredentialRole,
+}
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.access.zeroize();
+        self.secret.zeroize();
+        if let Some(token)=self.token.as_mut(){ token.zeroize(); }
+    }
 }
 impl Client {
-    fn new(cfg: &Config) -> Result<Self> {
+    fn new(cfg:&Config)->Result<Self>{Self::new_for(cfg,CredentialRole::Ambient)}
+    fn new_for(cfg:&Config,role:CredentialRole)->Result<Self>{
         cfg.validate()?;
-        let access=env::var("AWS_ACCESS_KEY_ID")?;
-        let secret=env::var("AWS_SECRET_ACCESS_KEY")?;
+        if role!=CredentialRole::Ambient{
+            let other=if role==CredentialRole::WormWriter{
+                CredentialRole::WormRecovery
+            }else{CredentialRole::WormWriter};
+            let (other_access,other_secret,other_token)=other.names();
+            if [other_access,other_secret,other_token,
+                "AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","AWS_SESSION_TOKEN"]
+                .iter().any(|name|env::var_os(name).is_some()){
+                return Err("WORM credential isolation failed: ambient or opposite principal present".into());
+            }
+        }
+        let (ak,sk,tk)=role.names();
+        let access=env::var(ak).map_err(|_|"Missing scoped S3 principal")?;
+        let secret=env::var(sk).map_err(|_|"Missing scoped S3 secret")?;
         if access.is_empty() || secret.is_empty() || access.bytes().any(|b|b==b'\n'||b==b'\r')
             || secret.bytes().any(|b|b==b'\n'||b==b'\r') {
             return Err("Missing or unsafe S3 credentials".into());
         }
-        let token=env::var("AWS_SESSION_TOKEN").ok();
+        let token=env::var(tk).ok();
         if token.as_deref().is_some_and(|s|s.bytes().any(|b|b==b'\n'||b==b'\r')) {
             return Err("Unsafe S3 session token".into());
         }
-        Ok(Self{cfg:cfg.clone(),access,secret,token})
+        Ok(Self{cfg:cfg.clone(),access,secret,token,role})
     }
     fn sign(&self, method:&str, key:Option<&str>, query:&[(&str,&str)],
             extra:&[(&str,&str)], hash:&str) -> Result<ureq::Request> {
+        if !self.role.permits(&self.cfg,method,key,query){
+            return Err("WORM S3 role denied request outside signed capability".into());
+        }
         let base=Url::parse(&self.cfg.endpoint)?;
         let host=base.host_str().ok_or("Missing S3 host")?;
         let host=if let Some(port)=base.port() {format!("{host}:{port}")} else {host.to_string()};
@@ -219,7 +275,10 @@ impl Client {
         let ksign=mac(&kservice,b"aws4_request")?;
         let signature=hex::encode(mac(&ksign,to_sign.as_bytes())?);
         let auth=format!("AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed}, Signature={signature}",self.access);
-        let agent=ureq::AgentBuilder::new().timeout_connect(Timeout::from_secs(10))
+        // Signed S3 requests must never follow a server-supplied Location to
+        // another authority or path: redirects can leak authorization or
+        // change the capability being exercised.
+        let agent=ureq::AgentBuilder::new().redirects(0).timeout_connect(Timeout::from_secs(10))
             .timeout_read(Timeout::from_secs(120)).build();
         let mut req=agent.request(method,&url).set("Authorization",&auth);
         for (key,value) in headers {
@@ -305,6 +364,9 @@ impl Client {
 }
 
 pub fn preflight(config:&Config)->Result<()> { Client::new(config)?.preflight() }
+pub fn preflight_for_role(config:&Config,role:CredentialRole)->Result<()> {
+    Client::new_for(config,role)?.preflight()
+}
 
 // B-In S3 / Ceph RGW / RustFS: read ONLY a caller-pinned object version.
 // Never LIST the mutable current view or materialize plaintext to a local
@@ -387,7 +449,10 @@ pub fn backup_object_to_store(
 
 
 pub fn backup(config:&Config,source:&Path)->Result<Record> {
-    let client=Client::new(config)?;
+    backup_for_role(config,source,CredentialRole::Ambient)
+}
+pub fn backup_for_role(config:&Config,source:&Path,role:CredentialRole)->Result<Record>{
+    let client=Client::new_for(config,role)?;
     client.preflight()?;
     let meta=fs::symlink_metadata(source)?;
     if !meta.file_type().is_dir() || meta.file_type().is_symlink(){
@@ -460,11 +525,15 @@ fn staged(client:&Client,record:&Record,where_to:&Path)->Result<std::path::PathB
 /// unversioned S3 delete marker over the current manifest. The version ID
 /// comes from an independently escrowed backup receipt, not a mutable LIST.
 pub fn verify_at_version(config:&Config,id:&str,manifest_version:&str,identity:&Path)->Result<Record>{
+    verify_at_version_for_role(config,id,manifest_version,identity,CredentialRole::Ambient)
+}
+pub fn verify_at_version_for_role(config:&Config,id:&str,manifest_version:&str,
+                                  identity:&Path,role:CredentialRole)->Result<Record>{
     if manifest_version.is_empty()||manifest_version.len()>512||
        manifest_version.bytes().any(|c|c.is_ascii_control()||c==b'/'||c==b'\\'){
        return Err("Invalid pinned manifest version ID".into());
     }
-    let client=Client::new(config)?;
+    let client=Client::new_for(config,role)?;
     let record=read_record(&client,id,Some(manifest_version))?;
     let temp=tempfile::tempdir()?;
     let file=staged(&client,&record,temp.path())?;
@@ -475,11 +544,15 @@ pub fn verify_at_version(config:&Config,id:&str,manifest_version:&str,identity:&
 }
 pub fn restore_at_version(config:&Config,id:&str,manifest_version:&str,
                           identity:&Path,destination:&Path)->Result<Record>{
+    restore_at_version_for_role(config,id,manifest_version,identity,destination,CredentialRole::Ambient)
+}
+pub fn restore_at_version_for_role(config:&Config,id:&str,manifest_version:&str,
+                          identity:&Path,destination:&Path,role:CredentialRole)->Result<Record>{
     if fs::symlink_metadata(destination).is_ok(){
         return Err("Pinned WORM restore cannot overwrite an existing path".into());
     }
-    let record=verify_at_version(config,id,manifest_version,identity)?;
-    let client=Client::new(config)?;
+    let record=verify_at_version_for_role(config,id,manifest_version,identity,role)?;
+    let client=Client::new_for(config,role)?;
     let temporary=tempfile::tempdir()?;
     let file=staged(&client,&record,temporary.path())?;
     archive::extract(&file,identity,destination)?;
@@ -538,6 +611,25 @@ pub fn restore_from_memory(config:&Config,id:&str,secret:&[u8],destination:&Path
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn worm_role_signing_is_fail_closed(){
+        let c=config();
+        let d=c.object_key("snapshots/test.age");
+        let m=c.object_key("manifests/test.json");
+        let w=CredentialRole::WormWriter;
+        let r=CredentialRole::WormRecovery;
+        assert!(w.permits(&c,"GET",None,&[("versioning","")]));
+        assert!(w.permits(&c,"PUT",Some(&d),&[]));
+        assert!(w.permits(&c,"GET",Some(&d),&[("retention",""),("versionId","v")]));
+        assert!(w.permits(&c,"GET",Some(&m),&[("versionId","v")]));
+        assert!(!w.permits(&c,"GET",Some(&d),&[("versionId","v")]));
+        assert!(!w.permits(&c,"GET",Some(&m),&[]));
+        assert!(!w.permits(&c,"DELETE",Some(&d),&[]));
+        assert!(r.permits(&c,"GET",Some(&d),&[("versionId","v")]));
+        assert!(!r.permits(&c,"GET",Some(&d),&[]));
+        assert!(!r.permits(&c,"PUT",Some(&d),&[]));
+        assert!(!r.permits(&c,"DELETE",Some(&m),&[]));
+        assert!(!r.permits(&c,"GET",Some("different-tenant/snapshots/a"),&[("versionId","v")]));
+    }
     fn config()->Config {
         Config{provider:"minio".into(),endpoint:"https://example.test".into(),
             region:"us-east-1".into(),bucket:"vault-worm".into(),

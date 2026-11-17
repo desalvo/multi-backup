@@ -103,16 +103,43 @@ impl Config{
     fn backup_ready(&self)->Result<()>{
         let j=self.engine_get(&["ovirt-engine","api","vms",&self.vm_id,
                                "backups",&self.backup_id])?;
-        let v=j.get("backup").unwrap_or(&j);
+        self.check_backup_proof(&j)
+    }
+    fn check_backup_proof(&self,j:&Value)->Result<()>{
+        // Engine versions serialize the resource as vm_backup, backup or
+        // an unwrapped resource. Trust no caller-provided disk list alone.
+        let v=j.get("vm_backup").or_else(||j.get("backup")).unwrap_or(j);
         if v["id"]!=self.backup_id ||
            v["phase"].as_str().is_none_or(|x|!x.eq_ignore_ascii_case("ready")){
             return Err("oVirt VM backup is not the exact READY backup ID".into());
         }
+        // A delta transfer without its earlier checkpoint chain MUST NOT
+        // be published as a self-contained full image.
+        if v.get("from_checkpoint_id")
+            .and_then(Value::as_str).is_some_and(|x|!x.is_empty()){
+            return Err("oVirt incremental checkpoint without restored base chain is not full backup".into());
+        }
+        let disks=v.pointer("/disks/disk").ok_or("oVirt backup missing Engine disk membership proof")?;
+        let items:Vec<&Value>=match disks{
+            Value::Array(xs)=>xs.iter().collect(),
+            Value::Object(_)=>vec![disks],
+            _=>return Err("oVirt backup disk membership must be an object or list".into()),
+        };
+        let matching:Vec<_>=items.iter().filter(|d|d["id"]==self.disk_id).collect();
+        if matching.len()!=1 {
+            return Err("oVirt backup does not contain exactly one matching VM disk".into());
+        }
+        let image_id=matching[0].get("image_id").and_then(Value::as_str)
+            .ok_or("oVirt backup missing independently assigned disk image ID")?;
+        if !uuid(image_id){return Err("oVirt snapshot image ID is not a UUID".into());}
         Ok(())
     }
     fn transfer_ready(&self)->Result<()>{
         let j=self.engine_get(&["ovirt-engine","api","imagetransfers",&self.transfer_id])?;
         let t=j.get("image_transfer").unwrap_or(&j);
+        self.check_transfer_proof(t)
+    }
+    fn check_transfer_proof(&self,t:&Value)->Result<()>{
         if t["id"]!=self.transfer_id||
            t["transfer_url"]!=self.transfer_url ||
            t["direction"].as_str().is_none_or(|x|!x.eq_ignore_ascii_case("download")) ||
@@ -123,6 +150,19 @@ impl Config{
             .ok_or("oVirt transfer disk identity not independently attested")?;
         if disk!=self.disk_id {
             return Err("oVirt transfer disk differs from declared VM disk snapshot".into());
+        }
+        if t.pointer("/backup/id").and_then(Value::as_str)!=Some(self.backup_id.as_str()) {
+            return Err("oVirt IMAGEIO transfer not bound to the exact VM backup".into());
+        }
+        let transfer_format=t.get("format").and_then(Value::as_str)
+            .ok_or("oVirt transfer format not attested by Engine")?.to_ascii_lowercase();
+        let expected=match transfer_format.as_str(){
+            "raw"=>"raw",
+            "qcow2"|"cow"=>"qcow2",
+            _=>return Err("oVirt IMAGEIO unknown transfer format".into()),
+        };
+        if expected!=self.expected_format{
+            return Err("oVirt IMAGEIO transfer format disagrees with pinned disk format".into());
         }
         Ok(())
     }
@@ -205,6 +245,43 @@ mod tests{
         assert!(c.validate().is_err());
         c=conf();c.transfer_url="https://imageio.example.test/images/12345678-1234-1234-1234-123456789abc?token=bad".into();
         assert!(c.validate().is_err());
+    }
+    #[test]fn engine_vm_backup_disk_and_checkpoint_are_attested(){
+        let c=conf();
+        let image="12345678-1234-1234-1234-123456789abd";
+        let good=serde_json::json!({"vm_backup":{"id":U,"phase":"ready",
+             "disks":{"disk":[{"id":U,"image_id":image}]}}});
+        assert!(c.check_backup_proof(&good).is_ok());
+        let mut wrong=good.clone();
+        wrong["vm_backup"]["disks"]["disk"][0]["id"]=Value::String("bad-disk".into());
+        assert!(c.check_backup_proof(&wrong).is_err());
+        wrong=good.clone();
+        wrong["vm_backup"]["from_checkpoint_id"]=Value::String(image.into());
+        assert!(c.check_backup_proof(&wrong).is_err());
+        wrong=good.clone();
+        wrong["vm_backup"]["disks"]["disk"][0]["image_id"]=Value::String("unknown".into());
+        assert!(c.check_backup_proof(&wrong).is_err());
+        wrong=good.clone();
+        wrong["vm_backup"]["disks"]["disk"].as_array_mut().unwrap()
+            .push(serde_json::json!({"id":U,"image_id":image}));
+        assert!(c.check_backup_proof(&wrong).is_err());
+    }
+    #[test]fn engine_imageio_requires_matching_backup_and_disk_format(){
+        let c=conf();
+        let ticket=serde_json::json!({"id":U,
+            "transfer_url":format!("https://imageio.example.test/images/{U}"),
+            "direction":"download","phase":"transferring","disk":{"id":U},
+            "backup":{"id":U},"format":"raw"});
+        assert!(c.check_transfer_proof(&ticket).is_ok());
+        let mut wrong=ticket.clone();
+        wrong["backup"]["id"]=Value::String("unrelated".into());
+        assert!(c.check_transfer_proof(&wrong).is_err());
+        wrong=ticket.clone();wrong["format"]=Value::String("qcow2".into());
+        assert!(c.check_transfer_proof(&wrong).is_err());
+        wrong=ticket.clone();wrong.as_object_mut().unwrap().remove("backup");
+        assert!(c.check_transfer_proof(&wrong).is_err());
+        wrong=ticket.clone();wrong["direction"]=Value::String("upload".into());
+        assert!(c.check_transfer_proof(&wrong).is_err());
     }
     #[test]fn source_hash_and_byte_limit_are_mandatory(){
         let evidence=Rc::new(RefCell::new(Proof::default()));

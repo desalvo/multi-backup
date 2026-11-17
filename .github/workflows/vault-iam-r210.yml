@@ -1,0 +1,20 @@
+name: Multi Backup - r210 WORM IAM policy invariants
+on:
+  push:
+    branches: ["feature/r210-vault-credential-isolation-ovirt"]
+    paths:
+      - "docs/policies/**"
+      - "scripts/ci/validate-worm-iam-r210.py"
+      - ".github/workflows/vault-iam-r210.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify distinct least-privilege principals and explicit negative operations
+        run: python3 scripts/ci/validate-worm-iam-r210.py
+      - name: Show bound of certification
+        run: echo "Static IAM contract only; provider-side negative credential test is required." >> "$GITHUB_STEP_SUMMARY"
