@@ -1071,3 +1071,10 @@ Real davfs2 RW CI failed independent remote GET even after bounded 120s, demonst
 
 ## r190 — Fix Ceph Tentacle actual-MDS status parser
 CephFS first real cluster lab #43992291655 provisioned 3 real OSDs, MON quorum, 1 active MDS, PGs active+clean but CI falsely failed on JSON output shape (`mdsmap` list rather than dict). Fix readiness detection recursively across Ceph versions and rerun genuine Lustre/CephFS field with S3 Ceph RGW B-In. Preserve fail-closed on no active MDS; no synthetic skips. One-line English commit summary: Accept Ceph Tentacle list/dict MDS status while requiring an actual active CephFS daemon.
+
+
+## r191 — WebDAV OS trust-store TLS (strict verification)
+
+First native HTTPS WebDAV test [#43994967648](https://github.com/desalvo/multi-backup/actions/runs/43994967648) **FAILED CLOSED** at \`HEAD\` before any remote write. The native ureq 2.x \`tls\` feature trusts bundled Mozilla roots by default and does not see the disposable CA installed by \`update-ca-certificates\`. Enable the supported ureq \`native-certs\` feature, retaining TLS certificate validation and zero redirects. Transport failures now report ONLY the safe error kind, not URL credentials or token; no \`danger_accept_invalid_certs\` or insecure HTTP fallback. Retest the real TLS WebDAV provider on new SHA before any PASS. Independent PUT/GET and checksum-last remain mandatory.
+
+One-line English commit summary: Honor system-trusted CA certificates for native WebDAV HTTPS without relaxing TLS verification.

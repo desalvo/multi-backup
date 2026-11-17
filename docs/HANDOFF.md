@@ -1000,3 +1000,10 @@ FUSE/davfs2 mounted B-Out was false-positive: writes acknowledged locally but in
 
 ## r190 CephFS lab failure and retry
 #43992291655 on SHA 6cbddea3: cluster actually healthy (3 MON quorum, 3 OSD up/in, 1 MDS+standby), but new script `cephfs-kind-real-r182.sh` assumed mdsmap dict and retried until failure. Updated recursive CephFS JSON parser supports list/dict and still rejects inactive MDS. Rerun once on exact new SHA, including latest genuine Ceph RGW versioned B-In. CI PASS not yet attained; source remains Preview.
+
+
+## r191 — WebDAV OS trust-store TLS (strict verification)
+
+First native HTTPS WebDAV test [#43994967648](https://github.com/desalvo/multi-backup/actions/runs/43994967648) **FAILED CLOSED** at \`HEAD\` before any remote write. The native ureq 2.x \`tls\` feature trusts bundled Mozilla roots by default and does not see the disposable CA installed by \`update-ca-certificates\`. Enable the supported ureq \`native-certs\` feature, retaining TLS certificate validation and zero redirects. Transport failures now report ONLY the safe error kind, not URL credentials or token; no \`danger_accept_invalid_certs\` or insecure HTTP fallback. Retest the real TLS WebDAV provider on new SHA before any PASS. Independent PUT/GET and checksum-last remain mandatory.
+
+One-line English commit summary: Honor system-trusted CA certificates for native WebDAV HTTPS without relaxing TLS verification.

@@ -33,7 +33,7 @@ hex = "0.4"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 sysinfo = "0.30"
 reed-solomon-erasure = "6.0"
-ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
+ureq = { version = "2.12", default-features = false, features = ["tls", "native-certs", "json"] }
 url = "2.5"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 
