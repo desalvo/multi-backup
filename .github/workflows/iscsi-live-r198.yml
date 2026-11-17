@@ -1,5 +1,6 @@
 name: Multi Backup - real iSCSI target initiator pinned snapshot test
 on:
+  workflow_call:
   push:
     branches: ["feature/r198-iscsi-snapshot-native-field","feature/r211-provider-field-certification"]
     paths:
