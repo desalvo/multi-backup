@@ -162,7 +162,7 @@ fn posix_ready_scope_is_exact_regular_file_data_and_fails_closed() {
         "--root",path(&store),"--identity",path(&key),"--id",id,
         "--destination",path(&restored)],true);
     assert_eq!(fs::read(restored.join("data/tree/blob.bin")).unwrap(),payload);
-    assert_eq!(fs::read(restored.join("data/empty.bin")).unwrap(),vec![]);
+    assert!(fs::read(restored.join("data/empty.bin")).unwrap().is_empty());
     // Restore cannot overwrite existing data or clobber an existing path.
     cli(&["plugins","restore","--input","posix","--output","posix",
         "--root",path(&store),"--identity",path(&key),"--id",id,
