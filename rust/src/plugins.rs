@@ -236,10 +236,10 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Use public REST/CMIS integrations only; enterprise-specific functions and editions require rights and API checks"),
     PluginDescriptor::new("owncloud", "ownCloud", DataKind::Files, PLAN, PREVIEW,
         "ownCloud WebDAV/OCS file ID, ETag, sharing, versions and metadata",
-        "External WebDAV/OCS protocol integration; validate server edition, upload semantics, permissions and conflict control"),
+        "Native Cloud-DAV B-Out Preview checks installed ownCloud Classic product status, exact own DAV collection/user, trusted HTTPS and no-overwrite age archive PUT+GET. Source revisions/ACL/shares and full app restore remain PLANNED"),
     PluginDescriptor::new("nextcloud", "Nextcloud", DataKind::Files, PLAN, PREVIEW,
         "Nextcloud WebDAV/OCS file ID, ETag, sharing, versions and chunked upload",
-        "External WebDAV/OCS protocol integration; validate server version and atomic verified commits; never overwrite"),
+        "Native Cloud-DAV B-Out Preview checks installed Nextcloud product status, exact user DAV collection, trusted HTTPS and no-overwrite age archive PUT+GET. Source revisions/ACL/shares and full app restore remain PLANNED"),
     PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PREVIEW, PREVIEW,
         "RBD image snapshots+diff export",
         "Dedicated native RBD immutable snapshot B-In accepts exact numeric snapshot ID, length and independent SHA256. Restore creates a NEW RBD image, verifies complete remote export. Snapshot quiesce, VM/CT consistency, diff chains, namespaces and production fencing remain OPEN"),
@@ -745,8 +745,8 @@ mod tests {
             // GPFS via standard NFS/SMB now has protocol-only input and
             // create-only mounted output preview, not native GPFS support.
             assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.backup_output, if matches!(id,"afs"|"lustre"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
-            assert_eq!(d.restore_input, if matches!(id,"afs"|"lustre"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
+            assert_eq!(d.backup_output, if matches!(id,"afs"|"lustre"|"gpfs"|"owncloud"|"nextcloud"){Stage::Preview}else{Stage::Planned}, "{id}");
+            assert_eq!(d.restore_input, if matches!(id,"afs"|"lustre"|"gpfs"|"owncloud"|"nextcloud"){Stage::Preview}else{Stage::Planned}, "{id}");
             assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
