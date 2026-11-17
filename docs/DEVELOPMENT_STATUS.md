@@ -1113,3 +1113,9 @@ One-line English commit summary: Add real CephFS concurrent snapshot ACL/xattr-p
 Run [#44000523851](https://github.com/desalvo/multi-backup/actions/runs/44000523851) failed immediately after the proven CephFS/RBD phases because the metadata tools were installed conditionally on MB_FSMETA_LAB inside the client container, but this variable existed only on the GitHub runner. The real metadata acceptance script's silent command -v guard then exited without diagnosis. The pinned client installs bsdtar, acl, attr unconditionally; now missing tools report an explicit error, and Rust rejects symlinks/special file entries before passing source trees to libarchive. No PASS until the new exact-SHA lab finishes fully and verifies ACL/xattr after restore.
 
 One-line English commit summary: Install real CephFS metadata tools in the pod and fail closed on symlinked snapshot entries with clear CI diagnostics.
+
+
+## r202 — Oracle Free physical PDB, CDB, PITR acceptance (pending)
+Extends the real Oracle Free CI acceptance from RESTORE VALIDATE to destructive-in-disposable-container actual PDB RESTORE+RECOVER, complete CDB RESTORE+RECOVER, and CDB SCN point-in-time RESTORE+RECOVER/RESETLOGS. Stamps a real persisted PDB user-table marker before the PDB/CDB backups and a second marker after CDB backup; only a physically recovered database with correct redo replay and SCN rollback can pass. CDB media include RMAN database, ARCHIVELOG and CONTROLFILE backup sets, all recovered through native Rust age chunks to original RMAN paths after removing originals. No production database is targeted. This remains unqualified until the exact-SHA CI is green; Oracle server-to-server restore, ASM/RAC and production PITR orchestration remain open.
+
+One-line English commit summary: Test genuine Oracle Free PDB/CDB physical RMAN restore and SCN PITR from native Rust age-recovered backup media.
