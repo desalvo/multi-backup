@@ -9,6 +9,7 @@ W=$(mktemp -d /tmp/mb-ssh-real.XXXXXXXX)
 PORT=22999
 cleanup(){
  set +e
+ if test -r "$W/sshd-sftp.pid";then sudo kill "$(cat "$W/sshd-sftp.pid")" >/dev/null 2>&1 || :;fi
  if test -r "$W/sshd.pid";then sudo kill "$(cat "$W/sshd.pid")" >/dev/null 2>&1 || :;fi
  sudo rm -rf -- "$W"
 }
@@ -111,6 +112,30 @@ ID=$(jq -er .id "$W/ssh-in-result.json")
 RECOVERED=$(find "$W/ssh-b-in-restored" -type f -name '*.bin' -print -quit)
 test -n "$RECOVERED"
 cmp "$W/remote-input.bin" "$RECOVERED"
+# A second REAL OpenSSH daemon accepts only SFTP: no remote shell.
+sed -e "s/^Port $PORT$/Port 22998/" \
+    -e "s#^PidFile $W/sshd.pid\$#PidFile $W/sshd-sftp.pid#" \
+    "$W/sshd.conf" > "$W/sshd-sftp.conf"
+printf '\nForceCommand internal-sftp\n' >> "$W/sshd-sftp.conf"
+sudo /usr/sbin/sshd -f "$W/sshd-sftp.conf" -E "$W/sshd-sftp.log"
+printf '[127.0.0.1]:22998 %s\n' "$(ssh-keygen -y -f "$W/host")" >> "$W/known_hosts"
+jq '.transport="sftp" | .port=22998' "$W/ssh-output.json" > "$W/sftp-output.json"
+"$CLI" plugins ssh-output-backup --config "$W/sftp-output.json" \
+ --source "$W/source" --filename sftp-only-0001.tar.gz.age \
+ --recipient "$RECIPIENT" --identity "$W/agekey" --json > "$W/sftp-bout.json"
+jq -e '.provider=="sftp" and .encrypted and .create_only and .independent_remote_readback' "$W/sftp-bout.json"
+test -s "$W/remote/sftp-only-0001/sftp-only-0001.tar.gz.age"
+test "$(stat -c '%a' "$W/remote/sftp-only-0001")" = 700
+"$CLI" plugins ssh-output-restore --config "$W/sftp-output.json" \
+ --filename sftp-only-0001.tar.gz.age --identity "$W/agekey" \
+ --destination "$W/sftp-recovered" --json > "$W/sftp-restored.json"
+cmp "$W/source/blob.bin" "$W/sftp-recovered/multi-backup/ssh-native/blob.bin"
+if "$CLI" plugins ssh-output-backup --config "$W/sftp-output.json" \
+ --source "$W/source" --filename sftp-only-0001.tar.gz.age \
+ --recipient "$RECIPIENT" --identity "$W/agekey" >/dev/null 2>&1;then
+ echo 'FAIL: SFTP-only server allowed duplicate remote encrypted object' >&2;exit 1
+fi
+echo 'PASS genuine ForceCommand internal-sftp-only server: create-only B-Out, independent GET, age restore and duplicate denial'
 echo 'PASS real OpenSSH B-In with SHA-pinned source and encrypted age chunk recovery'
 echo 'PASS real OpenSSH B-Out create-only ciphertext and SHA marker, independent remote GET and age restore'
 echo 'NOT CERTIFIED SFTP-only shell-less servers, large transfer resume or physical HA'
