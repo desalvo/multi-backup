@@ -36,16 +36,19 @@ jobs:
           cat=json.load(open('/tmp/mb-catalog.json'))
           assert len(cat)==33, 'Unexpected plugin count'
           ready=[p for p in cat if 'ready' in (p['backup_input'],p['backup_output'],p['restore_input'],p['restore_output'])]
-          assert len(ready)==1 and ready[0]['id']=='posix',ready
+          assert [p['id'] for p in ready]==['posix','postgresql'],ready
           assert 'content_only_quiesced_regular_files' in ready[0]['ready_scope']
+          assert 'postgresql16_single_database_full_logical_create_only' in ready[1]['ready_scope']
+          assert ready[1]['backup_output']=='unsupported'
+          assert ready[1]['restore_input']=='unsupported'
           p=json.load(open('/tmp/mb-ready.json'))
           assert p['executable'] is True
           assert p['preview_executable'] is False
           assert p['confirmation_required_before_writes'] is True
           for item in cat:
-              if item['id']!='posix':
+              if item['id'] not in ('posix','postgresql'):
                   assert item['ready_scope'] is None
-          print('PASS scoped local POSIX content-only READY; other 32 providers correctly not Ready')
+          print('PASS scoped local POSIX content-only READY and PostgreSQL catalog scope; other 31 providers remain Preview/Planned')
           PY
       - name: Scope statement
         if: success()
