@@ -35,7 +35,7 @@ fn path(s:&str)->bool{
 }
 fn archive_name(s:&str)->bool{
     s.ends_with(".tar.gz.age")&&s.len()>11&&s.len()<=180&&
-    ident(&s[..s.len()-".tar.gz.age".len()],160)
+    !s.contains("..")&&ident(&s[..s.len()-".tar.gz.age".len()],160)
 }
 fn secret(path:&Path)->Result<()>{
     let meta=fs::symlink_metadata(path)?;
