@@ -127,6 +127,9 @@ def real_environment(cfg, names):
         os.environ.get("MB_LAB_PROVISION") != APPROVAL or os.geteuid() == 0):
         fail("only an approved non-root self-hosted runner may provision")
     p = file_safe(SENTINEL)
+    proof = p.stat()
+    if proof.st_uid != 0 or proof.st_mode & 0o077:
+        fail("root-owned 0600 physical lab sentinel required")
     if p.read_text().strip() != APPROVAL:
         fail("physical lab sentinel not authorized")
     if not Path("/dev/kvm").exists():
@@ -162,6 +165,12 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--confirm", default="")
     args = parser.parse_args()
+    if args.action == "provision":
+        if args.confirm != APPROVAL:
+            fail("explicit create-only confirmation required")
+        if (os.environ.get("RUNNER_ENVIRONMENT") != "self-hosted" or
+            os.environ.get("MB_LAB_PROVISION") != APPROVAL or os.geteuid() == 0):
+            fail("lab provisioning is forbidden outside approved non-root self-hosted runner")
     cfg = read(args, full=args.action == "provision")
     names, steps = commands(cfg)
     if args.action == "plan":
