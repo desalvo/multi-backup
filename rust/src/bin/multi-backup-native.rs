@@ -1,6 +1,6 @@
 //! Standalone native Rust encrypted backup CLI. Native plugin execution is
 //! the primary development path; Python data migration is optional.
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, iscsi_snapshot, pve_media, pbs_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, iscsi_snapshot, pve_media, pve_guest_restore, pbs_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -29,6 +29,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins pve-backup-media --config-json OWNER_ONLY_PVE.json --node NODE --storage STORE --guest-id VMID [--json] (read-only provider backup volume metadata; NOT Multi Backup verified)\n\
        multi-backup-native plugins metadata-snapshot-backup --input cephfs|lustre|nfs|smb|glusterfs|sshfs --source EXACT_RO_SNAPSHOT_MOUNT --root STORE --identity AGE_KEY --label LABEL --source-snapshot-attested [--json] (ACL/xattr/PAX stream encrypted)\n\
        multi-backup-native plugins metadata-snapshot-restore --output PROVIDER --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--json] (ACL/xattr create-only same-mount restore)\n\
+       multi-backup-native plugins pve-restore-new-guest --root AGE_STORE --identity AGE_KEY --id BACKUP_ID --new-guest-id 9999 --storage local-lvm --stage-root EXISTING_TMP --confirm-new-guest qemu:9999:local-lvm [--json] (REAL qmrestore/pct restore create-only; no auto-start)\n\
        multi-backup-native plugins pve-media-backup --config-json PVE.json --node NODE --storage STORE --guest-kind qemu|lxc --guest-id ID --upid UPID --volid STORAGE:backup/FILE --sha256 HASH --bytes SIZE --root STORE --identity KEY --label NAME [--json] (PVE node-local verified vzdump to age chunks)\n\
        multi-backup-native plugins pve-media-restore-offline --root STORE --identity KEY --id HASH --destination NEW_DIR [--json]\n\
        multi-backup-native plugins pbs-disk-backup --snapshot-json PBS.json --root STORE --identity KEY --label NAME [--json] (official PBS client VM image to age chunks)\n\
@@ -191,6 +192,22 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--destination")?))?;
         if json{println!("{}",serde_json::to_string_pretty(&result)?);}
         else{println!("Restored ACL/xattr metadata archive to fresh mount: {}",result.backup_id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="pve-restore-new-guest" {
+        if password_stdin{return Err("PVE restore requires age identity file".into());}
+        accepted(&flags,&["--root","--identity","--id","--new-guest-id",
+            "--storage","--stage-root","--confirm-new-guest"])?;
+        let new_id:u32=required(&flags,"--new-guest-id")?.parse()?;
+        let report=pve_guest_restore::restore_new_guest(
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            required(&flags,"--id")?,new_id,
+            required(&flags,"--storage")?,
+            Path::new(required(&flags,"--stage-root")?),
+            required(&flags,"--confirm-new-guest")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&report)?);}
+        else{println!("New PVE {} guest {} created (not boot-tested)",report.guest_kind,report.new_guest_id);}
         return Ok(());
     }
     if family=="plugins" && command=="pve-media-backup" {
