@@ -29,9 +29,9 @@ NFS/SMB e GPFS protocollo non provano il funzionamento di GPFS nativo IBM.
 | S3/Ceph RGW/RustFS | Preview pinned version | Preview WORM | B-In Ceph RGW specifico, batch/list, versioned restore-to-S3 |
 | Dropbox | Preview incrementale | Preview upload cifrato | B-Out account isolato reale con secret/token, OAuth refresh e restore diretto |
 | GitHub | Preview mirror+CI | Unsupported | account reale con git-lfs, Actions, test di creazione nuova repo |
-| Ceph RBD | Planned | Unsupported | export-diff RBD snapshot, encryption, image create-only restore |
+| Ceph RBD | Planned | Planned (no executor) | RBD export-diff, snapshot coherence, new unmapped image, WWID and fencing tests required |
 | iSCSI | Planned | Planned | immutabile snapshot LUN, WWID, fencing e LVM cluster preflight reale |
-| Proxmox VE | Planned | Unsupported | media vzdump+task validato, export criptato VM/CT, restore |
+| Proxmox VE | Planned | Planned (no executor) | task+media verification, restore QEMU/LXC and new PVE backup-storage target not yet implemented |
 | Proxmox Backup Server | Planned | Planned | datastore export verification, restore CT/VM/host su host di prova |
 | Oracle RMAN | Planned | Unsupported | RMAN reale online/offline, ARCHIVELOG, dump age e restore |
 | SSH/SCP/SFTP | Preview (singolo file via SSH firmato con SHA256) | Planned | OpenSSH reale in CI con host key pinned, SHA e age chunk stream; SCP/SFTP directory/B-Out restano Planned |
@@ -74,3 +74,8 @@ One-line English commit summary: Add authenticated mount-bound encrypted backup 
 ## r180 — ingresso SSH con verifica crittografica
 
 Adapter Rust `ssh_input.rs`: host e utente validati, pinned known_hosts 0600, identità SSH 0600, percorso remoto assoluto con lessico privo di metacaratteri, nessuna shell interpolation, trasferimento in streaming su `ssh -T`. Un SHA-256 e una dimensione fissati dal chiamante vengono controllati **prima** della pubblicazione del manifest age. Il codice rifiuta output incompleti, exit code non zero, host key falsa e chiavi non autorizzate. CLI dedicata `plugins ssh-backup --config OWNER_ONLY.json --root STORE --identity AGE_ID --label NAME`. L'integrazione con il vero OpenSSH server è stata aggiunta al test precedente `ssh-sshfs-live-integration.yml`. SCP e SFTP rimangono test di protocollo, non adapter B-In certificati; nessun B-Out SSH diretto.
+
+
+## r181 — RBD/PVE B-Out dichiarativi e fix hostkey SSH
+
+I due nuovi B-Out RBD e PVE sono **solo Planned** e non possono eseguire alcuna scrittura. Le condizioni preparatorie includono snapshot RBD e immagine nuova non montata, oppure storage PVE abilitato ai media backup con ricevuta di task **e media** realmente verificati e restore VM/CT non distruttivo. Le capacità non sono equiparate a backup/restore E2E. `ssh_input.rs` usa l'opzione OpenSSH `-o UserKnownHostsFile=...` atomica con known_hosts pin 0600; il primo test CI aveva correttamente fallito per una forma errata dell'argomento, la revisione va verificata sul nuovo SHA.

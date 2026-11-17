@@ -106,8 +106,8 @@ pub fn backup_file(config:&Config,root:&Path,identity:&Path,label:&str,
                "-o","ControlMaster=no",
                "-o","LogLevel=ERROR",
                "-o","GlobalKnownHostsFile=/dev/null",
-               "-o","UserKnownHostsFile"])
-        .arg(&config.known_hosts_file)
+               "-o"])
+        .arg(format!("UserKnownHostsFile={}",config.known_hosts_file.display()))
         .arg(destination)
         .arg(format!("cat -- {}",config.remote_file))
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())

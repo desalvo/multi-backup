@@ -1033,3 +1033,8 @@ See `docs/PROVIDER_PLUGIN_READINESS_R179_IT.md`. Added dedicated Rust exact-moun
 ## r180 — pinned SSH stream adapter
 
 Native `ssh_input.rs` streams an exact remote read-only file over strict pinned OpenSSH host keys into encrypted chunk store. The supplied SHA256/length and SSH process success must pass before publish. Existing real OpenSSH CI expanded to test encrypted byte-identical restore and wrong-digest fail-closed. SCP/SFTP B-In batch and any direct SSH B-Out are still Planned; no cross-remote backups claimed. One-line English commit summary: Add strictly pinned SSH B-In streaming encryption, independent digest checks and real-sshd acceptance.
+
+
+## r181 — RBD/PVE output planning, pinned SSH argument compatibility
+
+RBD and PVE B-Out can now be selected in the planner but remain non-executable Stage::Planned, requiring RBD immutable snapshot + new unmapped image / PVE verified vzdump media and non-overwrite restore. Fixed OpenSSH UserKnownHostsFile=KEYFILE argument after real-sshd refusal. Await exact SHA live SSH tests; no fake PASS. One-line English commit summary: Declare secure RBD/PVE output prerequisites and fix pinned OpenSSH known-hosts option.

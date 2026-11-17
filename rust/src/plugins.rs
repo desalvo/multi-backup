@@ -240,8 +240,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("nextcloud", "Nextcloud", DataKind::Files, PLAN, PLAN,
         "Nextcloud WebDAV/OCS file ID, ETag, sharing, versions and chunked upload",
         "External WebDAV/OCS protocol integration; validate server version and atomic verified commits; never overwrite"),
-    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, NONE,
-        "RBD image snapshots+diff export", "Block image is not a directory; restore requires explicit image creation, never silent overwrite"),
+    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, PLAN,
+        "RBD image snapshots+diff export",
+        "B-In RBD snapshot export and B-Out new empty image import are explicitly planned only: require image ID, pool owner, Ceph auth and source consistency; NEVER overwrite a mapped or existing image"),
     PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
         "Initiator/target IQN and LUN WWID with storage snapshot",
         "Read only a stable quiesced block snapshot; supports raw LUN or LVM (local, clustered-local, shared-exclusive, HA-exclusive, clustered-shared); restore to fresh isolated VG/LUN only").with_san_lvm(),
@@ -253,9 +254,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
     // Keep the historical "proxmox" ID for backward compatibility with
     // saved jobs, but never conflate a PVE hypervisor with a PBS datastore.
-    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, NONE,
+    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, PLAN,
         "QEMU VM and native LXC CT inventory with explicit snapshot/suspend/stop modes",
-        "Explicit PVE vzdump snapshot/suspend/stop task trigger and polling are preview-only; archive transfer, task+media verification and create-only VM/CT restore remain PLANNED and NOT field certified"),
+        "PVE B-In media export and B-Out native backup-storage target/import are PLANNED only; task receipt is not a verified archive; cannot overwrite existing VMID or storage backup; real QEMU/LXC restore unqualified"),
     PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PLAN, PLAN,
         "Distinct PBS datastore and snapshot groups for VM/CT/host backup archives",
         "PBS datastore AND native vm/ct/host snapshot listing via TLS scoped read-only token is implemented in Rust preview; transfer, encrypted export, native verification and create-only restore remain PLANNED"),
@@ -395,6 +396,18 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
                 required_preflight.push("verify exact writable NFS/SMB mount, create-only new target, verified backup decryption, and no overwrite; IBM CES write semantics not separately certified");
             }
         }
+        if plugin.id=="proxmox" {
+            required_preflight.push("require genuine PVE snapshot/suspend/stop task completion PLUS verified new backup media; task UPID alone never proves backup success");
+            if writing {required_preflight.push("B-Out PVE target is planning-only: require approved storage configured for backup, create-only native backup reference, verified age ciphertext and offline restore proof; no overwrite of VM/CT");}
+        }
+        if plugin.id=="rbd" {
+            required_preflight.push("require Ceph RBD immutable snapshot ID, pool, image name, feature compatibility and client ceph auth attestation; no write to live image");
+            if writing {required_preflight.push("RBD output planning-only: create an isolated NEW unmapped image from verified encrypted stream, require human approval and copy-on-write fencing");}
+        }
+        if plugin.id=="ssh" {
+            required_preflight.push("SSH B-In requires 0600 pinned known_hosts and private key, safe absolute file path, independently supplied SHA256 and bytes, and successful authenticated SSH exit before manifest commit");
+            if writing {required_preflight.push("Direct SSH/SCP/SFTP B-Out not implemented; no unsafe shell or overwrite fallback");}
+        }
         if plugin.id == "s3" {
             required_preflight.push("S3 source B-In requires exact immutable version ID and independent raw SHA-256 reference; no mutable latest-object fallback");
             required_preflight.push("S3 source must pass authenticated HTTPS, exact returned version and size; after streaming chunks verify SHA before publishing encrypted manifest");
@@ -406,7 +419,7 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
         }
         if plugin.id == "webdav" {
             required_preflight.push("require exact mounted FUSE davfs2 read-only client, trusted HTTPS server certificate, authentication and out-of-band quiescent snapshot attestation");
-            required_preflight.push("WebDAV output/remote restore is NOT implemented; ETag cache, metadata and transactional publish need live certification");
+            required_preflight.push("Mounted WebDAV encrypted B-Out is preview-only; native remote DAV metadata ETag/ACL and authenticated RW field acceptance are still pending");
         }
         if plugin.id == "sshfs" {
             required_preflight.push("verify existing patched SSHFS/FUSE mount, pinned SSH host key and secure authentication");
@@ -483,7 +496,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_32_requested_input_plugins_and_24_outputs_are_listed() {
+    fn all_32_requested_input_plugins_and_26_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox", "pbs",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
@@ -493,9 +506,9 @@ mod tests {
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
-            "owncloud", "nextcloud", "sshfs", "smb"];
+            "owncloud", "nextcloud", "sshfs", "smb", "rbd", "proxmox"];
         assert_eq!(catalog_for(Mode::Backup, true).len(), 32);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 24);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 26);
         assert_eq!(CATALOG.len(), 33);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
@@ -504,7 +517,7 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 24);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
             if matches!(entry.id,"s3"|"ssh") {
@@ -532,11 +545,22 @@ mod tests {
         }
     }
     #[test]
+    fn requested_proxmox_and_rbd_output_roles_are_only_declarative(){
+        for id in ["rbd","proxmox"]{
+            let p=plan(Mode::Backup,"posix",id).unwrap();
+            assert_eq!(p.destination_stage,Stage::Planned);
+            assert!(!p.executable && !p.preview_executable);
+            assert!(p.confirmation_required_before_writes);
+            assert!(p.required_preflight.iter().any(|s|s.contains("create") ||
+                s.contains("NEW") || s.contains("new backup")));
+        }
+    }
+    #[test]
     fn pve_and_pbs_have_distinct_non_executable_capabilities() {
         let pve=find("proxmox").expect("PVE compatibility ID");
         let pbs=find("pbs").expect("PBS must be separately selectable");
         assert_eq!(pve.backup_input,Stage::Planned);
-        assert_eq!(pve.backup_output,Stage::Unsupported);
+        assert_eq!(pve.backup_output,Stage::Planned);
         assert_eq!(pbs.backup_input,Stage::Planned);
         assert_eq!(pbs.backup_output,Stage::Planned);
         assert_ne!(pve.id,pbs.id);

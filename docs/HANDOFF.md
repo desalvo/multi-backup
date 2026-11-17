@@ -966,3 +966,8 @@ Branch feature/r179-provider-output-hardening, stacked on r178 PR #32. See docs/
 ### r180 native SSH B-In
 
 On stacked r179 branch, new `ssh_input.rs`, `plugins ssh-backup` and dedicated OpenSSH real-sshd CI test. Safe path/user/host only, caller SHA256+size and real hostkey pin, manifest-last after process exit. Root encrypted store, remote read without plaintext staging. Direct SCP/SFTP and SSH B-Out are NOT implemented, no release/Ready until CI.
+
+
+### r181 followup
+
+RBD/PVE B-Out upgraded from Unsupported to Planned ONLY, no runtime executor. Real SSH B-In #43989432365 failed (exit=255 due OpenSSH option split); fixed in next SHA by using `UserKnownHostsFile=<abs path>` as one `-o` option. See r179 provider readiness doc. Do not mark SSH B-In CI PASS until rerun.
