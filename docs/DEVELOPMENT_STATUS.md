@@ -1126,3 +1126,9 @@ One-line English commit summary: Implement externally enforced WORM vault and re
 
 ## r209.5 — Patroni integrated native acceptance green
 On SHA `16b25052a507ee92535be2dc9919e43be040c249`, [CI #44073298429](https://github.com/desalvo/multi-backup/actions/runs/44073298429) **PASS**. Live Patroni 3.2.2 returned `role=master` with `GET /primary HTTP 200`; our adapter now accepts Patroni 3.x `master` OR newer `primary` only when the independent /cluster DCS leader, healthy full membership and timeline agree. Exact real run validated encrypted new-db recovery and fencing before and after a leader crash; all adjacent real database, Galera, WAL/PITR, Oracle, MySQL8.4 and Rust focused suites [#44073214298](https://github.com/desalvo/multi-backup/actions/runs/44073214298), [#44073214023](https://github.com/desalvo/multi-backup/actions/runs/44073214023), [#44073214010](https://github.com/desalvo/multi-backup/actions/runs/44073214010), [#44073213992](https://github.com/desalvo/multi-backup/actions/runs/44073213992), [#44073213941](https://github.com/desalvo/multi-backup/actions/runs/44073213941) **PASS**. Scope remains three real services on one hosted runner, not physical HA test or all-plugins RC gate.
+
+
+## r209.6 — oVirt IMAGEIO format correction
+Do not label an arbitrary imageio byte stream QCOW2. Strict `expected_format` ("raw" or "qcow2") mandatory; use exact extension in encrypted manifest. The field lab independently probes `qemu-img info` (and `qemu-img check` for QCOW2), compares byte SHA and denies wrong key/overwrite. Real oVirt Engine field acceptance remains unperformed absent protected fixture.
+
+One-line English commit summary: Preserve explicit oVirt RAW versus QCOW2 IMAGEIO format through encrypted import and offline verification.
