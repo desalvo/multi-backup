@@ -1,5 +1,6 @@
 name: Multi Backup - real two-principal WORM IAM r211
 on:
+  workflow_call:
   push:
     branches: ['feature/r211-provider-field-certification']
     paths:
