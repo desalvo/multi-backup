@@ -956,3 +956,18 @@ Real RC1 native Mac windows arm64 + x86_64 PASS, but Windows real GUI window exi
 ### r178 plugin handoff
 
 Stacked branch `feature/r178-s3-input-dropbox-output`, separate from existing draft PR #31. New dedicated Rust `plugins s3-object-backup` / `dropbox-upload` / `dropbox-backup` commands; no generic mount/destination downgrade. S3 B-In requires version ID + caller-supplied SHA256 and commits encrypted chunks only on verified transfer. Dropbox B-Out uses create-only upload sessions and independent file metadata readback; requires `MULTI_BACKUP_DROPBOX_TOKEN`. New RustFS live test; isolated Dropbox B-Out live test manual-only, strongly gated. Run exact-SHA CI, do not claim Ready until real vendor field and E2E all operations. `docs/PLUGIN_S3_DROPBOX_R178_IT.md` has steps and limitations.
+
+
+### r179 provider output branch handoff
+
+Branch feature/r179-provider-output-hardening, stacked on r178 PR #32. See docs/PROVIDER_PLUGIN_READINESS_R179_IT.md. New mounted_output.rs, native CLI mounted-backup/mounted-restore (actual age ciphertext only), registry B-Out Preview for eight mounted providers, live 5-mode NFS/Samba/GlusterFS/GPFS compatibility workflow extended. No false native GPFS field claim or SAN/proxmox/oracle promotion. Await exact-SHA CI and field validation, no RC2 tag.
+
+
+### r180 native SSH B-In
+
+On stacked r179 branch, new `ssh_input.rs`, `plugins ssh-backup` and dedicated OpenSSH real-sshd CI test. Safe path/user/host only, caller SHA256+size and real hostkey pin, manifest-last after process exit. Root encrypted store, remote read without plaintext staging. Direct SCP/SFTP and SSH B-Out are NOT implemented, no release/Ready until CI.
+
+
+### r181 followup
+
+RBD/PVE B-Out upgraded from Unsupported to Planned ONLY, no runtime executor. Real SSH B-In #43989432365 failed (exit=255 due OpenSSH option split); fixed in next SHA by using `UserKnownHostsFile=<abs path>` as one `-o` option. See r179 provider readiness doc. Do not mark SSH B-In CI PASS until rerun.

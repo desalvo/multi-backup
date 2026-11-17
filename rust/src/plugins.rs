@@ -207,23 +207,23 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Version-pinned S3 GetObject with independently supplied SHA-256 and server length; source snapshot pinned, WORM output only when explicitly configured",
         "Dedicated Rust B-In streams a version-pinned S3/Ceph RGW/RustFS object to age-encrypted chunks with pre-commit digest; WORM B-Out/restore-from-vault remain separate. Batch ListObjects, ACL fidelity, vendor RGW field evidence and generic restore-to-S3 are unqualified")
         .with_restore_output_stage(PLAN),
-    PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PREVIEW, PLAN,
-        "Exact read-only authenticated davfs2 mount, with independently attested quiescent collection", "Experimental mounted WebDAV input to encrypted POSIX chunks; no native WebDAV output, ETag certification, or remote write/restore"),
-    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PLAN,
-        "Mounted filesystem plus server snapshot if available", "Support NFSv3, v4.x; do not assume root or atomic snapshots"),
-    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, NONE,
-        "SMB durable handles or snapshots if available", "Authenticated SMB3 RO input and new-directory-only RW mounted recovery preview; ACL/ADS/Windows path semantics still pending"),
-    PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PREVIEW, PLAN,
-        "CephFS snapshots or quiesced mount", "No cross-filesystem atomicity claim; separate CephFS and RBD plugins"),
-    PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PREVIEW, PLAN,
+    PluginDescriptor::new("webdav", "WebDAV", DataKind::Files, PREVIEW, PREVIEW,
+        "Exact read-only authenticated davfs2 mount, with independently attested quiescent collection", "Experimental mounted WebDAV input to encrypted POSIX chunks; mounted create-only age archive B-Out and ciphertext readback Preview; native DAV ETag/ACL and remote auth field qualification pending"),
+    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PREVIEW,
+        "Mounted filesystem plus server snapshot if available", "Read-only source and exact RW NFS mount B-Out encrypted create-only archive, checked via age readback; do not assume root or atomic snapshots"),
+    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, PREVIEW,
+        "SMB durable handles or snapshots if available", "Authenticated SMB3 RO source, exact RW SMB3 mount encrypted B-Out and create-only recovery preview; ACL/ADS/Windows path semantics pending"),
+    PluginDescriptor::new("cephfs", "CephFS", DataKind::Files, PREVIEW, PREVIEW,
+        "CephFS snapshots or quiesced mount", "Exact mounted CephFS RW encrypted create-only B-Out preview; no cross-filesystem atomicity claim; separate CephFS and RBD"),
+    PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PREVIEW, PREVIEW,
         "Mounted Gluster volume inventory with consistency epoch and preserved GFID/ACL/xattr metadata",
-        "Quiesce or coordinate snapshots by volume topology (replica/disperse); no direct brick writes, restores to new isolated directory/volume"),
-    PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PREVIEW, PLAN,
+        "Exact RW GlusterFS mount encrypted create-only B-Out preview; no direct brick writes, topology/ACL and replica health field validation still pending"),
+    PluginDescriptor::new("lustre", "Lustre parallel filesystem", DataKind::DistributedFilesystem, PREVIEW, PREVIEW,
         "Mounted Lustre client, coordinated MDT/OST consistent snapshot, stripe and ACL/xattr metadata",
-        "Use separately installed authorized Lustre client; avoid bundling kernel modules; writes only to a new isolated mounted destination"),
-    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via NFS-SMB (PROTOCOL PREVIEW)", DataKind::DistributedFilesystem, PREVIEW, PLAN,
+        "Existing authorized Lustre client, exact RW mount encrypted create-only archive B-Out preview; MDT/OST consistency metadata not certified"),
+    PluginDescriptor::new("gpfs", "IBM Storage Scale / GPFS via NFS-SMB (PROTOCOL PREVIEW)", DataKind::DistributedFilesystem, PREVIEW, PREVIEW,
         "Client protocol compatibility with NFSv3/v4 or SMB3 mount; source consistency proved separately",
-        "Optional RC NFS/SMB protocol client preview only. Generic NFS and Samba tests do NOT certify IBM GPFS native ACLs, snapshot, CES failover or IBM filesystem metadata. Real IBM CES field qualification remains separately deferred.")
+        "Optional RC NFS/SMB protocol client preview only. Generic NFS and Samba tests do NOT certify IBM GPFS native ACLs, snapshot, CES failover or IBM filesystem metadata. Mounted CES-protocol NFS/SMB encrypted create-only B-Out preview; real IBM CES field qualification separately deferred.")
         .with_gpfs_ces(),
     PluginDescriptor::new("hdfs", "Hadoop HDFS", DataKind::DistributedFilesystem, PLAN, PLAN,
         "SWebHDFS/WebHDFS, HDFS snapshot/directory metadata, ACL/xattrs, checksums",
@@ -240,8 +240,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("nextcloud", "Nextcloud", DataKind::Files, PLAN, PLAN,
         "Nextcloud WebDAV/OCS file ID, ETag, sharing, versions and chunked upload",
         "External WebDAV/OCS protocol integration; validate server version and atomic verified commits; never overwrite"),
-    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, NONE,
-        "RBD image snapshots+diff export", "Block image is not a directory; restore requires explicit image creation, never silent overwrite"),
+    PluginDescriptor::new("rbd", "Ceph RADOS Block Device (RBD)", DataKind::BlockDevice, PLAN, PLAN,
+        "RBD image snapshots+diff export",
+        "B-In RBD snapshot export and B-Out new empty image import are explicitly planned only: require image ID, pool owner, Ceph auth and source consistency; NEVER overwrite a mapped or existing image"),
     PluginDescriptor::new("iscsi", "iSCSI LUN", DataKind::BlockTransport, PLAN, PLAN,
         "Initiator/target IQN and LUN WWID with storage snapshot",
         "Read only a stable quiesced block snapshot; supports raw LUN or LVM (local, clustered-local, shared-exclusive, HA-exclusive, clustered-shared); restore to fresh isolated VG/LUN only").with_san_lvm(),
@@ -253,9 +254,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "Distinguish transport TCP/RDMA/FC, namespace and multipath; output/restore may write only an explicitly created isolated namespace"),
     // Keep the historical "proxmox" ID for backward compatibility with
     // saved jobs, but never conflate a PVE hypervisor with a PBS datastore.
-    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, NONE,
+    PluginDescriptor::new("proxmox", "Proxmox Virtual Environment (PVE)", DataKind::Virtualization, PLAN, PLAN,
         "QEMU VM and native LXC CT inventory with explicit snapshot/suspend/stop modes",
-        "Explicit PVE vzdump snapshot/suspend/stop task trigger and polling are preview-only; archive transfer, task+media verification and create-only VM/CT restore remain PLANNED and NOT field certified"),
+        "PVE B-In media export and B-Out native backup-storage target/import are PLANNED only; task receipt is not a verified archive; cannot overwrite existing VMID or storage backup; real QEMU/LXC restore unqualified"),
     PluginDescriptor::new("pbs", "Proxmox Backup Server (PBS)", DataKind::Virtualization, PLAN, PLAN,
         "Distinct PBS datastore and snapshot groups for VM/CT/host backup archives",
         "PBS datastore AND native vm/ct/host snapshot listing via TLS scoped read-only token is implemented in Rust preview; transfer, encrypted export, native verification and create-only restore remain PLANNED"),
@@ -274,11 +275,13 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("oracle", "Oracle Database", DataKind::Database, PLAN, NONE,
         "Online RMAN ARCHIVELOG: validated datafiles, controlfile/SPFILE, redo sequence, database SCN",
         "Requires licensed Oracle instance and locally installed RMAN; never ship Oracle binaries or enable extra-cost Oracle compression/encryption/standby features automatically"),
-    PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PLAN, PLAN,
-        "Remote stat+hash, optional filesystem snapshot", "Strict host-key pinning; no shell interpolation, deletes or unsafe redirects"),
-    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PLAN,
+    PluginDescriptor::new("ssh", "SSH / SCP / SFTP", DataKind::RemoteShell, PREVIEW, PLAN,
+        "Pinned SSH host key, exact remote-file digest and length, no shell escape",
+        "Native authenticated SSH B-In streams one digest-and-length-pinned file into age-encrypted chunks; SCP/SFTP directory operations and B-Out remain planned")
+        .with_restore_output_stage(PLAN),
+    PluginDescriptor::new("sshfs", "SSHFS (FUSE mounted SFTP)", DataKind::Files, PREVIEW, PREVIEW,
         "Existing verified SSHFS mount, strict host key, file hashes/metadata",
-        "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport and no overwrite"),
+        "External open-source GPL-2.0 SSHFS/FUSE client only; patched version, safe symlink policy, no insecure directport; existing exact RW SSHFS mount may receive encrypted create-only archive B-Out"),
     PluginDescriptor::new("anti-ransomware-vault", "Anti-ransomware append-only vault PREVIEW",
         DataKind::ProtectedVault, NONE, PREVIEW,
         "WORM/Object Lock retention, manifest-last atomic commit and independent recovery approval",
@@ -393,6 +396,18 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
                 required_preflight.push("verify exact writable NFS/SMB mount, create-only new target, verified backup decryption, and no overwrite; IBM CES write semantics not separately certified");
             }
         }
+        if plugin.id=="proxmox" {
+            required_preflight.push("require genuine PVE snapshot/suspend/stop task completion PLUS verified new backup media; task UPID alone never proves backup success");
+            if writing {required_preflight.push("B-Out PVE target is planning-only: require approved storage configured for backup, create-only native backup reference, verified age ciphertext and offline restore proof; no overwrite of VM/CT");}
+        }
+        if plugin.id=="rbd" {
+            required_preflight.push("require Ceph RBD immutable snapshot ID, pool, image name, feature compatibility and client ceph auth attestation; no write to live image");
+            if writing {required_preflight.push("RBD output planning-only: create an isolated NEW unmapped image from verified encrypted stream, require human approval and copy-on-write fencing");}
+        }
+        if plugin.id=="ssh" {
+            required_preflight.push("SSH B-In requires 0600 pinned known_hosts and private key, safe absolute file path, independently supplied SHA256 and bytes, and successful authenticated SSH exit before manifest commit");
+            if writing {required_preflight.push("Direct SSH/SCP/SFTP B-Out not implemented; no unsafe shell or overwrite fallback");}
+        }
         if plugin.id == "s3" {
             required_preflight.push("S3 source B-In requires exact immutable version ID and independent raw SHA-256 reference; no mutable latest-object fallback");
             required_preflight.push("S3 source must pass authenticated HTTPS, exact returned version and size; after streaming chunks verify SHA before publishing encrypted manifest");
@@ -404,7 +419,7 @@ pub fn plan_profiles(mode: Mode, source_id: &str, destination_id: &str,
         }
         if plugin.id == "webdav" {
             required_preflight.push("require exact mounted FUSE davfs2 read-only client, trusted HTTPS server certificate, authentication and out-of-band quiescent snapshot attestation");
-            required_preflight.push("WebDAV output/remote restore is NOT implemented; ETag cache, metadata and transactional publish need live certification");
+            required_preflight.push("Mounted WebDAV encrypted B-Out is preview-only; native remote DAV metadata ETag/ACL and authenticated RW field acceptance are still pending");
         }
         if plugin.id == "sshfs" {
             required_preflight.push("verify existing patched SSHFS/FUSE mount, pinned SSH host key and secure authentication");
@@ -481,7 +496,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     #[test]
-    fn all_32_requested_input_plugins_and_23_outputs_are_listed() {
+    fn all_32_requested_input_plugins_and_26_outputs_are_listed() {
         let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox", "pbs",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
@@ -491,9 +506,9 @@ mod tests {
         let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
-            "owncloud", "nextcloud", "sshfs"];
+            "owncloud", "nextcloud", "sshfs", "smb", "rbd", "proxmox"];
         assert_eq!(catalog_for(Mode::Backup, true).len(), 32);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 23);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 26);
         assert_eq!(CATALOG.len(), 33);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
@@ -502,10 +517,10 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 23);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
         assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
         for entry in CATALOG {
-            if entry.id=="s3" {
+            if matches!(entry.id,"s3"|"ssh") {
                 // Native pinned-object backup source does NOT confer a
                 // generic restore-to-S3 capability; keep this direction
                 // planned until a write adapter is qualified.
@@ -518,11 +533,34 @@ mod tests {
         }
     }
     #[test]
+    fn mounted_ciphertext_output_is_distinct_from_plaintext_remote_restore(){
+        for p in ["nfs","smb","webdav","cephfs","glusterfs","lustre","gpfs","sshfs"]{
+            let d=find(p).unwrap();
+            assert_eq!(d.backup_output,Stage::Preview);
+            assert_eq!(d.restore_input,Stage::Preview);
+            let b=plan(Mode::Backup,"posix",p).unwrap();
+            let r=plan(Mode::Restore,p,"posix").unwrap();
+            assert!(!b.executable && !b.preview_executable);
+            assert!(!r.executable && !r.preview_executable);
+        }
+    }
+    #[test]
+    fn requested_proxmox_and_rbd_output_roles_are_only_declarative(){
+        for id in ["rbd","proxmox"]{
+            let p=plan(Mode::Backup,"posix",id).unwrap();
+            assert_eq!(p.destination_stage,Stage::Planned);
+            assert!(!p.executable && !p.preview_executable);
+            assert!(p.confirmation_required_before_writes);
+            assert!(p.required_preflight.iter().any(|s|s.contains("create") ||
+                s.contains("NEW") || s.contains("new backup")));
+        }
+    }
+    #[test]
     fn pve_and_pbs_have_distinct_non_executable_capabilities() {
         let pve=find("proxmox").expect("PVE compatibility ID");
         let pbs=find("pbs").expect("PBS must be separately selectable");
         assert_eq!(pve.backup_input,Stage::Planned);
-        assert_eq!(pve.backup_output,Stage::Unsupported);
+        assert_eq!(pve.backup_output,Stage::Planned);
         assert_eq!(pbs.backup_input,Stage::Planned);
         assert_eq!(pbs.backup_output,Stage::Planned);
         assert_ne!(pve.id,pbs.id);
@@ -657,8 +695,8 @@ mod tests {
         let d=find("glusterfs").unwrap();
         assert_eq!(d.kind, DataKind::Files);
         assert_eq!(d.backup_input, Stage::Preview);
-        assert_eq!(d.backup_output, Stage::Planned);
-        assert_eq!(d.restore_input, Stage::Planned);
+        assert_eq!(d.backup_output, Stage::Preview);
+        assert_eq!(d.restore_input, Stage::Preview);
         assert_eq!(d.restore_output, Stage::Preview);
         assert!(d.lvm_modes.is_empty());
         assert!(!plan(Mode::Backup, "glusterfs", "anti-ransomware-vault").unwrap().executable);
@@ -708,8 +746,8 @@ mod tests {
             // GPFS via standard NFS/SMB now has protocol-only input and
             // create-only mounted output preview, not native GPFS support.
             assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.backup_output, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.restore_input, if id=="afs" {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_output, if matches!(id,"afs"|"lustre"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
+            assert_eq!(d.restore_input, if matches!(id,"afs"|"lustre"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
             assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
@@ -778,7 +816,7 @@ mod tests {
     fn webdav_ro_source_requires_exact_native_mount_and_attestation() {
         let d=find("webdav").unwrap();
         assert_eq!(d.backup_input, Stage::Preview);
-        assert_eq!(d.backup_output, Stage::Planned);
+        assert_eq!(d.backup_output, Stage::Preview);
         let webdav_plan=plan(Mode::Backup,"webdav","posix").unwrap();
         assert!(webdav_plan.preview_executable);
         assert!(!webdav_plan.executable);
@@ -790,8 +828,8 @@ mod tests {
         let d=find("sshfs").unwrap();
         assert_eq!(d.kind,DataKind::Files);
         assert_eq!(d.backup_input,Stage::Preview);
-        assert_eq!(d.backup_output,Stage::Planned);
-        assert_eq!(d.restore_input,Stage::Planned);
+        assert_eq!(d.backup_output,Stage::Preview);
+        assert_eq!(d.restore_input,Stage::Preview);
         assert_eq!(d.restore_output,Stage::Preview);
         assert_ne!(d.id,find("ssh").unwrap().id);
         let b=plan(Mode::Backup,"sshfs","anti-ransomware-vault").unwrap();

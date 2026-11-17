@@ -1023,3 +1023,18 @@ See `docs/RC2_READINESS_R176_IT.md`. Release RC1 is immutable and already publis
 Implemented the dedicated S3 version-pinned, independently SHA256-validated streamed input to encrypted age chunks and Dropbox new-object-only, encrypted output with Dropbox metadata content-hash readback. Real RustFS integration test extended for newer-version drift and age restore. A manual, explicitly owner-approved isolated Dropbox test-account workflow is prepared but NOT run automatically. Both registry stages are Preview, never global Ready; direct restore to cloud, multipart resume, physical Ceph field and verified Dropbox credentials remain open. See `docs/PLUGIN_S3_DROPBOX_R178_IT.md`.
 
 One-line English commit summary: Add pinned S3 input and create-only Dropbox output backed by encryption, digest verification and scoped live-test gates.
+
+
+## r179 — protocol-mounted encrypted backup output and restore source
+
+See `docs/PROVIDER_PLUGIN_READINESS_R179_IT.md`. Added dedicated Rust exact-mounted NFS/SMB/WebDAV/CephFS/GlusterFS/Lustre/GPFS-CES/SSHFS encrypted create-only output and remote encrypted readback into a new local directory; instrumented existing NFS/Samba/GlusterFS live workflow. The remaining requested SAN, Oracle, Proxmox, cloud E2E requirements are **not** complete. No overall Ready or RC2 claim. One-line English commit summary: Add safe ciphertext-only mounted output with real network field tests and fail-closed restore.
+
+
+## r180 — pinned SSH stream adapter
+
+Native `ssh_input.rs` streams an exact remote read-only file over strict pinned OpenSSH host keys into encrypted chunk store. The supplied SHA256/length and SSH process success must pass before publish. Existing real OpenSSH CI expanded to test encrypted byte-identical restore and wrong-digest fail-closed. SCP/SFTP B-In batch and any direct SSH B-Out are still Planned; no cross-remote backups claimed. One-line English commit summary: Add strictly pinned SSH B-In streaming encryption, independent digest checks and real-sshd acceptance.
+
+
+## r181 — RBD/PVE output planning, pinned SSH argument compatibility
+
+RBD and PVE B-Out can now be selected in the planner but remain non-executable Stage::Planned, requiring RBD immutable snapshot + new unmapped image / PVE verified vzdump media and non-overwrite restore. Fixed OpenSSH UserKnownHostsFile=KEYFILE argument after real-sshd refusal. Await exact SHA live SSH tests; no fake PASS. One-line English commit summary: Declare secure RBD/PVE output prerequisites and fix pinned OpenSSH known-hosts option.

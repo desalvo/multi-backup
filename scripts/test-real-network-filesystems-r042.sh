@@ -207,6 +207,57 @@ if "$CLI" plugins restore --input posix --output "$PLUGIN" "${RESTORE_FLAGS[@]}"
   --identity "$KEY" --id "$INC" --destination "$RW/new-recovery" >/dev/null 2>&1; then
   echo "FAIL: existing $MODE recovery overwritten" >&2; exit 1
 fi
+# r179 B-Out: same real NFS/CIFS/GlusterFS (GPFS-NFS/SMB compatibility) server
+MOUNT_GPFS_OUT=()
+MOUNT_GPFS_IN=()
+if [[ "$PLUGIN" == gpfs ]];then
+  MOUNT_GPFS_OUT=(--output-gpfs-access "$ACCESS")
+  MOUNT_GPFS_IN=(--input-gpfs-access "$ACCESS")
+fi
+mkdir -p "$WORK/mounted-source/nested"
+printf 'real mounted encrypted output r179\n' > "$WORK/mounted-source/nested/plain.txt"
+if "$CLI" plugins mounted-backup --output "$PLUGIN" \
+  "${MOUNT_GPFS_OUT[@]}" --mount "$RO" --source "$WORK/mounted-source" \
+  --filename r179-encrypted.tar.gz.age --recipient "$RECIPIENT" \
+  --identity "$KEY" >/dev/null 2>&1;then
+  echo "FAIL: B-Out wrote into RO mount" >&2;exit 1
+fi
+if "$CLI" plugins mounted-backup --output "$PLUGIN" \
+  "${MOUNT_GPFS_OUT[@]}" --mount "$WORK/mounted-source" --source "$WORK/mounted-source" \
+  --filename r179-encrypted.tar.gz.age --recipient "$RECIPIENT" \
+  --identity "$KEY" >/dev/null 2>&1;then
+  echo "FAIL: local directory pretended to be network mount" >&2;exit 1
+fi
+"$CLI" plugins mounted-backup --output "$PLUGIN" "${MOUNT_GPFS_OUT[@]}" \
+  --mount "$RW" --source "$WORK/mounted-source" \
+  --filename r179-encrypted.tar.gz.age --recipient "$RECIPIENT" \
+  --identity "$KEY" --json > "$WORK/bout.json"
+test "$(jq -r .verified_members "$WORK/bout.json")" -eq 2
+test "$(jq -r .create_only "$WORK/bout.json")" = true
+test -f "$RW/r179-encrypted.tar.gz.age"
+test -f "$RW/r179-encrypted.tar.gz.age.sha256"
+if "$CLI" plugins mounted-backup --output "$PLUGIN" "${MOUNT_GPFS_OUT[@]}" \
+  --mount "$RW" --source "$WORK/mounted-source" \
+  --filename r179-encrypted.tar.gz.age --recipient "$RECIPIENT" \
+  --identity "$KEY" >/dev/null 2>&1;then
+  echo "FAIL: B-Out overwrote encrypted archive" >&2;exit 1
+fi
+"$CLI" plugins mounted-restore --input "$PLUGIN" "${MOUNT_GPFS_IN[@]}" \
+  --mount "$RW" --filename r179-encrypted.tar.gz.age \
+  --identity "$KEY" --destination "$WORK/mounted-restored" >/dev/null
+cmp "$WORK/mounted-source/nested/plain.txt" \
+  "$WORK/mounted-restored/multi-backup/mounted-output/nested/plain.txt"
+if "$CLI" plugins mounted-restore --input "$PLUGIN" "${MOUNT_GPFS_IN[@]}" \
+  --mount "$RW" --filename r179-encrypted.tar.gz.age \
+  --identity "$WORK/wrong-key" --destination "$WORK/mounted-wrong-key" >/dev/null 2>&1;then
+  echo "FAIL: B-Out accepted wrong age identity" >&2;exit 1
+fi
+if "$CLI" plugins mounted-restore --input "$PLUGIN" "${MOUNT_GPFS_IN[@]}" \
+  --mount "$RW" --filename r179-encrypted.tar.gz.age \
+  --identity "$KEY" --destination "$WORK/mounted-restored" >/dev/null 2>&1;then
+  echo "FAIL: B-Out overwrote recovered directory" >&2;exit 1
+fi
+echo "PASS: real $MODE mounted encrypted B-Out, sidecar, age readback and create-only recovery"
 echo "PASS: genuine $MODE through $PROTOCOL server+kernel/FUSE, Rust FULL/INC age encrypted verification and byte-identical recovery"
 if [[ "$PLUGIN" == gpfs ]];then
  echo "SCOPE: NFS/SMB client protocol only; NO IBM Storage Scale CES/native GPFS qualified"
