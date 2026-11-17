@@ -57,13 +57,12 @@ impl Config{
             .ok_or("Invalid product status path")?;
         let dav_path=dav.path().strip_prefix(prefix)
             .ok_or("DAV and provider status path prefixes differ")?;
-        if !matches!(dav_path,"remote.php/webdav/") &&
-           !(dav_path.starts_with("remote.php/dav/files/") &&
-             dav_path.ends_with('/')&&dav_path.len()>25 &&
-             dav_path.split('/').all(|x|!x.contains(".."))) {
-            return Err("Provider DAV collection must be a direct ownCloud/Nextcloud files endpoint".into());
+        let authenticated_user_collection=format!("remote.php/dav/files/{}/",self.username);
+        if dav_path!="remote.php/webdav/" &&
+           dav_path!=authenticated_user_collection {
+            return Err("Provider DAV collection must belong to this authenticated user".into());
         }
-        if self.provider=="nextcloud" && !dav_path.starts_with("remote.php/dav/files/"){
+        if self.provider=="nextcloud" && dav_path!=authenticated_user_collection {
             return Err("Nextcloud requires native user-scoped DAV collection".into());
         }
         if self.username.is_empty()||self.username.len()>128||
