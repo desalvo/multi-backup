@@ -5,7 +5,6 @@ on:
     paths:
       - 'rust/src/plugin_executor.rs'
       - 'rust/src/mounted_output.rs'
-      - 'rust/src/bin/multi-backup-native.rs'
       - 'rust/src/mount_probe.rs'
       - 'rust/src/chunk_store.rs'
       - 'rust/Cargo.toml'

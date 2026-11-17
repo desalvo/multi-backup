@@ -108,7 +108,7 @@ pub fn backup_file(config:&Config,root:&Path,identity:&Path,label:&str,
                "-o","GlobalKnownHostsFile=/dev/null",
                "-o","UserKnownHostsFile"])
         .arg(&config.known_hosts_file)
-        .arg("--").arg(destination)
+        .arg(destination)
         .arg(format!("cat -- {}",config.remote_file))
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn()?;
@@ -123,7 +123,7 @@ pub fn backup_file(config:&Config,root:&Path,identity:&Path,label:&str,
     let result=store.backup_stream(identity,label,namespace,&logical,&mut reader,
         BackupKind::Full,None,||{
             let status=child.wait().map_err(|_|"SSH child wait failed")?;
-            if !status.success(){return Err("SSH server command did not succeed".into());}
+            if !status.success(){return Err(format!("SSH server command did not succeed (exit={:?})",status.code()));}
             let data=check.borrow();
             if data.bytes!=length{return Err("SSH stream incomplete".into());}
             if hex::encode(data.sha.clone().finalize())!=expected{

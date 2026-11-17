@@ -135,6 +135,16 @@ cfg={
 with open(root+"/ssh-source.json","x") as handle: json.dump(cfg,handle)
 os.chmod(root+"/ssh-source.json",0o600)
 PY
+    # The standalone Rust adapter uses exactly this pinned OpenSSH call,
+    # not the workflow's SSH alias configuration.
+    ssh -T -p "$PORT" -i "$WORK/client_key" \
+       -o BatchMode=yes -o StrictHostKeyChecking=yes \
+       -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+       -o PasswordAuthentication=no \
+       -o "UserKnownHostsFile=$WORK/known_hosts" \
+       -o GlobalKnownHostsFile=/dev/null \
+       "$NAME@127.0.0.1" "cat -- $WORK/remote/scp-sftp.dat" > "$WORK/direct-ssh.dat"
+    cmp "$WORK/direct-ssh.dat" "$WORK/remote/scp-sftp.dat"
     "$CLI" plugins ssh-backup --config "$WORK/ssh-source.json" \
       --root "$WORK/stream-store" --identity "$WORK/stream-age-identity" \
       --label "Pinned genuine OpenSSH B-In" --json > "$WORK/ssh-import.json"
