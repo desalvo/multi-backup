@@ -97,8 +97,41 @@ fn publish_new(source:&Path,target:&Path)->Result<()>{
     let to=CString::new(target.as_os_str().as_bytes())?;
     let status=unsafe{libc::syscall(libc::SYS_renameat2,libc::AT_FDCWD,
         from.as_ptr(),libc::AT_FDCWD,to.as_ptr(),libc::RENAME_NOREPLACE)};
-    if status!=0{return Err(format!("New restore publication refused (atomic no-replace): {}",
-        std::io::Error::last_os_error()).into());}
+    if status==0{return Ok(());}
+    let error=std::io::Error::last_os_error();
+    if !matches!(error.raw_os_error(),Some(libc::EINVAL)|Some(libc::EOPNOTSUPP)){
+        return Err(format!("Atomic no-replace restore publication refused: {error}").into());
+    }
+    // Native Ceph FUSE may reject RENAME_NOREPLACE with EINVAL. Fall back
+    // only to atomic create_new DIRECTORY reservation (mkdir fails EEXIST).
+    // Never issue an unrestricted rename onto an externally existing path.
+    // A 0700 reserved destination is populated only from our verified,
+    // privately staged PAX directory, then unsealed after all moves.
+    use std::os::unix::fs::{DirBuilderExt,PermissionsExt};
+    let parent=target.parent().ok_or("Restore target parent missing")?;
+    let pm=fs::metadata(parent)?;
+    if pm.permissions().mode()&0o022!=0{
+        return Err("CephFS create-only fallback requires non-group/world-writable parent".into());
+    }
+    let reserved=std::fs::DirBuilder::new().mode(0o700).create(target);
+    reserved.map_err(|e|format!("New restore target mkdir reservation refused: {e}"))?;
+    let publication=(||->Result<()>{
+        for item in fs::read_dir(source)?{
+            let item=item?;
+            // The destination directory was just created and is private;
+            // no previously existing user file can be replaced.
+            fs::rename(item.path(),target.join(item.file_name()))?;
+        }
+        fs::set_permissions(target,fs::metadata(source)?.permissions())?;
+        Ok(())
+    })();
+    if let Err(e)=publication{
+        // Failed create-only publication remains explicitly incomplete:
+        // never remove it while an external observer may be inspecting it.
+        let _=fs::set_permissions(target,fs::Permissions::from_mode(0o700));
+        return Err(format!("Incomplete NEW restore reservation (do not treat as complete): {e}").into());
+    }
+    // Empty tempdir is automatically cleaned by tempfile.
     Ok(())
 }
 #[cfg(not(target_os="linux"))]
