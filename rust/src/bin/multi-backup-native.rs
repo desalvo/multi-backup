@@ -27,6 +27,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
        multi-backup-native plugins ovirt-imageio-backup --config OWNER_ONLY_OVIRT_IMAGEIO.json --root ENCRYPTED_STORE --identity AGE_PRIVATE --label LABEL [--json] (read-only pre-issued READY oVirt VM disk imageio ticket, SHA-256 pinned; no remote VM restore)\n\
        multi-backup-native plugins vmware-ovf-backup --profile-json EXPORT_0600.json --root AGE_STORE --identity AGE_KEY --stage-root PRIVATE_ENCRYPTED_TMP --label LABEL [--json] (powered-off VM OVF+VMDK encrypted; no VADP/CBT or live VMs)\n\
+       multi-backup-native plugins vmware-ovf-package-backup --root AGE_STORE --identity AGE_KEY --stage-root PRIVATE_ENCRYPTED_TMP --source-ovf-dir PRIVATE_OVF_DIR --source-moref vm-123 --expected-fingerprint SHA256 --label NAME [--json] (offline pre-exported OVF package; source VM provenance NOT certified)\n\
        multi-backup-native plugins vmware-ovf-restore-new --profile-json IMPORT_0600.json --root AGE_STORE --identity AGE_KEY --id BACKUP_ID --stage-root PRIVATE_ENCRYPTED_TMP --new-vm NEW_NAME --confirm-new-vm vmware:NEW_NAME:DATASTORE [--json] (create-only new powered-off VM; no overwrite, no boot proof)\n\
        multi-backup-native plugins hypervisor-inventory --config-json OWNER_ONLY_VMWARE_OR_OVIRT.json [--json] (VMs ONLY, READ-ONLY; no CT or backups/restores)\n\
        multi-backup-native plugins pve-start-backup --config-json OWNER_ONLY_PVE.json --node NODE --guest-kind qemu|lxc --guest-id VMID --mode snapshot|suspend|stop --storage PVE_STORAGE --confirm-remote-backup KIND:VMID:MODE:STORAGE [--json] (starts PVE vzdump task only; no verified archive)\n\
@@ -185,6 +186,22 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Path::new(required(&flags,"--stage-root")?))?;
         if json{println!("{}",serde_json::to_string_pretty(&r)?);}
         else{println!("VMware encrypted offline OVF created: {} (live VM and CBT not certified)",r.id);}
+        return Ok(());
+    }
+    if family=="plugins" && command=="vmware-ovf-package-backup" {
+        if password_stdin{return Err("Offline OVF package input requires protected age identity".into());}
+        accepted(&flags,&["--root","--identity","--stage-root","--source-ovf-dir",
+            "--source-moref","--expected-fingerprint","--label"])?;
+        let r=vmware_ovf::backup_package(
+            Path::new(required(&flags,"--root")?),
+            Path::new(required(&flags,"--identity")?),
+            Path::new(required(&flags,"--stage-root")?),
+            Path::new(required(&flags,"--source-ovf-dir")?),
+            required(&flags,"--source-moref")?,
+            required(&flags,"--expected-fingerprint")?,
+            required(&flags,"--label")?)?;
+        if json{println!("{}",serde_json::to_string_pretty(&r)?);}
+        else{println!("VMware offline OVF package encrypted: {} (provider source not attested)",r.id);}
         return Ok(());
     }
     if family=="plugins" && command=="vmware-ovf-restore-new" {
