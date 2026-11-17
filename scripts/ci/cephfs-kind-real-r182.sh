@@ -62,7 +62,10 @@ spec:
   restartPolicy: Never
   containers:
     - name: client
-      image: ubuntu:24.04
+      # The Rook cluster is Ceph Tentacle 20.2.4 (aes256k CephX).
+      # Ubuntu 24.04 ships old Ceph 19.2.3: it cannot parse Tentacle
+      # keys, so a matching pinned Ceph client image is mandatory.
+      image: quay.io/ceph/ceph:v20.2.4
       command: ["/bin/bash", "-lc", "sleep 1800"]
       securityContext:
         privileged: true
@@ -72,8 +75,19 @@ spec:
 YAML
 kubectl apply -f "$TEMP/client.yaml"
 kubectl -n rook-ceph wait --for=condition=Ready pod/mb-ci-cephfs-client --timeout=300s
-kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash -lc \
-  'export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq age ceph-fuse ceph-common jq'
+# Install only client tools, never downgrade CephX authentication to legacy AES.
+# CentOS Stream 9 Ceph image uses dnf. age is provided by EPEL 9.
+kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash -lc '
+  set -euo pipefail
+  command -v ceph
+  if ! command -v ceph-fuse >/dev/null; then dnf -y install ceph-fuse; fi
+  if ! command -v jq >/dev/null; then dnf -y install jq; fi
+  if ! command -v age-keygen >/dev/null; then
+    dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+    dnf -y install age
+  fi
+  command -v ceph-fuse && command -v age-keygen && command -v jq
+'
 # Auth material never leaves the disposable cluster, even in logs/artifacts.
 kubectl -n rook-ceph exec deploy/rook-ceph-tools -- tar -C / -cf - etc/ceph \
   | kubectl -n rook-ceph exec -i mb-ci-cephfs-client -- tar -C / -xf -

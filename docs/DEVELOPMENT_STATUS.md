@@ -1085,3 +1085,10 @@ One-line English commit summary: Honor system-trusted CA certificates for native
 The new direct HTTP/WebDAV adapter compiled successfully, but CI [#43995446149](https://github.com/desalvo/multi-backup/actions/runs/43995446149) still failed closed at HEAD with \`ureq::Transport::ConnectionFailed\` (before any writes). The disposable HTTPS server is explicitly bound to \`127.0.0.1\`, while the URL used \`localhost\` and may select IPv6 ::1; the server certificate includes IP SAN 127.0.0.1. The lab now targets the explicit HTTPS **IPv4 loopback** and logs the safe ureq transport reason. TLS remains validated with OS-installed CA, no insecure fallbacks. Await real HTTPS conditional PUT/GET CI PASS before promotion. The registered WebDAV mounted B-In remains separately proven on davfs2 RO.
 
 One-line English commit summary: Pin real WebDAV TLS field host to IPv4 loopback while retaining certificate validation and safe diagnostics.
+
+## r193 — CephFS CephX-v20 and WebDAV certificate chain corrective acceptance
+- Genuine 3-MON / 3-OSD CephFS lab on run 43995191250 had an active MDS but **FAILED** on its Ubuntu 24.04 Ceph 19.2.3 client, incompatible with Ceph Tentacle 20.2.4 aes256k key material. Use a version-pinned Ceph 20.2.4 client image; retain strong keys and actual FUSE mounts; do not log keyring parsing errors or mark E2E PASS until green.
+- Real WebDAV TLS native output on run 43995889270 **FAILED CLOSED** at HEAD without uploads. Replace CI's self-signed leaf used as a root certificate with a distinct disposable CA:TRUE issuer and CA:FALSE server TLS certificate with DNS/IP SAN and serverAuth EKU. Continue strict native root verification, independently download ciphertext and checksum; no insecure fallback.
+- Tests must run on the exact new SHA and complete before RC2 promotion. No release/merge from this change alone.
+
+One-line English commit summary: Fix real CephFS client CephX compatibility and WebDAV trust-chain fixtures without relaxing security.

@@ -23,11 +23,30 @@ trap cleanup EXIT
 printf "WebDAV original content\n" > "$ROOT/nested/data.txt"
 dd if=/dev/urandom of="$ROOT/test.bin" bs=1M count=2 status=none
 HASH=$(sha256sum "$ROOT/test.bin" | awk '{print $1}')
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
-  -subj /CN=localhost -addext subjectAltName=DNS:localhost,IP:127.0.0.1 \
-  -keyout "$WORK/webdav.key" -out "$WORK/webdav.crt" >/dev/null 2>&1
-chmod 0600 "$WORK/webdav.key"
-sudo install -m 0644 "$WORK/webdav.crt" /usr/local/share/ca-certificates/mb-webdav-r046.crt
+# A self-signed HTTPS *leaf* is not a valid CA: rustls rejects it even
+# when OpenSSL/curl sometimes accept it as a directly trusted certificate.
+# Create a throwaway CA and a separate CA:FALSE TLS server leaf.
+openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 2 \
+  -subj '/CN=Multi Backup disposable WebDAV test CA' \
+  -addext 'basicConstraints=critical,CA:TRUE' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+  -keyout "$WORK/ca.key" -out "$WORK/ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -sha256 -nodes \
+  -subj /CN=localhost -keyout "$WORK/webdav.key" \
+  -out "$WORK/webdav.csr" >/dev/null 2>&1
+cat > "$WORK/server.ext" <<'CERT'
+subjectAltName=DNS:localhost,IP:127.0.0.1
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+CERT
+openssl x509 -req -in "$WORK/webdav.csr" \
+  -CA "$WORK/ca.crt" -CAkey "$WORK/ca.key" -CAcreateserial \
+  -days 1 -sha256 -extfile "$WORK/server.ext" \
+  -out "$WORK/webdav.crt" >/dev/null 2>&1
+chmod 0600 "$WORK/ca.key" "$WORK/webdav.key"
+openssl verify -purpose sslserver -CAfile "$WORK/ca.crt" "$WORK/webdav.crt"
+sudo install -m 0644 "$WORK/ca.crt" /usr/local/share/ca-certificates/mb-webdav-r046.crt
 sudo update-ca-certificates >/dev/null
 PASSWORD=$(openssl rand -hex 20)
 htpasswd -nbB mbci "$PASSWORD" > "$WORK/htpasswd"

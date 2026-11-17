@@ -4,25 +4,39 @@ set -Eeuo pipefail
 umask 077
 for bin in ceph-fuse ceph age-keygen sha256sum findmnt mountpoint jq;do command -v "$bin";done
 test -c /dev/fuse || { echo 'FAIL no /dev/fuse in genuine client' >&2;exit 1; }
-ceph fs status mb-ci-fs
+# The 20.2.4 client is necessary for aes256k; do not leak private keyring
+# contents from Ceph parser diagnostics into public CI logs on failure.
+test "$(ceph --version | sed -n 's/^ceph version \([0-9]*\).*/\1/p')" = 20 || {
+  echo 'FAIL: CephFS client must match pinned Ceph v20 cluster' >&2; exit 1;
+}
 RW=/mnt/mb-cephfs-rw
 RO=/mnt/mb-cephfs-ro
 LOCAL=/tmp/mb-cephfs-local
 mkdir -p "$RW" "$RO" "$LOCAL"
+if ! ceph fs status mb-ci-fs >"$LOCAL/fs-status.txt" 2>"$LOCAL/ceph-error.log"; then
+  echo 'FAIL: real CephFS client authentication or MDS status failed; details retained inside disposable pod' >&2
+  exit 1
+fi
 cleanup(){
   set +e
   fusermount -u "$RO" 2>/dev/null || umount "$RO" 2>/dev/null || :
   fusermount -u "$RW" 2>/dev/null || umount "$RW" 2>/dev/null || :
 }
 trap cleanup EXIT
-ceph-fuse --client_fs mb-ci-fs "$RW"
+if ! ceph-fuse --client_fs mb-ci-fs "$RW" >"$LOCAL/ceph-fuse-rw.log" 2>&1; then
+  echo 'FAIL: genuine CephFS RW FUSE mount failed; sensitive diagnostics retained only inside disposable pod' >&2
+  exit 1
+fi
 findmnt -rn -T "$RW" -o FSTYPE | grep -Eq '^(fuse.ceph-fuse|ceph)$'
 mkdir -p "$RW/source/nested"
 printf 'real cephfs source before update\n' >"$RW/source/nested/original.txt"
 dd if=/dev/urandom of="$RW/source/payload.bin" bs=1M count=2 status=none
 HASH="$(sha256sum "$RW/source/payload.bin" | awk '{print $1}')"
 # This is a quiesced fixture, NOT an attested CephFS native snapshot.
-ceph-fuse --client_fs mb-ci-fs -o ro "$RO"
+if ! ceph-fuse --client_fs mb-ci-fs -o ro "$RO" >"$LOCAL/ceph-fuse-ro.log" 2>&1; then
+  echo 'FAIL: genuine CephFS RO FUSE mount failed; sensitive diagnostics retained only inside disposable pod' >&2
+  exit 1
+fi
 findmnt -rn -T "$RO" -o OPTIONS | grep -Eq '(^|,)ro(,|$)'
 test "$(cat "$RO/source/nested/original.txt")" = 'real cephfs source before update'
 age-keygen -o "$LOCAL/identity" >/dev/null 2>&1
