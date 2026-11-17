@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 for b in ceph-fuse ceph bsdtar setfacl getfacl setfattr getfattr sha256sum jq; do
-  command -v "$b" >/dev/null
+  command -v "$b" >/dev/null || { echo "FAIL: CephFS metadata lab lacks genuine $b" >&2; exit 1; }
 done
 CLI=/usr/local/bin/multi-backup-native
 RW=/mnt/mb-cephfs-rw

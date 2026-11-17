@@ -5,7 +5,8 @@
 //! is atomic. Restore is create-only on an exact RW mount.
 use crate::{chunk_store::{BackupKind,Store},mount_probe};
 use serde::Serialize;
-use std::{fs,io::{Read,Write},path::Path,process::{Command,Stdio}};
+use std::{fs,io::Write,path::Path,process::{Command,Stdio}};
+use walkdir::WalkDir;
 
 type Result<T>=std::result::Result<T,Box<dyn std::error::Error+Send+Sync>>;
 #[derive(Serialize)]
@@ -45,6 +46,19 @@ pub fn backup(provider:&str,source:&Path,store_root:&Path,key:&Path,
     let source=ordinary_dir(source)?;
     let store_root=ordinary_dir(store_root)?;
     require_mount(provider,&source,false)?;
+    // Preserve ACL/xattr on ordinary files and dirs only; never let a
+    // mutable link/special inode reach the external archive extractor.
+    // Immutable native snapshot attestation is the caller's responsibility.
+    let mut seen=0usize;
+    for entry in WalkDir::new(&source).follow_links(false).max_depth(64) {
+        let entry=entry?;
+        let kind=entry.file_type();
+        if !kind.is_dir() && !kind.is_file(){
+            return Err("ACL/xattr snapshot contains symlink or special inode".into());
+        }
+        seen+=1;
+        if seen>100_000{return Err("ACL/xattr snapshot item count exceeds safe limit".into());}
+    }
     if source.starts_with(&store_root)||store_root.starts_with(&source)||
        key.starts_with(&source){
         return Err("Metadata source and encrypted store/key overlap".into());

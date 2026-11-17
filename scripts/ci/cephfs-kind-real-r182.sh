@@ -86,9 +86,11 @@ kubectl -n rook-ceph exec mb-ci-cephfs-client -- bash -lc '
     dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
     dnf -y install age
   fi
-  if [ "${MB_FSMETA_LAB:-0}" = 1 ]; then
-    dnf -y install bsdtar acl attr
-  fi
+  # The flag belongs to the GitHub runner, not to the disposable client pod.
+  # This lab always exercises metadata; install the REAL tools unconditionally.
+  dnf -y install bsdtar acl attr
+  command -v bsdtar && command -v setfacl && command -v getfacl
+  command -v setfattr && command -v getfattr
   command -v ceph-fuse && command -v age-keygen && command -v jq
 '
 # Auth material never leaves the disposable cluster, even in logs/artifacts.
