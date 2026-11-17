@@ -123,7 +123,11 @@ impl Profile {
             serde_json::from_slice(&body).map_err(|_|"Patroni status is not JSON".into())
         };
         let primary=get("/primary")?;
-        if primary["role"]!="primary" || primary["state"]!="running"{
+        // Patroni /primary returns HTTP 200 only while holding the leader lock;
+// the JSON PG role is "master" in Patroni 3.x and "primary" in newer
+// terminology. Require BOTH 200 and an independently matching DCS leader.
+        if !matches!(primary["role"].as_str(),Some("master")|Some("primary")) ||
+           primary["state"]!="running"{
             return Err("Patroni refuses backup on replica or stale-primary state".into());
         }
         let leader=primary.pointer("/patroni/name")
