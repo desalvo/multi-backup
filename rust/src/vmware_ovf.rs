@@ -252,13 +252,14 @@ pub fn backup(profile:&Profile,root:&Path,key:&Path,label:&str,stage_root:&Path)
         .arg(profile.vm_path.as_deref().unwrap()).arg(&dir)
         .stdout(Stdio::null()).status()?;
     if !status.success(){return Err("VMware genuine OVF export failed".into())}
-    let files=checked_files(&dir)?;
+    let exported=dir.join(&source.name);
+    let files=checked_files(&exported)?;
     let after=pinned_source(profile)?;
     if source.moref!=after.moref||source.name!=after.name{
         return Err("VMware source identity changed while exporting".into())
     }
     let mut tar=Command::new("tar");
-    tar.arg("-cf").arg("-").arg("-C").arg(&dir).arg("--")
+    tar.arg("-cf").arg("-").arg("-C").arg(&exported).arg("--")
        .args(&files).stdin(Stdio::null()).stdout(Stdio::piped())
        .stderr(Stdio::null());
     let mut child=tar.spawn()?;
@@ -298,7 +299,7 @@ fn safe_extract(archive:&Path,dest:&Path)->Result<PathBuf>{
             return Err("VMware tar member must be regular, never symlink/dir/hardlink".into())
         }
         let path=item.path()?;
-        let name=path.to_str().ok_or("VMware archive name encoding")?;
+        let name=path.to_str().ok_or("VMware archive name encoding")?.to_owned();
         if !component(name)||!["ovf","vmdk","mf","nvram"].iter().any(|ext|
               name.ends_with(&format!(".{ext}"))){
             return Err("VMware tar traversal or unexpected member".into())
