@@ -1,21 +1,32 @@
-# Manuali utente — stato dei PDF
+# Manuali utente — Multi Backup r218 (IT / EN)
 
-- **Ultima applicazione distribuita:** Multi Backup r018 Python/Tk. Le schermate e le procedure storiche dei manuali PDF tracciati in questa cartella documentano principalmente tale interfaccia.
-- **Sviluppo attivo:** Rust nativo r038 nel branch di PR #10; non è una release stabile o RC certificata.
-- **Procedure r038 aggiornate e autorevoli:** [Guida IT](../R038_OPERATIONS_IT.md) e [English Guide](../R038_OPERATIONS_EN.md).
-- Il generatore `scripts/build-publications.py` produce manuali bilingui aggiornati con **quattro capitoli r038 marcati sviluppo/preview**, oltre alle sezioni precedenti r018. La CI `publications-smoke` controlla effettivamente la presenza di tali sezioni nei PDF generati.
-- Non presumere che i PDF attualmente tracciati nel repository siano stati già sostituiti: per una copia rigenerata usare gli artifact della CI `native-gui-and-about-preview` relativi a un run r038 completato positivamente. Pubblicare/sostituire i PDF ufficiali solo quando la versione e la certificazione dei pacchetti sono allineate.
+**Versione corrente verificata: r218, documentazione generata dal codice Rust.**
+I PDF seguenti sono stati realmente rigenerati e pubblicati dal workflow
+[`Multi Backup r218 - current Rust UI manuals and brochures (IT EN)`](../../.github/workflows/brochures-r218.yml)
+con esito verde nel [run GitHub Actions #44295235864](https://github.com/desalvo/multi-backup/actions/runs/44295235864).
 
-Per verifiche e limiti si veda [l'indice della documentazione](../DOCUMENTATION_INDEX_R038.md).
+- [Manuale utente italiano — 9 pagine](Multi-Backup-Manuale-Utente-IT.pdf)
+- [User manual English — 9 pages](Multi-Backup-User-Manual-EN.pdf)
 
+**Provenienza:** generati dal codice sorgente esatto
+`1ea5c44b4c6c447c3c36ad7ea4de2421fe993042`, pubblicati dal commit CI
+`10ace3d15cfb3136ad3cf5a4a5738a477de77979`.
+Le immagini sono in `../screenshots-current/` e il corrispondente
+`SOURCE_SHA` documenta la versione originaria. Sono schermate vere
+dell'applicazione nativa Rust egui avviata in Xvfb, o dell'attuale frontend
+server Rust HTML/CSS/JS eseguito con **API fixture sintetiche esplicitamente
+marcate**. L'immagine mobile è una viewport browser responsive, **non**
+una cattura da dispositivo iOS/Android fisico.
 
-## r218 addendum (2026-11-18)
+**Rigenerazione:** eseguire prima
+`scripts/ci/capture-rust-desktop-r218.py` in CI con il binario Rust,
+quindi `scripts/ci/capture-rust-server-r218.py`, e poi
+`python3 scripts/build-current-manual-r218.py --screenshots generated-screenshots --out generated-publications`.
+Il workflow acquisisce, genera, valida PDF e screenshot, e pubblica solo a test superati.
+Lo ZIP con PDF, PNG e SHA256SUMS è disponibile come artefatto del run indicato.
 
-La documentazione per l'attuale console Rust responsive, le app mobili iOS/iPadOS/Android, il mount cloud FUSE/WinFsp e il browser cloud autenticato è disponibile in [matrice piattaforme](../PLATFORMS_R218_IT.md), [client mobili](../MOBILE_CLIENTS_R218_IT.md), [Cloud Drive e restore](../CLOUD_DRIVES_MOUNT_RESTORE_R218_IT.md), [iCloud Drive B-In/B-Out](../ICLOUD_B_IN_OUT_R218_IT.md). I PDF storici di questa directory contengono schermate Python/Tk precedenti e NON descrivono queste preview.
-
-
-## r218 — manuali correnti con screenshot Rust
-
-Il generatore nuovo è scripts/build-current-manual-r218.py. Le screenshot desktop si acquisiscono dal binario Rust egui realmente avviato, con profilo temporaneo isolato e Xvfb. Le screenshot server e mobile riproducono gli asset HTML/CSS/JS attuali con API fixture sintetiche esplicitamente indicate; non provengono da account reali né da dispositivi fisici.
-
-Il workflow GitHub Actions brochures-r218.yml cattura le immagini, genera e verifica i quattro PDF bilingui, li pubblica come artifact e tenta di sostituire i PDF versionati soltanto se tutti i controlli passano. Prima del successo della CI i vecchi PDF rimangono documenti storici, NON la manualistica corrente. Le screenshot r018 Python/Tk in docs/screenshots restano solo materiale storico.
+**Limiti:** le procedure sono documentazione tecnica preview, non certificano
+firmware, account cloud reali, firma/notarizzazione, app native mobili distribuite
+o fault test HA su tre host fisici. I precedenti manuali r018/r038 e screenshot
+Python/Tk in `../screenshots/` restano solo materiale storico, non la UI corrente.
+Licenza progetto EUPL-1.2.
