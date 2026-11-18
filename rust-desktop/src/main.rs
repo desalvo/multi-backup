@@ -2244,6 +2244,20 @@ fn main() -> eframe::Result {
         println!("Native Rust GUI self-test OK"); return Ok(());
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
+    // Documentation screenshots MUST come from the real running Rust app.
+    // Explicit opt-in refuses accidental captures from a normal user session.
+    let docs_page=if args.len()==2 && args[0]=="--docs-page" {
+        if std::env::var("MULTI_BACKUP_DOCUMENTATION_CAPTURE").ok().as_deref()!=Some("1"){
+            eprintln!("Documentation capture needs a disposable profile and explicit opt-in");
+            std::process::exit(2);
+        }
+        let match_page=Page::ALL.into_iter().find(|p|p.label()==args[1]);
+        if match_page.is_none(){
+            eprintln!("Unknown Rust GUI documentation capture page");
+            std::process::exit(2);
+        }
+        match_page
+    }else{None};
     #[cfg(windows)]
     let software_rendering=windows_requires_software_renderer();
     #[cfg(windows)]
@@ -2289,7 +2303,9 @@ fn main() -> eframe::Result {
                 }
                 println!("MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe actual={renderer}");
             }
-            Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))
+            let mut app=NativeApp::new(&cc.egui_ctx,smoke);
+            if let Some(page)=docs_page{app.page=page;}
+            Ok(Box::new(app))
         }));
     if let Err(ref failure)=result {
         eprintln!("Native GUI startup failed: {failure}");
