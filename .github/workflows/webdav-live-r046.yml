@@ -1,5 +1,6 @@
 name: Multi Backup - real authenticated WebDAV RO input and native encrypted HTTPS B-Out
 on:
+  workflow_call:
   push:
     branches: ["feature/**"]
     paths:
@@ -16,8 +17,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: mb-r216-webdav-tls-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   real-webdav:
     runs-on: ubuntu-24.04

@@ -2322,8 +2322,8 @@ mod provider_gui_tests{
             matches!(p.backup_input,plugins::Stage::Ready) ||
             matches!(p.backup_output,plugins::Stage::Ready)).collect::<Vec<_>>();
         assert_eq!(ready.iter().map(|p|p.id).collect::<Vec<_>>(),
-            vec!["posix","s3","cephfs","rbd","iscsi","mysql","postgresql",
-                 "oracle","anti-ransomware-vault"]);
+            vec!["posix","s3","webdav","cephfs","lustre","rbd","iscsi","mysql",
+                 "postgresql","oracle","ssh","sshfs","anti-ransomware-vault"]);
         assert!(ready.iter().all(|p|p.ready_scope.is_some()),
             "Every visible Ready label must reveal the exact supported scope");
         assert!(plugins::CATALOG.iter().filter(|p|p.ready_scope.is_none())
