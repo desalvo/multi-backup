@@ -27,7 +27,7 @@ jobs:
           bash scripts/ci/package-ubuntu24-r217.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: rc216-ubuntu24-amd64-native-deb
+          name: rc217-ubuntu24-amd64-native-deb
           path: packages/*
           retention-days: 21
           if-no-files-found: error
@@ -77,7 +77,7 @@ jobs:
           echo 'Verified installed ad-hoc signed Rust DMG; NOT Apple-notarized' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: rc216-macos-${{ matrix.arch }}-adhoc-dmg
+          name: rc217-macos-${{ matrix.arch }}-adhoc-dmg
           path: |
             multi-backup-r217-rc-preview-macos-${{ matrix.arch }}.dmg
             multi-backup-r217-rc-preview-macos-${{ matrix.arch }}.dmg.sha256
@@ -130,7 +130,7 @@ jobs:
           Write-Output 'PASS installed Inno native Windows Rust GUI, CLI and age; UNSIGNED RC preview'
       - uses: actions/upload-artifact@v4
         with:
-          name: rc216-windows-x64-unsigned-inno
+          name: rc217-windows-x64-unsigned-inno
           path: |
             installers/multi-backup-rust-preview-windows-x64.exe
             multi-backup-rust-preview-windows-x64.zip

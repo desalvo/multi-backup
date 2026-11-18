@@ -1,4 +1,4 @@
-"""RC216 installer validation intentionally rejects different SHA, missing OS, altered installer."""
+"""RC217 installer validation intentionally rejects different SHA, missing OS, altered installer."""
 import hashlib
 import importlib.util
 from pathlib import Path
@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 SCRIPT=Path(__file__).resolve().parents[1]/"scripts/ci/verify-platform-artifacts-r217.py"
-spec=importlib.util.spec_from_file_location("art216",SCRIPT)
+spec=importlib.util.spec_from_file_location("art217",SCRIPT)
 art=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(art)
 SHA="a"*40
@@ -17,13 +17,17 @@ def create_fixture(root:Path):
         folder.mkdir(parents=True,exist_ok=False)
         (folder/source).write_text(SHA+"\n")
         name=group+suffix
-        output=folder/name
+        if group=="rc217-windows-x64-inno-unsigned":
+            (folder/"installers").mkdir()
+            output=folder/"installers"/name
+        else:
+            output=folder/name
         output.write_bytes(b"binary-preview"*1500)
         hashval=hashlib.sha256(output.read_bytes()).hexdigest()
         check=folder/(name+checksum if checksum!="SHA256SUMS-win-r217.txt" else checksum)
         if not check.name.endswith(checksum):
             check=folder/(name+checksum)
-        recorded=f"packages/{name}" if group=="rc216-ubuntu24-amd64-native-deb" else name
+        recorded=f"packages/{name}" if group=="rc217-ubuntu24-amd64-native-deb" else name
         check.write_text(f"{hashval}  {recorded}\n")
 
 class InstallerProof(unittest.TestCase):
@@ -39,15 +43,31 @@ class InstallerProof(unittest.TestCase):
         with TemporaryDirectory() as temp:
             root=Path(temp)
             create_fixture(root)
-            (root/"rc216-macos-x86_64-adhoc-dmg"/
-             "rc216-macos-x86_64-adhoc-dmg-x86_64.dmg").unlink()
+            (root/"rc217-macos-x86_64-adhoc-dmg"/
+             "rc217-macos-x86_64-adhoc-dmg-x86_64.dmg").unlink()
             with self.assertRaises(art.UntrustedPackage):
                 art.verify(root,SHA)
         with TemporaryDirectory() as temp:
             root=Path(temp)
             create_fixture(root)
-            target=root/"rc216-ubuntu24-amd64-native-deb"/"rc216-ubuntu24-amd64-native-deb.deb"
+            target=root/"rc217-ubuntu24-amd64-native-deb"/"rc217-ubuntu24-amd64-native-deb.deb"
             target.write_bytes(b"tampered"+target.read_bytes())
+            with self.assertRaises(art.UntrustedPackage):
+                art.verify(root,SHA)
+
+    def test_nested_windows_path_is_allowlisted_and_escape_rejected(self):
+        with TemporaryDirectory() as temp:
+            root=Path(temp)
+            create_fixture(root)
+            win=root/"rc217-windows-x64-inno-unsigned"
+            (win/"installers"/"unexpected.txt").write_text("untrusted")
+            with self.assertRaises(art.UntrustedPackage):
+                art.verify(root,SHA)
+        with TemporaryDirectory() as temp:
+            root=Path(temp)
+            create_fixture(root)
+            folder=root/"rc217-windows-x64-inno-unsigned"
+            (folder/"extra").mkdir()
             with self.assertRaises(art.UntrustedPackage):
                 art.verify(root,SHA)
 
@@ -55,7 +75,7 @@ class InstallerProof(unittest.TestCase):
         with TemporaryDirectory() as temp:
             root=Path(temp)
             create_fixture(root)
-            path=root/"rc216-windows-x64-inno-unsigned"/"SOURCE_SHA-win-r217.txt"
+            path=root/"rc217-windows-x64-inno-unsigned"/"SOURCE_SHA-win-r217.txt"
             path.write_text("b"*40)
             with self.assertRaises(art.UntrustedPackage):
                 art.verify(root,SHA)

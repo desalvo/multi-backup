@@ -13,13 +13,13 @@ from pathlib import Path
 import re
 
 SOURCES={
-    "rc216-ubuntu24-amd64-native-deb":
+    "rc217-ubuntu24-amd64-native-deb":
         ("SOURCE_SHA.txt", ".deb", ".deb.sha256"),
-    "rc216-macos-arm64-adhoc-dmg":
+    "rc217-macos-arm64-adhoc-dmg":
         ("SOURCE_SHA-mac-arm64.txt", "-arm64.dmg", ".dmg.sha256"),
-    "rc216-macos-x86_64-adhoc-dmg":
+    "rc217-macos-x86_64-adhoc-dmg":
         ("SOURCE_SHA-mac-x86_64.txt", "-x86_64.dmg", ".dmg.sha256"),
-    "rc216-windows-x64-inno-unsigned":
+    "rc217-windows-x64-inno-unsigned":
         ("SOURCE_SHA-win-r217.txt", ".exe", "SHA256SUMS-win-r217.txt"),
 }
 HASHLINE=re.compile(r"^([0-9a-f]{64})  ([^\x00\n\r/\\]+)$")
@@ -45,8 +45,25 @@ def verify(root:Path, sha:str)->list[dict]:
         if source.is_symlink() or source.read_text().strip()!=sha:
             raise UntrustedPackage(f"Wrong source SHA for {name}")
         assets=[p for p in folder.iterdir() if p.is_file() and not p.is_symlink()]
-        binaries=[p for p in assets if p.name.endswith(binary_suffix)]
         checks=[p for p in assets if p.name.endswith(checksum_suffix)]
+        binaries=[p for p in assets if p.name.endswith(binary_suffix)]
+        # actions/upload-artifact preserves explicit installer paths when the
+        # paths are on different roots: Windows EXE remains under installers/.
+        # That is the ONLY nested folder authorized for the Windows artifact.
+        nested=folder/"installers"
+        for item in folder.iterdir():
+            if item.is_symlink() or (item.is_dir() and (
+                name!="rc217-windows-x64-inno-unsigned" or item.name!="installers")):
+                raise UntrustedPackage(f"Untrusted nested installer path: {item.name}")
+        if nested.exists():
+            if nested.is_symlink() or not nested.is_dir():
+                raise UntrustedPackage("Windows installers must be a real directory")
+            for item in nested.iterdir():
+                if item.is_symlink() or not item.is_file():
+                    raise UntrustedPackage("Nested path is not a regular Windows installer file")
+            binaries.extend(p for p in nested.iterdir() if p.name.endswith(binary_suffix))
+            if len(list(nested.iterdir()))!=1:
+                raise UntrustedPackage("Unexpected extra files in Windows installer folder")
         if len(binaries)!=1 or len(checks)!=1:
             raise UntrustedPackage(f"Expected exactly one installer and checksum for {name}")
         archive=binaries[0]
@@ -56,7 +73,7 @@ def verify(root:Path, sha:str)->list[dict]:
         # The Ubuntu packager correctly emits "packages/filename.deb" because
         # it hashes before upload. Artifacts are flattened by upload-artifact,
         # so accept exactly that one trusted prefix, never arbitrary paths.
-        if name=="rc216-ubuntu24-amd64-native-deb" and line.count("  packages/")==1:
+        if name=="rc217-ubuntu24-amd64-native-deb" and line.count("  packages/")==1:
             line=line.replace("  packages/","  ",1)
         hit=HASHLINE.fullmatch(line)
         if hit is None or hit.group(2)!=archive.name:
@@ -69,7 +86,7 @@ def verify(root:Path, sha:str)->list[dict]:
         if h.hexdigest()!=expected:
             raise UntrustedPackage(f"Installer bytes differ from same-run checksum: {name}")
         records.append({
-            "artifact":name,"filename":archive.name,"sha256":expected,
+            "artifact":name,"filename":archive.relative_to(folder).as_posix(),"sha256":expected,
             "bytes":archive.stat().st_size,"source_sha":sha,
             "actual_native_install_smoke_required":True,
             "signed_production_release":False,

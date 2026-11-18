@@ -248,7 +248,7 @@ jobs:
           PY
       - uses: actions/download-artifact@v4
         with:
-          pattern: rc216-*
+          pattern: rc217-*
           path: platform-assets
           merge-multiple: false
       - name: Independently hash all four actual native installers downloaded from the same run
