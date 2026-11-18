@@ -74,7 +74,14 @@ jobs:
               assert len(pdf.pages)>=pages,(filename,len(pdf.pages))
               text=" ".join(p.extract_text() or "" for p in pdf.pages)
               assert all(marker.lower() in text.lower() for marker in markers),(filename,markers)
-              embedded=sum(len(p.get("/Resources",{}).get("/XObject",{})) for p in pdf.pages)
+              embedded=0
+          for page in pdf.pages:
+              resources=page.get("/Resources")
+              if resources:
+                  resources=resources.get_object()
+                  xobjects=resources.get("/XObject")
+                  if xobjects:
+                      embedded+=len(xobjects.get_object())
               assert embedded>=2,(filename,"no rendered UI screenshots")
               print(filename,len(pdf.pages),"pages",embedded,"image objects")
           PY

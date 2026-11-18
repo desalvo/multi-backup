@@ -82,6 +82,7 @@ TEXT = {
  "news": "Principali novità dalla brochure precedente (r038)",
  "news_items": [
   "Cloud Drive unificati: Dropbox, Google Drive, iCloud Drive, OneDrive, ownCloud, Nextcloud e Box, con mount FUSE/WinFsp e browser remoti, download e upload/delete opt-in (Preview).",
+  "Compressione selezionabile nel nuovo storage cifrato a chunk: zstd (default), xz/LZMA2, gzip o nessuna compressione; compatibilità dei vecchi archivi zstd.",
   "Client nativi REMOTI iOS/iPadOS (SwiftUI e WKWebView) e Android (Java e WebView), stessa console server e layout responsive per smartphone/tablet.",
   "App Rust desktop con installer reali: Ubuntu 24 .deb; macOS Apple Silicon e Intel .dmg; Windows x64 Inno con rendering software su host senza GPU.",
   "16 percorsi di provider READY soltanto per operazioni circoscritte, testati con laboratori veri; catalogo completo di 34 plugin. Ogni altro scenario resta preview.",
@@ -120,6 +121,7 @@ TEXT = {
  "news": "What's new since the previous r038 brochure",
  "news_items": [
   "Universal Cloud Drive browser and FUSE/WinFsp mount: Dropbox, Google Drive, iCloud Drive, OneDrive, ownCloud, Nextcloud, Box; download and opt-in upload/delete (Preview).",
+  "Select the per-store encrypted chunk codec: zstd (default), xz/LZMA2, gzip or none, while keeping legacy zstd stores readable.",
   "Native REMOTE iOS/iPadOS (SwiftUI/WKWebView) and Android (Java/WebView) clients, sharing the server console with responsive mobile/tablet layouts.",
   "Rust desktop native installers: Ubuntu 24 .deb; macOS Apple Silicon and Intel .dmg; Windows x64 Inno with software rendering on GPU-less hosts.",
   "16 provider paths READY only for tightly bounded operations, field-tested in genuine labs; 34 total catalog entries. Other scopes remain preview.",
