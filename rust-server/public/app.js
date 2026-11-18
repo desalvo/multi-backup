@@ -466,3 +466,122 @@ document.getElementById("vault-refresh").addEventListener("click",()=>loadImmuta
 document.getElementById("vault-backup").addEventListener("click",()=>vaultMutation("backup"));
 document.getElementById("vault-restore").addEventListener("click",()=>vaultMutation("restore"));
 loadImmutableVault().catch(()=>{vaultStatus.textContent="Vault non disponibile";});
+
+
+// r218: server-side cloud file browser; fixed pre-authorized rclone profiles only.
+// All provider names/paths are rendered with textContent, never as HTML.
+const cloudProfile=document.getElementById("cloud-profile");
+const cloudPath=document.getElementById("cloud-path");
+const cloudFeedback=document.getElementById("cloud-feedback");
+const cloudItems=document.getElementById("cloud-items");
+let cloudProfiles=[];
+function cloudSelected(){return cloudProfiles.find(p=>p.id===cloudProfile.value);}
+function cloudRemotePath(name){
+  const base=cloudPath.value.trim().replace(/\/+$/,"");
+  return base?base+"/"+name:name;
+}
+function cloudApprovalHeaders(){
+  const approval=document.getElementById("recovery-authorization");
+  const headers={"X-CSRF-Token":csrf,
+    "X-Multi-Backup-Recovery-Authorization":approval.value.trim()};
+  approval.value="";
+  return headers;
+}
+async function cloudLoadProfiles(){
+  const r=await fetch("/api/cloud/profiles",{credentials:"same-origin",cache:"no-store"});
+  cloudItems.replaceChildren();cloudProfile.replaceChildren();
+  if(!r.ok){cloudFeedback.textContent="Cloud browser non configurato o permesso negato.";return;}
+  const data=await r.json();
+  cloudProfiles=Array.isArray(data.profiles)?data.profiles:[];
+  for(const p of cloudProfiles){
+    const option=el("option",p.id+" ("+p.provider+")");
+    option.value=p.id;cloudProfile.append(option);
+  }
+  cloudFeedback.textContent=cloudProfiles.length+" cloud autorizzati";
+  if(cloudProfiles.length)await cloudList();
+}
+async function cloudList(){
+  const p=cloudSelected(),cap=document.getElementById("cloud-capabilities");
+  if(!p){cloudItems.replaceChildren();return;}
+  cap.textContent=(p.upload?"Upload permesso":"Sola lettura")+
+    " · "+(p.delete?"Cancellazione abilitata":"Cancellazione disabilitata")+
+    (p.mount_read_only?" · mount RO":" · mount RW consentito dalla policy");
+  const params=new URLSearchParams({profile:p.id,path:cloudPath.value.trim()});
+  const response=await fetch("/api/cloud/list?"+params,{credentials:"same-origin",cache:"no-store"});
+  cloudItems.replaceChildren();
+  if(!response.ok){cloudFeedback.textContent="Directory non disponibile o percorso non valido.";return;}
+  const data=await response.json();
+  const items=Array.isArray(data.items)?data.items:[];
+  cloudFeedback.textContent=items.length+" elementi in /"+(data.path||"");
+  for(const item of items){
+    const line=el("div",undefined,"cloud-file");
+    const name=el("button",(item.directory?"📁 ":"📄 ")+String(item.name));
+    name.type="button";name.className="cloud-file-name";
+    name.addEventListener("click",()=>{
+      if(item.directory){cloudPath.value=cloudRemotePath(String(item.name));cloudList();}
+      else {cloudDownload(cloudRemotePath(String(item.name)));}
+    });
+    const size=el("small",item.directory?"Cartella":String(item.size)+" B","muted");
+    line.append(name,size);
+    if(!item.directory){
+      const dl=el("button","Scarica");dl.type="button";
+      dl.addEventListener("click",()=>cloudDownload(cloudRemotePath(String(item.name))));
+      line.append(dl);
+      if(p.delete){
+        const del=el("button","Elimina");del.type="button";
+        del.addEventListener("click",()=>cloudDelete(cloudRemotePath(String(item.name))));
+        line.append(del);
+      }
+    }
+    cloudItems.append(line);
+  }
+  if(!items.length)cloudItems.append(el("p","Directory vuota o non sincronizzata.","muted"));
+}
+function cloudDownload(path){
+  const p=cloudSelected();if(!p)return;
+  const url="/api/cloud/download?"+new URLSearchParams({profile:p.id,path});
+  window.location.assign(url);
+}
+async function cloudUpload(){
+  const p=cloudSelected(),file=document.getElementById("cloud-upload-file").files[0];
+  if(!p||!p.upload){cloudFeedback.textContent="Upload disabilitato dalla policy.";return;}
+  if(!file||!file.size||file.size>8*1024*1024){cloudFeedback.textContent="Seleziona un file tra 1 B e 8 MiB.";return;}
+  const path=cloudRemotePath(file.name);
+  const headers=cloudApprovalHeaders();
+  try{
+    const res=await fetch("/api/cloud/upload?"+new URLSearchParams({profile:p.id,path}),{
+      method:"POST",credentials:"same-origin",headers,body:file
+    });
+    const result=await res.json();
+    cloudFeedback.textContent=res.ok?"File caricato in nuovo percorso (preview).":
+      "Upload rifiutato: "+String(result.error||res.status);
+    if(res.ok)await cloudList();
+  }finally{headers["X-Multi-Backup-Recovery-Authorization"]="";}
+}
+async function cloudDelete(path){
+  const p=cloudSelected();if(!p?.delete)return;
+  if(path.endsWith(".age")||path.endsWith(".age.sha256")){
+    cloudFeedback.textContent="Un backup cifrato si elimina solo con la retention.";return;
+  }
+  const required="DELETE:"+p.id+":"+path;
+  const confirmation=window.prompt("Per cancellare definitivamente inserisci esattamente:\n"+required);
+  if(confirmation!==required)return;
+  const headers=cloudApprovalHeaders();
+  headers["Content-Type"]="application/json";
+  try{
+    const res=await fetch("/api/cloud/delete",{method:"POST",
+      credentials:"same-origin",headers,
+      body:JSON.stringify({profile:p.id,path,confirm:confirmation})});
+    cloudFeedback.textContent=res.ok?"File eliminato.":"Cancellazione rifiutata.";
+    if(res.ok)await cloudList();
+  }finally{headers["X-Multi-Backup-Recovery-Authorization"]="";}
+}
+document.getElementById("cloud-refresh").addEventListener("click",()=>cloudLoadProfiles().catch(()=>{}));
+document.getElementById("cloud-list").addEventListener("click",()=>cloudList().catch(()=>{cloudFeedback.textContent="Errore di accesso.";}));
+document.getElementById("cloud-back").addEventListener("click",()=>{
+  const segments=cloudPath.value.trim().split("/").filter(Boolean);
+  segments.pop();cloudPath.value=segments.join("/");cloudList();
+});
+cloudProfile.addEventListener("change",()=>{cloudPath.value="";cloudList();});
+document.getElementById("cloud-upload").addEventListener("click",()=>cloudUpload().catch(()=>{cloudFeedback.textContent="Errore di upload.";}));
+cloudLoadProfiles().catch(()=>{cloudFeedback.textContent="Cloud browser non disponibile.";});

@@ -1,6 +1,7 @@
 //! Authenticated Rust web server for the compiled backup core.
 //! Fail closed: local Argon2id login is operational; LDAP/OIDC MUST NOT be
 //! advertised or enabled until implemented and externally verified.
+mod cloud_browser;
 mod smtp;
 mod ldap;
 mod oidc;
@@ -858,6 +859,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
             }
         });
     }
+    cloud_browser::validate_config()?;
     let security=SecurityPolicy::from_env(&origin)?;
     let smtp=SmtpConfig::from_env()?;
     let dav=DavConfig::from_env(&origin)?;
@@ -879,6 +881,12 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
+        .route("/api/cloud/profiles",get(cloud_browser::profiles))
+        .route("/api/cloud/list",get(cloud_browser::list))
+        .route("/api/cloud/download",get(cloud_browser::download))
+        .route("/api/cloud/upload",post(cloud_browser::upload)
+            .layer(axum::extract::DefaultBodyLimit::max(8*1024*1024)))
+        .route("/api/cloud/delete",post(cloud_browser::delete))
         .route("/api/s3-vault/status",get(s3_vault_status))
         .route("/api/s3-vault/backup",post(s3_vault_backup))
         .route("/api/s3-vault/verify",post(s3_vault_verify))

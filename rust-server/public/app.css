@@ -52,3 +52,13 @@ button[disabled]{opacity:.6;cursor:default}input{border:1px solid #667bb6;backgr
 .cluster-record[data-status="local"]{border-left:4px solid #e7bd60}
 .cluster-record[data-status="shared"]{border-left:4px solid #62c3e6}
 @media(max-width:850px){.cluster-columns{grid-template-columns:1fr}}
+
+/* r218 scoped cloud browser; provider strings are inert text. */
+.cloud-files{padding:12px;margin:12px 0;border:1px solid #405d8c;border-radius:12px;min-height:52px;max-height:450px;overflow:auto;background:#0c1e3b}
+.cloud-file{display:flex;gap:8px;align-items:center;border-bottom:1px solid #30456f;padding:9px 5px}
+.cloud-file:last-child{border-bottom:none}
+.cloud-file-name{background:transparent;border:0;text-align:left;flex:1;box-shadow:none;padding:7px;overflow-wrap:anywhere}
+.cloud-file small{min-width:65px;text-align:right}
+#cloud-profile{min-width:180px;padding:11px;background:#091d3b;color:#fff;border:1px solid #667bb6;border-radius:9px}
+#cloud-path{min-width:240px}
+@media(max-width:750px){.cloud-file{flex-wrap:wrap}.cloud-file-name{flex-basis:100%}}
