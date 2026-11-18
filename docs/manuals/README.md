@@ -12,3 +12,10 @@ Per verifiche e limiti si veda [l'indice della documentazione](../DOCUMENTATION_
 ## r218 addendum (2026-11-18)
 
 La documentazione per l'attuale console Rust responsive, le app mobili iOS/iPadOS/Android, il mount cloud FUSE/WinFsp e il browser cloud autenticato è disponibile in [matrice piattaforme](../PLATFORMS_R218_IT.md), [client mobili](../MOBILE_CLIENTS_R218_IT.md), [Cloud Drive e restore](../CLOUD_DRIVES_MOUNT_RESTORE_R218_IT.md), [iCloud Drive B-In/B-Out](../ICLOUD_B_IN_OUT_R218_IT.md). I PDF storici di questa directory contengono schermate Python/Tk precedenti e NON descrivono queste preview.
+
+
+## r218 — manuali correnti con screenshot Rust
+
+Il generatore nuovo è scripts/build-current-manual-r218.py. Le screenshot desktop si acquisiscono dal binario Rust egui realmente avviato, con profilo temporaneo isolato e Xvfb. Le screenshot server e mobile riproducono gli asset HTML/CSS/JS attuali con API fixture sintetiche esplicitamente indicate; non provengono da account reali né da dispositivi fisici.
+
+Il workflow GitHub Actions brochures-r218.yml cattura le immagini, genera e verifica i quattro PDF bilingui, li pubblica come artifact e tenta di sostituire i PDF versionati soltanto se tutti i controlli passano. Prima del successo della CI i vecchi PDF rimangono documenti storici, NON la manualistica corrente. Le screenshot r018 Python/Tk in docs/screenshots restano solo materiale storico.

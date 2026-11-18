@@ -51,3 +51,10 @@ Riferimenti tecnici:
 - https://rclone.org/iclouddrive/
 - https://rclone.org/commands/rclone_deletefile/
 - https://rclone.org/webdav/
+
+
+## r218 — ZIP64 cifrato: ispezione e restore selettivo cloud
+
+Nuovi comandi CLI: plugins cloud-backup-inspect e plugins cloud-backup-restore. Accettano provider approvato, configurazione rclone privata, cartella remota con bundle.index.age e part-NNNNNN.zip, identity age e directory di lavoro locale privata. Il primo comando autentica l'indice cifrato e ogni volume ZIP e restituisce le voci logiche del manifest. Il secondo richiede --confirm RESTORE:PROVIDER:DIR, un percorso di destinazione inesistente ed eventuale --selection PATH. Prima della pubblicazione del restore verifica age, ZIP SHA256 e chunk/parity; byte budget predefinito 8GiB, massimo 32GiB.
+
+Il server espone POST /api/cloud/backup/inspect e POST /api/cloud/backup/restore, disabilitati di default: servono MULTI_BACKUP_CLOUD_RECOVERY_ENABLED=1, HTTPS hardened, amministratore, CSRF e autorizzazione offline. I test usano cifratura vera ma trasporto cloud rclone simulato: non esiste ancora certificazione con account cloud veri, fencing atomico di versioni remote o restore direttamente verso un nuovo cloud provider.

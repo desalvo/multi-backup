@@ -1269,3 +1269,10 @@ One-line English commit summary: Normalize Ubuntu SHA checksum path and version 
 - Updated source-driven bilingual r218 brochures, readmes, platform matrix, mobile and cloud guides. The old tracked PDF brochures belong to previous edition; use independent PDF artifact from same r218 SHA, not old files.
 - Separate local sample-data server demo (Python standard-library) with real browse/upload/delete/download/selective restore API simulation; tests 3/3 PASS. It is NOT the production Rust server or a hosted Internet website; never expose it with real secrets.
 - Preserve EUPL-1.2, exact-source CI, independent mobile/cloud release scope, final approval for stable signing/physical HA tests. One-line commit: Add fail-closed multicloud POSIX mounts and authorized browser operations while retaining exact-source r217 RC success.
+
+
+### r218 — aggiornamento corrente 18 novembre 2026: UI Rust, cloud recovery, compression
+- Nuovo motore di ispezione bundle ZIP64 cloud: scarica ciphertext con limiti, autentica indice age, verifica i volumi SHA-256 e il chunk store, permette restore selettivo SOLO in nuova directory locale. API server indipendentemente protette e opt-in; lab rclone simulato, non certificazione account reali.
+- Compressori nuovi per chunk store: zstd di default, xz/LZMA2 livello 6, gzip, none, configurabili alla creazione da CLI o GUI Rust. Vecchi storage senza campo codec = zstd. Test round-trip e negative decompress in CI.
+- Nuove pubblicazioni IT/EN: raccolta screenshot desktop reali egui da Xvfb, frontend server HTML/CSS/JS attuale con fixture sintetica marcata, mobile responsive; generate manuali e brochure PDF solo dopo verifiche reali; vecchie schermate Tk restano storiche.
+- r218 permane preview in PR #55 draft; r217 RC0 green indipendente; firme, provider reali, restore cloud-to-cloud e HA a tre host fisici restano aperti. Leggere le evidenze della CI sullo SHA esatto prima di dichiarare READY.
