@@ -31,6 +31,13 @@ Il vero test esistente .github/workflows/network-filesystems-live-r042.yml è ri
 - Verificatore crittografico del bundle r217 dopo download dei quattro artefatti; fallire se SHA, checksum, log o un test mancano.
 - Solo con TUTTI SUCCESS: artefatto scaricabile CI installable-rc0 completo di manifest e checksum. *Non* una release pubblica, firmata o stabile.
 
+## r217 Ceph operator/CRUSH — guasto CI reale del 18 novembre 2026
+
+- Run #44235174489 sul commit d37d5ecf5bd5c3aee0c604d463e43ad9a5d0d83c: 30/32 job SUCCESS, ma CephFS/RBD FAILURE e fan-in RC conseguentemente DENIED. I quattro installer nativi, NFS/SMB/Gluster e i restanti laboratori hanno superato i job. Non esiste per quel run un bundle RC approvato.
+- Diagnosi dal log: il cluster ha realmente MON 3/3 e OSD UP+IN 3/3, ma il pod OSD-2 è stato ricreato dopo il primo riposizionamento CRUSH. Lo status finale ha 89 PG active+clean+remapped e CRUSH con due OSD sul worker2 e nessuno sul worker3: non è una certificazione ammissibile.
+- Correzione: il validatore CRUSH ora richiede il container OSD realmente ready+running; la correzione CRUSH può ripetersi al massimo quattro volte dopo nuove attestazioni indipendenti, con distanza minima fra tentativi e vincolo obbligatorio al contesto disposable kind. Si preserva il requisito assoluto dei tre host distinti e tutti i PG active+clean, zero remapped. La CI r217 ora viene attivata anche da modifiche a script/validatori/test Ceph.
+- Verifica necessaria: nuova full CI sul SHA definitivo, tutti i job SUCCESS inclusi CephFS/RBD, test negativi e bundle con quattro installer verificati. Fino allora 16/33 READY resta un obiettivo r217, non la promozione automatica di un test fallito.
+
 ## Blocchi per READY globale
 
 - Nessuna prova di fault/fencing su **tre host fisici distinti**; quindi infrastruttura di produzione HA non completamente READY.
