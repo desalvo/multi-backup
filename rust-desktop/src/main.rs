@@ -1,6 +1,6 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
-mod cloud_mount;
 //! Backend functions are the same compiled Rust operations as the native CLI.
+mod cloud_mount;
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
 use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain, virtualization_inventory, hypervisor_inventory};
 use std::{
