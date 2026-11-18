@@ -106,6 +106,42 @@ pub fn export(store:&Store,key:&Path,id:&str,destination:&Path,volume_mib:u64)
 }
 /// Import validates encrypted index, all volume SHA256s and every member,
 /// followed by age authenticated chunk + parity verification. Never overwrite.
+
+/// Authenticated portable volume inventory used before remote cloud downloads.
+#[derive(Clone,Debug)]
+pub struct PortableVolume { pub name:String,pub size:u64,pub sha256:String }
+#[derive(Clone,Debug)]
+pub struct PortableInventory { pub backup_id:String,pub volumes:Vec<PortableVolume> }
+pub fn inventory(encrypted_index:&[u8],identity:&Path)->Res<PortableInventory>{
+    if encrypted_index.is_empty()||encrypted_index.len()>8*1024*1024 {
+        return Err("Cloud index must be nonempty and <=8MiB".into());
+    }
+    let decoded=age(encrypted_index,None,Some(identity))?;
+    if decoded.len()>8*1024*1024 {return Err("Decoded cloud index too large".into());}
+    let index:Catalog=serde_json::from_slice(&decoded)?;
+    if index.version!=1||!safe_hash(&index.backup_id)||
+       index.volumes.is_empty()||index.volumes.len()>4096 {
+        return Err("Invalid portable cloud index".into());
+    }
+    let mut members=HashSet::new();
+    let mut volumes=Vec::with_capacity(index.volumes.len());
+    for (i,v) in index.volumes.iter().enumerate() {
+        if v.name!=format!("part-{:06}.zip",i+1)||
+           v.size==0||!safe_hash(&v.sha256)||
+           v.members.is_empty()||v.members.len()>100000 {
+            return Err("Invalid cloud volume inventory".into());
+        }
+        for m in &v.members {
+            if !safe_object(&m.path)||!safe_hash(&m.sha256)||
+               !members.insert(m.path.clone()) {
+                return Err("Unsafe or duplicate encrypted object".into());
+            }
+        }
+        volumes.push(PortableVolume{name:v.name.clone(),size:v.size,sha256:v.sha256.clone()});
+    }
+    Ok(PortableInventory{backup_id:index.backup_id,volumes})
+}
+
 pub fn import(package:&Path,key:&Path,destination:&Path)->Res<String>{
     if destination.exists(){return Err("Import destination already exists".into());}
     if !fs::symlink_metadata(package)?.file_type().is_dir(){

@@ -179,6 +179,7 @@ struct Fields {
     chunk_legacy_json: String,
     chunk_volume_mib: String,
     chunk_size_mib: String,
+    chunk_compressor: String,
     plugin_source: String,
     plugin_input: String,
     plugin_namespace: String,
@@ -440,6 +441,7 @@ impl NativeApp {
             chunk_gc_grace: "48".into(),
             chunk_volume_mib: "2048".into(),
             chunk_size_mib: "4".into(),
+            chunk_compressor: "zstd".into(),
             plugin_input: "posix".into(),
             plugin_namespace: "files".into(),
             plugin_gpfs_access: "ces-nfs".into(),
@@ -1531,6 +1533,7 @@ impl NativeApp {
         let legacy=self.fields.chunk_legacy_json.clone();
         let volume=self.fields.chunk_volume_mib.clone();
         let chunk_size=self.fields.chunk_size_mib.clone();
+        let compressor_name=self.fields.chunk_compressor.clone();
         let plugin_source=self.fields.plugin_source.clone();
         let plugin_input=self.fields.plugin_input.clone();
         let plugin_namespace=self.fields.plugin_namespace.clone();
@@ -1560,8 +1563,10 @@ impl NativeApp {
                     let size=chunk_size.parse::<usize>()
                         .map_err(|_|"Dimensione chunk non valida")?;
                     let bytes=size.checked_mul(1024*1024).ok_or("Chunk size overflow")?;
-                    chunk_store::Store::init(root,&recipient,bytes).map_err(|e|e.to_string())?;
-                    return Ok("Storage v1 creato senza toccare i backup esistenti".into());
+                    let compressor=chunk_store::Compressor::parse(&compressor_name)?;
+                    chunk_store::Store::init_compressed(root,&recipient,bytes,compressor)
+                        .map_err(|e|e.to_string())?;
+                    return Ok(format!("Storage v1 creato con compressione {} (backup precedenti invariati)",compressor_name));
                 }
                 if action=="import-zip" {
                     let id=portable::import(Path::new(&destination),key,root)
@@ -1728,6 +1733,23 @@ impl NativeApp {
         ui.text_edit_singleline(&mut self.fields.chunk_identity);
         ui.label("Recipient pubblico age");
         ui.text_edit_singleline(&mut self.fields.recipient);
+        egui::ComboBox::from_label("Compressione del NUOVO storage")
+            .selected_text(match self.fields.chunk_compressor.as_str(){
+                "xz"=>"XZ / LZMA2 (livello 6)","gzip"=>"Gzip",
+                "none"=>"Nessuna","zstd"=>"Zstandard",
+                _=>"Zstandard"
+            })
+            .show_ui(ui,|ui|{
+                ui.selectable_value(&mut self.fields.chunk_compressor,"zstd".into(),
+                                    "Zstandard (default, livello 3)");
+                ui.selectable_value(&mut self.fields.chunk_compressor,"xz".into(),
+                                    "XZ / LZMA2 (livello 6)");
+                ui.selectable_value(&mut self.fields.chunk_compressor,"gzip".into(),
+                                    "Gzip");
+                ui.selectable_value(&mut self.fields.chunk_compressor,"none".into(),
+                                    "Nessuna compressione");
+            });
+        ui.label("Il compressore è fissato nello storage cifrato; i backup esistenti restano invariati.");
         ui.horizontal_wrapped(|ui|{
             ui.label("Chunk MiB");ui.text_edit_singleline(&mut self.fields.chunk_size_mib);
             if ui.add_enabled(!self.active,egui::Button::new("Crea storage v1"))
@@ -2244,6 +2266,20 @@ fn main() -> eframe::Result {
         println!("Native Rust GUI self-test OK"); return Ok(());
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
+    // Documentation screenshots MUST come from the real running Rust app.
+    // Explicit opt-in refuses accidental captures from a normal user session.
+    let docs_page=if args.len()==2 && args[0]=="--docs-page" {
+        if std::env::var("MULTI_BACKUP_DOCUMENTATION_CAPTURE").ok().as_deref()!=Some("1"){
+            eprintln!("Documentation capture needs a disposable profile and explicit opt-in");
+            std::process::exit(2);
+        }
+        let match_page=Page::ALL.into_iter().find(|p|p.label()==args[1]);
+        if match_page.is_none(){
+            eprintln!("Unknown Rust GUI documentation capture page");
+            std::process::exit(2);
+        }
+        match_page
+    }else{None};
     #[cfg(windows)]
     let software_rendering=windows_requires_software_renderer();
     #[cfg(windows)]
@@ -2289,7 +2325,9 @@ fn main() -> eframe::Result {
                 }
                 println!("MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe actual={renderer}");
             }
-            Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))
+            let mut app=NativeApp::new(&cc.egui_ctx,smoke);
+            if let Some(page)=docs_page{app.page=page;}
+            Ok(Box::new(app))
         }));
     if let Err(ref failure)=result {
         eprintln!("Native GUI startup failed: {failure}");

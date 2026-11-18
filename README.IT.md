@@ -1,5 +1,15 @@
 # Multi Backup
 
+## r218 — Cloud Drive, iCloud B-In/B-Out e applicazioni mobili
+
+**RC0 r217 installabile, CI verde:** [full CI #44246558178](https://github.com/desalvo/multi-backup/actions/runs/44246558178), SHA b085abc. Collaudati i quattro installer nativi, CephFS/RBD e tutti i gate richiesti; bundle CI RC0 non firmato, non ancora stable pubblica.
+
+**Novità r218 (Preview):** app native iOS/iPadOS e Android come frontend remoto HTTPS del server; UI del server responsive. Cloud Drive unificati: Dropbox, Google Drive, iCloud Drive, OneDrive, ownCloud, Nextcloud, Box; mount FUSE/WinFsp desktop (sola lettura default), browsing dal server e download, upload/delete previa autorizzazione esplicita. Plugin iCloud Drive B-In/B-Out su rclone con vero stream age e test trasporto sintetico. Il catalogo backup ora ha **34 plugin**, **16** con un perimetro READY limitato. Le nuove build e i cloud non bloccano la RC r217; certificazioni e firma mobile sono ancora aperte.
+
+Documenti: [matrice piattaforme](docs/PLATFORMS_R218_IT.md), [app mobili](docs/MOBILE_CLIENTS_R218_IT.md), [cloud explorer, mount e restore](docs/CLOUD_DRIVES_MOUNT_RESTORE_R218_IT.md), [iCloud](docs/ICLOUD_B_IN_OUT_R218_IT.md), [brochure correnti IT/EN](docs/brochures/README.md).
+
+
+
 ### r039+ Plugin Rust eseguibili (anteprima non certificata)
 
 Disponibili otto sorgenti generiche verso POSIX cifrato, ora anche CephFS, GlusterFS e Lustre con mount Linux RO, e sei restore verso directory nuova POSIX/NFS/SSHFS/CephFS/GlusterFS/Lustre su mount RW. Il plugin AFS separato realizza dump full/incremental diretti da vos a chunk age/zstd, da host locale o SSH agentless autenticato, e restore della catena verificata su volume AFS NUOVO, con conferma obbligatoria. Documentazione [IT](docs/PLUGIN_EXECUTORS_R039_IT.md) e [EN](docs/PLUGIN_EXECUTORS_R039_EN.md). Senza test su veri server AFS e mount cluster, keytab/localauth, ACL e failover non sono ancora certificati.

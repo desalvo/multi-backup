@@ -1,0 +1,134 @@
+name: Multi Backup r218 - current Rust UI manuals and brochures (IT EN)
+on:
+  push:
+    branches: ["feature/r218-mobile-clients"]
+    paths:
+      - "rust-desktop/src/main.rs"
+      - "rust-server/public/**"
+      - "scripts/ci/capture-rust-desktop-r218.py"
+      - "scripts/ci/capture-rust-server-r218.py"
+      - "scripts/build-current-manual-r218.py"
+      - "scripts/build-brochure-r218.py"
+      - ".github/workflows/brochures-r218.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: mb-current-rust-publications-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  capture-and-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Install real Rust GUI screenshot dependencies
+        run: |
+          set -euo pipefail
+          # GitHub-hosted Ubuntu 24 already ships headless Chrome system libs.
+          # Avoid Playwright's second apt transaction (slow/hanging mirrors).
+          # egui/eframe needs Mesa's software DRI ICD to render under Xvfb.\n          # egui/eframe uses native X11 + GL here, not GTK. GTK development
+          # headers pulled 100+ unnecessary packages and timed out on slow
+          # Ubuntu mirrors; install only the libraries this binary requires.
+          timeout 180 sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update -qq
+          timeout 900 sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=2 -o Acquire::http::Timeout=45 \
+            install -y --no-install-recommends \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libasound2-dev libgl1-mesa-dri xvfb xauth imagemagick
+          python3 -m pip install --timeout 30 --retries 2 \
+            'Pillow>=13,<14' 'reportlab>=4.2,<5' 'pypdf>=5,<7' 'playwright>=1.55,<2'
+          timeout 180 python3 -m playwright install --only-shell chromium
+      - name: Compile actual current native Rust desktop UI
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path rust-desktop/Cargo.toml
+          rust-desktop/target/debug/multi-backup-desktop --self-test
+      - name: Capture genuine Rust desktop pixels in private Xvfb session
+        run: |
+          set -euo pipefail
+          mkdir -p generated-screenshots
+          xvfb-run -a -s "-screen 0 1440x900x24" \
+            python3 scripts/ci/capture-rust-desktop-r218.py generated-screenshots
+      - name: Capture real Rust server HTML/CSS/JS with marked synthetic API fixture
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/capture-rust-server-r218.py generated-screenshots
+      - name: Rebuild complete IT and EN manuals and brochures from genuine UI captures
+        run: |
+          set -euo pipefail
+          mkdir -p generated-publications
+          python3 scripts/build-current-manual-r218.py \
+            --screenshots generated-screenshots --out generated-publications
+          python3 scripts/build-brochure-r218.py \
+            --screenshots generated-screenshots --out generated-publications
+          python3 - <<'PY'
+          from pathlib import Path
+          from pypdf import PdfReader
+          base=Path("generated-publications")
+          files=[
+              ("Multi-Backup-Manuale-Utente-IT.pdf",8,("Rust","xz","cloud")),
+              ("Multi-Backup-User-Manual-EN.pdf",8,("Rust","xz","cloud")),
+              ("Multi-Backup-Brochure-IT.pdf",5,("Rust","34","Cloud")),
+              ("Multi-Backup-Brochure-EN.pdf",5,("Rust","34","Cloud")),
+          ]
+          for filename,pages,markers in files:
+              file=base/filename
+              assert file.stat().st_size>20000,filename
+              pdf=PdfReader(str(file))
+              assert len(pdf.pages)>=pages,(filename,len(pdf.pages))
+              text=" ".join(p.extract_text() or "" for p in pdf.pages)
+              assert all(marker.lower() in text.lower() for marker in markers),(filename,markers)
+              embedded=0
+              for page in pdf.pages:
+                  resources=page.get("/Resources")
+                  if resources:
+                      resources=resources.get_object()
+                      xobjects=resources.get("/XObject")
+                      if xobjects:
+                          for ref in xobjects.get_object().values():
+                              if ref.get_object().get("/Subtype")=="/Image":
+                                  embedded+=1
+              minimum_images=4 if "Manual" in filename else 3
+              assert embedded>=minimum_images,(filename,embedded,"missing real UI screenshots")
+              print(filename,len(pdf.pages),"pages",embedded,"embedded raster images")
+          PY
+          printf '%s\n' "$GITHUB_SHA" > generated-publications/SOURCE_SHA
+          (cd generated-publications && sha256sum *.pdf > SHA256SUMS)
+      - name: Upload reproducible UI captures and rendered PDFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-backup-r218-current-rust-manuals-brochures-screenshots
+          path: |
+            generated-publications/
+            generated-screenshots/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Replace historical tracked PDFs only after all real UI acceptance passes
+        if: github.ref == 'refs/heads/feature/r218-mobile-clients'
+        run: |
+          set -euo pipefail
+          mkdir -p docs/screenshots-current docs/manuals docs/brochures
+          cp generated-screenshots/*.png docs/screenshots-current/
+          cp generated-publications/Multi-Backup-Manuale-Utente-IT.pdf docs/manuals/
+          cp generated-publications/Multi-Backup-User-Manual-EN.pdf docs/manuals/
+          cp generated-publications/Multi-Backup-Brochure-IT.pdf docs/brochures/
+          cp generated-publications/Multi-Backup-Brochure-EN.pdf docs/brochures/
+          printf '%s\n' "$GITHUB_SHA" > docs/screenshots-current/SOURCE_SHA
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots-current docs/manuals/Multi-Backup-Manuale-Utente-IT.pdf \
+            docs/manuals/Multi-Backup-User-Manual-EN.pdf \
+            docs/brochures/Multi-Backup-Brochure-IT.pdf \
+            docs/brochures/Multi-Backup-Brochure-EN.pdf
+          if ! git diff --cached --quiet; then
+            git commit -m "Refresh current Rust UI documentation with source-matched screenshots"
+            git push origin HEAD:feature/r218-mobile-clients
+          fi
+      - name: Certification boundary
+        run: |
+          echo 'Current Rust desktop pixels captured by actual egui app; server and mobile screenshots use REAL current frontend with synthetic API fixture.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Manuals and brochures regenerated IT/EN at source SHA; not a live-provider, physical mobile device or signed product acceptance.' >> "$GITHUB_STEP_SUMMARY"

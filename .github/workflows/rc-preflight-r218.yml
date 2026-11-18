@@ -1,0 +1,132 @@
+name: Multi Backup r218 - exact-source integrated unsigned RC gate
+on:
+  push:
+    branches: ["feature/r218-mobile-clients"]
+    paths:
+      - "rust/**"
+      - "rust-desktop/**"
+      - "rust-server/**"
+      - "scripts/ci/test-cloud-explorer-r218.sh"
+      - ".github/workflows/cloud-explorer-preview-r218.yml"
+      - ".github/workflows/rc-preflight-r218.yml"
+      - ".github/workflows/rust-focused.yml"
+      - ".github/workflows/software-readiness-r168.yml"
+      - ".github/workflows/native-installers-r217.yml"
+      - ".github/workflows/scoped-ready-r217.yml"
+      - ".github/workflows/scoped-ready-r218.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: mb-r218-exact-source-${{ github.ref }}
+  cancel-in-progress: false
+
+# A single SHA across all jobs. Never publish stable/early-release tags here.
+# Uses the native r217 installer *recipe* on r218 source; filenames still
+# identify the recipe, not an r217 source commit.
+jobs:
+  scoped-ready:
+    name: Exact-SHA bounded provider READY acceptance
+    uses: ./.github/workflows/scoped-ready-r218.yml
+
+  software:
+    name: Rust core/server/GUI, PG agents, OCI and Kind
+    uses: ./.github/workflows/software-readiness-r168.yml
+
+  cloud-recovery:
+    name: age/XZ ZIP64 authenticated cloud recovery with catalog-swap negative
+    uses: ./.github/workflows/cloud-explorer-preview-r218.yml
+
+  native-installers:
+    name: Actual Ubuntu, macOS Apple/Intel, Windows native install and self-test
+    uses: ./.github/workflows/native-installers-r217.yml
+
+  release-security:
+    name: RC policy regression; no publishing credentials
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install XML entity-expansion prevention dependency
+        run: python3 -m pip install 'defusedxml>=0.7.1,<1'
+      - name: Validate preflight and packaging security fail-closed cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m unittest discover -s tests -p test_rc_preflight_r217.py -v
+          python3 -m unittest discover -s tests -p test_rc_security_r214.py -v
+          python3 -m unittest discover -s tests -p test_platform_artifacts_r217.py -v
+          bash -n scripts/ci/test-cloud-explorer-r218.sh
+          node --check rust-server/public/app.js
+      - name: Restrict candidate to unsigned and never call stable release publisher
+        run: |
+          test "$GITHUB_REF" = "refs/heads/feature/r218-mobile-clients"
+          echo "Preview only: no production credentials, release/tag mutation or stable promotion." >> "$GITHUB_STEP_SUMMARY"
+
+  exact-source-gate:
+    name: Reject skipped / failed exact-SHA jobs; record candidate evidence
+    needs: [scoped-ready, software, cloud-recovery, native-installers, release-security]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require every family green; produce immutable readiness status
+        shell: bash
+        env:
+          READY_RESULT: ${{ needs.scoped-ready.result }}
+          SOFTWARE_RESULT: ${{ needs.software.result }}
+          CLOUD_RESULT: ${{ needs.cloud-recovery.result }}
+          INSTALL_RESULT: ${{ needs.native-installers.result }}
+          SECURITY_RESULT: ${{ needs.release-security.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 - <<'PY'
+          import json,os,pathlib,sys
+          names={
+              'bounded_ready':os.environ['READY_RESULT'],
+              'software_pg_agent_gui_k8s':os.environ['SOFTWARE_RESULT'],
+              'cloud_age_xz_zip64':os.environ['CLOUD_RESULT'],
+              'four_native_installers':os.environ['INSTALL_RESULT'],
+              'release_security':os.environ['SECURITY_RESULT'],
+          }
+          complete=all(value=='success' for value in names.values())
+          report={
+              'project':'multi-backup','branch':'feature/r218-mobile-clients',
+              'source_sha':os.environ['GITHUB_SHA'],
+              'run_id':os.environ['GITHUB_RUN_ID'],'jobs':names,
+              'unsigned_candidate_software_gate':complete,
+              'stable_release_certified':False,
+              'physical_three_host_ha_verified':False,
+              'live_cloud_provider_accounts_verified':False,
+              'provider_atomic_version_fencing_verified':False,
+              'apple_notarization_or_authenticode_verified':False,
+              'physical_mobile_device_verified':False
+          }
+          pathlib.Path('evidence/r218-exact-source-gate.json').write_text(
+              json.dumps(report,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
+              print('## r218 unsigned current-SHA acceptance',file=output)
+              print('Commit: '+os.environ['GITHUB_SHA'],file=output)
+              for name,value in names.items():
+                  print(f'- {name}: {value}',file=output)
+              print('Unsigned candidate software gate: '+('PASS' if complete else 'FAIL'),file=output)
+              print('Not a signed/stable release; live cloud, physical HA, notarization and mobile hardware remain unverified.',file=output)
+          if not complete:
+              sys.exit('DENIED: missing, skipped or failing current-SHA acceptance family')
+          PY
+      - name: Attach machine-readable evidence only if every job actually passed
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-backup-r218-exact-sha-unsigned-gate
+          path: evidence/r218-exact-source-gate.json
+          retention-days: 30
+          if-no-files-found: error

@@ -23,7 +23,7 @@ storage/
 └── .multi-backup-v1/
     ├── config.json.age              # segreto di deduplica, recipient e dimensione
     ├── manifests/<64-hex>.json.age   # uno per backup logico, tutti i namespace
-    ├── chunks/aa/bb/<64-hex>.age     # chunk zstd -> age, percorsi sicuri
+    ├── chunks/aa/bb/<64-hex>.age     # chunk con codec configurato -> age
     ├── stripes/<64-hex>.json.age     # mapping, lunghezze e checksum shard
     ├── parity/aa/<stripe-id>/{0,1}.age
     ├── quarantine/<id>-<nonce>.age
@@ -39,7 +39,7 @@ flowchart TD
  C --> D[HMAC-SHA256 col segreto dello storage]
  D --> E{Chunk verificato gia presente?}
  E -- si --> F[Riutilizza contenuto]
- E -- no --> G[Compressore Zstandard]
+ E -- no --> G[Codec selezionato: zstd xz gzip none]
  G --> H[Cifratura age X25519]
  H --> I[Oggetto immutabile aa/bb/hash.age]
  I --> J[Stripe Reed-Solomon 8+2]
@@ -54,7 +54,7 @@ flowchart TD
 | Confini del chunk | fissi | implementati; FastCDC/content-defined **da fare** |
 | Hash per deduplica | HMAC-SHA256 con segreto casuale da 256 bit | implementato |
 | Hash plaintext | SHA-256 nel manifest age | implementato |
-| Compressione | Zstandard, livello 3 | implementato |
+| Compressione | zstd 3 default; xz / LZMA2 6; gzip; none | implementato r218, collaudo CI in corso |
 | Cifratura | age X25519, singolo recipient per store | implementato in CLI sperimentale |
 | Stripe | 8 data shard + 2 parity shard | implementato, da validare E2E |
 | Spazio per parità | circa +25% rispetto agli 8 data shard | teorico; varia con dimensione e padding |
@@ -213,3 +213,10 @@ La documentazione storica r021–r025 sopra è superata dall'implementazione Rus
 **Repack automatico 8+2:** durante storage gc-collect, sotto lock, le stripe con chunk attivi e orfani vengono ricostruite con i soli chunk ancora usati. Le nuove due parità age vengono verificate e il nuovo indice cifrato è pubblicato PER ULTIMO. La vecchia stripe resta durante il grace period del sostituto (default 48h), e una GC successiva recupera gli oggetti orfani. Anche gli shard preparati senza un indice committato possono essere ripuliti dopo il periodo di sicurezza. gc-preview non esegue repack o cancellazione. Fault-injection con power loss, multiwriter e filesystem remoto rimangono requisiti RC non certificati.
 
 Dimensioni visualizzate: file, byte non compressi, zstd compressi, zstd compressi+deduplicati e nuovo contenuto incrementale; i numeri zstd NON coincidono con i byte ciphertext/parità effettivamente recuperabili. Guide aggiornate: [IT](OPERATIONS_R038_IT.md), [EN](OPERATIONS_R038_EN.md), [inventario](FEATURE_INVENTORY_R038.md).
+
+
+## r218 — compressione selezionabile
+
+Il codec è selezionato alla creazione dello storage tramite --compressor zstd|xz|gzip|none oppure dalla GUI Rust (sezione Storage chunk). La scelta è memorizzata nel file config.json.age, cifrato con age, e riguarda tutti i chunk immutabili dello stesso store. Gli storage creati prima del cambio rimangono leggibili come zstd grazie al default di deserializzazione. Per cambiare codec, creare un NUOVO storage: non ricomprimere in-place i vecchi chunk.
+
+XZ usa il contenitore .xz e l'algoritmo LZMA2, non il formato legacy LZMA1. Ogni codec mantiene age, checksum dei chunk, HMAC, Reed–Solomon e restore create-only. La gestione di grandi backup xz e tutte le architetture native richiedono ancora misure di consumo CPU/RAM e collaudi specifici.

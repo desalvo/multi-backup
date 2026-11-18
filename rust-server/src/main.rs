@@ -14,6 +14,7 @@ mod agent_api;
 mod cluster_worker;
 mod internal_db_backup;
 mod monitoring;
+mod cloud_api;
 use security::SecurityPolicy;
 use dav::DavConfig;
 use smtp::SmtpConfig;
@@ -39,6 +40,10 @@ struct AppConfig {
     password_hash: String,
     origin: String,
     security: SecurityPolicy,
+    cloud_config: Option<PathBuf>,
+    cloud_write_enabled: bool,
+    cloud_delete_enabled: bool,
+    cloud_recovery_enabled: bool,
     root: PathBuf,
     identity: Option<PathBuf>,
     immutable_vault_root: Option<PathBuf>,
@@ -859,12 +864,46 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         });
     }
     let security=SecurityPolicy::from_env(&origin)?;
+    // Cloud explorer config is an operator-owned secret, never user-supplied.
+    // The browser is read-only unless *both* an HTTPS-hardened gateway and
+    // explicit write/delete feature gates are enabled at server boot.
+    let cloud_config=std::env::var_os("MULTI_BACKUP_CLOUD_RCLONE_CONFIG").map(PathBuf::from);
+    let cloud_write_enabled=std::env::var("MULTI_BACKUP_CLOUD_WRITE_ENABLED")
+        .ok().as_deref()==Some("1");
+    let cloud_delete_enabled=std::env::var("MULTI_BACKUP_CLOUD_DELETE_ENABLED")
+        .ok().as_deref()==Some("1");
+    let cloud_recovery_enabled=std::env::var("MULTI_BACKUP_CLOUD_RECOVERY_ENABLED")
+        .ok().as_deref()==Some("1");
+    if cloud_recovery_enabled &&
+       (!security.hardened() || cloud_config.is_none() || identity.is_none()) {
+        return Err("Cloud recovery requires hardened HTTPS, rclone config and age identity".into());
+    }
+    if cloud_write_enabled || cloud_delete_enabled {
+        if !security.hardened() || cloud_config.is_none() ||
+           (cloud_delete_enabled && !cloud_write_enabled) {
+            return Err("Cloud writes/deletes require explicit config and hardened HTTPS security".into());
+        }
+    }
+    if let Some(ref cfg)=cloud_config {
+        let meta=fs::symlink_metadata(cfg)?;
+        if !meta.file_type().is_file(){return Err("Cloud rclone config must be ordinary file".into())}
+        #[cfg(unix)]{
+            use std::os::unix::fs::PermissionsExt;
+            if meta.permissions().mode()&0o077!=0 {
+                return Err("Cloud rclone config must be chmod 0600".into());
+            }
+        }
+        let configured=multi_backup_core::cloud_drive::configured(cfg)?;
+        if configured.is_empty(){return Err("No supported cloud remotes in private rclone config".into())}
+    }
     let smtp=SmtpConfig::from_env()?;
     let dav=DavConfig::from_env(&origin)?;
     let ldap=LdapConfig::from_env()?;
     let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
-        name,password_hash:hash,origin,security,root,exports,identity,immutable_vault_root,s3_vault_config,audit,smtp,dav,ldap,oidc,
+        name,password_hash:hash,origin,security,cloud_config,
+        cloud_write_enabled,cloud_delete_enabled,cloud_recovery_enabled,
+        root,exports,identity,immutable_vault_root,s3_vault_config,audit,smtp,dav,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
         failed_logins:Mutex::new(HashMap::new()),
@@ -879,6 +918,16 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/",get(dashboard))
         .route("/app.css",get(css)).route("/app.js",get(js))
         .route("/api/backups",get(backups))
+        .route("/api/cloud/remotes",get(cloud_api::remotes))
+        .route("/api/cloud/list",get(cloud_api::list))
+        .route("/api/cloud/download",get(cloud_api::download))
+        .route("/api/cloud/upload",post(cloud_api::upload)
+            .layer(cloud_api::upload_body_limit()))
+        .route("/api/cloud/delete",post(cloud_api::delete))
+        .route("/api/cloud/backup/inspect",post(cloud_api::inspect_backup)
+            .layer(cloud_api::recovery_body_limit()))
+        .route("/api/cloud/backup/restore",post(cloud_api::restore_backup)
+            .layer(cloud_api::recovery_body_limit()))
         .route("/api/s3-vault/status",get(s3_vault_status))
         .route("/api/s3-vault/backup",post(s3_vault_backup))
         .route("/api/s3-vault/verify",post(s3_vault_verify))
