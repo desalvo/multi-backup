@@ -223,18 +223,23 @@ pub const CATALOG: &[PluginDescriptor] = &[
         "READY ONLY: attested quiescent davfs2 RO mount regular-file bytes and native HTTPS Basic Auth conditional PUT encrypted archive + independent GET SHA256 + NEW local restore. NOT general plaintext remote restore, ETag/ACL/xattr fidelity, resumable large files, FUSE durability or production snapshot consistency")
         .with_restore_output_stage(PLAN)
         .with_ready_scope("webdav_authenticated_ro_davfs2_bytes_create_only_https_ciphertext_put_get; no plaintext-dav-restore/ACL/ETag/resumable"),
-    PluginDescriptor::new("nfs", "NFS v3+", DataKind::Files, PREVIEW, PREVIEW,
-        "Mounted filesystem plus server snapshot if available", "Read-only source and exact RW NFS mount B-Out encrypted create-only archive, checked via age readback; do not assume root or atomic snapshots"),
-    PluginDescriptor::new("smb", "CIFS / Samba", DataKind::Files, PREVIEW, PREVIEW,
-        "SMB durable handles or snapshots if available", "Authenticated SMB3 RO source, exact RW SMB3 mount encrypted B-Out and create-only recovery preview; ACL/ADS/Windows path semantics pending"),
+    PluginDescriptor::new("nfs", "NFSv3 genuine kernel mount byte-content", DataKind::Files, READY, READY,
+        "Authorized exact read-only NFSv3 client with external frozen source, complete ordinary-file bytes and incremental Rust age chunks",
+        "READY ONLY NFSv3 localhost real nfsd exported share with independently attested RO mount and quiescent regular-file FULL/INC, integrity check, create-only NEW RW mounted restore, ciphertext-only B-Out and independent age readback. NOT NFSv4/krb5, server snapshot, ACL/xattr/owner/mode fidelity, multi-host HA/fencing, production network resilience")
+        .with_ready_scope("nfsv3_kernel_export_attested_frozen_regular_file_full_inc_new_restore_ciphertext_bout; no nfs4/kerberos/ACL/xattr/ha"),
+    PluginDescriptor::new("smb", "Samba SMB3 authenticated mounted byte-content", DataKind::Files, READY, READY,
+        "Actual Samba SMB3 local daemon and authenticated kernel CIFS RO/RW mounts, stable ordinary-file bytes, age and new-path recovery",
+        "READY ONLY authenticated SMB3.0 real CIFS client source, frozen ordinary-file bytes FULL/INC, age-integrity, NEW RW restore and encrypted ciphertext archive B-Out readback. NOT Windows ADS/ACL, durable handle/snapshot, NTFS ACL/owner, remote multipath, production HA or multi-SMB dialect interoperability")
+        .with_ready_scope("samba_smb3_authenticated_cifs_attested_regular_file_full_inc_new_restore_ciphertext_bout; no ADS/ACL/snapshots/ha"),
     PluginDescriptor::new("cephfs", "CephFS regular-file content (genuine Rook client)", DataKind::Files, READY, PREVIEW,
         "Attested read-only CephFS snapshot/mount, only ordinary file content to age chunks and create-only directory recovery",
         "READY limited to bytes of regular files on an exact verified CephFS mount with independent frozen snapshot attestation; encrypted restore into a NEW directory. Mount-based encrypted B-Out remains Preview. No automatic MDS snapshot barrier, ACL/xattr/uid/gid/mode/empty directory fidelity through generic executor, physical fault/fencing or coordinated multi-FS consistency")
         .with_restore_output_stage(READY)
         .with_ready_scope("cephfs_snapshot_attested_mounted_regular_file_content_create_only; no atomic-multi-fs/metadata/physical-fault"),
-    PluginDescriptor::new("glusterfs", "GlusterFS", DataKind::Files, PREVIEW, PREVIEW,
-        "Mounted Gluster volume inventory with consistency epoch and preserved GFID/ACL/xattr metadata",
-        "Exact RW GlusterFS mount encrypted create-only B-Out preview; no direct brick writes, topology/ACL and replica health field validation still pending"),
+    PluginDescriptor::new("glusterfs", "GlusterFS live daemon and FUSE regular bytes", DataKind::Files, READY, READY,
+        "Actual GlusterFS server with single disposable volume, verified FUSE RO/RW client, frozen FULL/INC and age new-path recovery",
+        "READY ONLY real single-node GlusterFS volume with authenticated/authorized FUSE mounts, quiesced regular-file FULL/INC, create-only isolated restore and encrypted ciphertext B-Out with age readback. NOT GFID topology recreation, rebalance, distributed multi-node replicas, ACL/xattr/owner/mode fidelity, quorum, brick failure or HA")
+        .with_ready_scope("glusterfs_single_node_real_fuse_mount_attested_regular_file_full_inc_restore_ciphertext_bout; no GFID/multi-node/ACL/xattr/HA"),
     PluginDescriptor::new("lustre", "Lustre real Rocky9 MDT/OST regular-file bytes", DataKind::DistributedFilesystem, READY, READY,
         "Real genuine KVM Lustre MDT and OST quiesced file-content full to age; create-only restore and ciphertext archive mounted B-Out",
         "READY only: stable regular-file bytes on authorized real QEMU Lustre MDT/OST client, age encrypted FULL, byte-identical NEW path restore and create-only mounted ciphertext B-Out + age readback. NO coordinated online MDT/OST atomic snapshot, full UID/GID/ACL/xattr/mtime, stripe recreation, physical host failure, HA/fencing")
@@ -539,7 +544,7 @@ mod tests {
             if any_ready {assert!(matches!(plugin.id,
                 "posix"|"s3"|"cephfs"|"rbd"|"iscsi"|"mysql"|
                 "postgresql"|"oracle"|"anti-ransomware-vault"|
-                "webdav"|"ssh"|"sshfs"|"lustre"));}
+                "webdav"|"ssh"|"sshfs"|"lustre"|"nfs"|"smb"|"glusterfs"));}
         }
         let p=plan(Mode::Backup,"posix","posix").unwrap();
         assert_eq!(p.source_stage,Stage::Ready);
@@ -563,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn r216_scoped_ready_role_matrix_excludes_unsupported_vendor_write_operations(){
+    fn r217_scoped_ready_role_matrix_excludes_unsupported_vendor_write_operations(){
         let roles=[
             ("posix", [Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
             ("s3", [Stage::Ready,Stage::Preview,Stage::Preview,Stage::Planned]),
@@ -578,6 +583,9 @@ mod tests {
             ("ssh",[Stage::Ready,Stage::Planned,Stage::Planned,Stage::Planned]),
             ("sshfs",[Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
             ("lustre",[Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
+            ("nfs",[Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
+            ("smb",[Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
+            ("glusterfs",[Stage::Ready,Stage::Ready,Stage::Ready,Stage::Ready]),
         ];
         let mut actual=0;
         for entry in CATALOG {
@@ -617,8 +625,23 @@ mod tests {
             assert!(d.ready_scope.unwrap().contains("; no "));
             assert!(!plan(Mode::Backup,id,"posix").unwrap().executable);
         }
-        assert_eq!(CATALOG.iter().filter(|p|p.ready_scope.is_some()).count(),13);
+        assert_eq!(CATALOG.iter().filter(|p|p.ready_scope.is_some()).count(),16);
         assert!(plan(Mode::Restore,"posix","webdav").unwrap().executable==false);
+    }
+    #[test]
+    fn r217_nfs_smb_gluster_qualified_single_server_bytes_not_false_gpfs_native() {
+        for id in ["nfs","smb","glusterfs"]{
+            let d=find(id).unwrap();
+            let roles=[d.backup_input,d.backup_output,d.restore_input,d.restore_output];
+            assert_eq!(roles,[Stage::Ready;4]);
+            assert!(d.ready_scope.unwrap().contains("no "));
+            assert!(!plan(Mode::Backup,id,"posix").unwrap().executable);
+            assert!(!plan(Mode::Restore,"posix",id).unwrap().executable);
+            assert!(plan(Mode::Backup,id,"posix").unwrap().preview_executable);
+        }
+        assert_eq!(find("gpfs").unwrap().backup_input,Stage::Preview);
+        assert_eq!(find("gpfs").unwrap().backup_output,Stage::Preview);
+        assert!(find("gpfs").unwrap().ready_scope.is_none());
     }
     #[test]
     fn all_32_requested_input_plugins_and_25_outputs_are_listed() {
@@ -660,7 +683,7 @@ mod tests {
     fn mounted_ciphertext_output_is_distinct_from_plaintext_remote_restore(){
         for p in ["nfs","smb","webdav","cephfs","glusterfs","lustre","gpfs","sshfs"]{
             let d=find(p).unwrap();
-            assert_eq!(d.backup_output,if matches!(p,"webdav"|"sshfs"|"lustre"){Stage::Ready}else{Stage::Preview});
+            assert_eq!(d.backup_output,if matches!(p,"webdav"|"sshfs"|"lustre"|"nfs"|"smb"|"glusterfs"){Stage::Ready}else{Stage::Preview});
             assert_eq!(d.restore_input,if matches!(p,"webdav"|"sshfs"|"lustre"){Stage::Ready}else{Stage::Preview});
             let b=plan(Mode::Backup,"posix",p).unwrap();
             let r=plan(Mode::Restore,p,"posix").unwrap();
@@ -821,13 +844,15 @@ mod tests {
         assert!(!plan(Mode::Backup, "posix", vault.id).unwrap().executable);
     }
     #[test]
-    fn glusterfs_mounted_source_preview_is_not_a_certified_target() {
+    fn glusterfs_real_mounted_single_volume_ready_does_not_certify_replicated_cluster() {
         let d=find("glusterfs").unwrap();
         assert_eq!(d.kind, DataKind::Files);
-        assert_eq!(d.backup_input, Stage::Preview);
-        assert_eq!(d.backup_output, Stage::Preview);
-        assert_eq!(d.restore_input, Stage::Preview);
-        assert_eq!(d.restore_output, Stage::Preview);
+        assert_eq!(d.backup_input, Stage::Ready);
+        assert_eq!(d.backup_output, Stage::Ready);
+        assert_eq!(d.restore_input, Stage::Ready);
+        assert_eq!(d.restore_output, Stage::Ready);
+        assert!(d.ready_scope.unwrap().contains("single_node_real_fuse_mount"));
+        assert!(d.ready_scope.unwrap().contains("no GFID"));
         assert!(d.lvm_modes.is_empty());
         assert!(!plan(Mode::Backup, "glusterfs", "anti-ransomware-vault").unwrap().executable);
         assert!(!plan(Mode::Restore, "anti-ransomware-vault", "glusterfs").unwrap().executable);
