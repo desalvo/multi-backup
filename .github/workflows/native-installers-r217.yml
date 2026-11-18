@@ -96,10 +96,10 @@ jobs:
           if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Wrong source SHA' }
           if (!(Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) { throw 'Inno Setup compiler absent' }
           ./scripts/package-rust-windows-preview.ps1
-      - name: Silent install EXE at new path and launch real Windows D3D12 WARP GUI
+      - name: Silent install EXE at new path and launch real Windows D3D12 LLVMpipe GUI
         shell: pwsh
         env:
-          MULTI_BACKUP_FORCE_WARP: "1"
+          MULTI_BACKUP_FORCE_LLVMPIPE: "1"
         run: |
           $ErrorActionPreference='Stop'
           $installer=Join-Path $PWD 'installers/multi-backup-rust-preview-windows-x64.exe'
@@ -118,7 +118,7 @@ jobs:
           $guiLog=Join-Path $env:RUNNER_TEMP 'multi-backup-warp-installed-r217.log'
           & $gui --smoke *>&1 | Tee-Object -FilePath $guiLog
           if ($LASTEXITCODE -ne 0) { throw 'Native GUI launch failed' }
-          if (!(Select-String -LiteralPath $guiLog -Pattern 'MULTI_BACKUP_GUI_RENDERER=Windows_D3D12_WARP' -Quiet)) { throw 'Real WARP rendering not activated' }
+          if (!(Select-String -LiteralPath $guiLog -Pattern 'MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe' -Quiet)) { throw 'Real LLVMpipe rendering not activated' }
           if (!(Select-String -LiteralPath $guiLog -Pattern 'RUST_GUI_PAGE_SMOKE=About' -Quiet)) { throw 'Native GUI did not render all sidebar pages' }
           & $cli --version
           if ($LASTEXITCODE -ne 0) { throw 'CLI failed' }

@@ -2246,9 +2246,12 @@ fn main() -> eframe::Result {
     let smoke = args.len() == 1 && args[0] == "--smoke";
     #[cfg(windows)]
     let software_rendering=windows_requires_software_renderer();
+    #[cfg(windows)]
+    let mesa_software_rendering=std::env::var_os("MULTI_BACKUP_FORCE_LLVMPIPE").is_some() ||
+        (software_rendering && std::env::var_os("MULTI_BACKUP_FORCE_WARP").is_none());
     let mut options = eframe::NativeOptions {
         #[cfg(windows)]
-        renderer: eframe::Renderer::Wgpu,
+        renderer: if mesa_software_rendering { eframe::Renderer::Glow } else { eframe::Renderer::Wgpu },
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("Multi Backup · {VERSION}"))
             .with_inner_size([1320.0, 890.0])
@@ -2256,7 +2259,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     #[cfg(windows)]
-    if software_rendering {
+    if software_rendering && !mesa_software_rendering {
         // Request a real WARP D3D12 device; fail closed if no such adapter can
         // create a real surface. No synthetic PASS in software-only CI.
         options.wgpu_options=match windows_warp_wgpu(){
@@ -2271,7 +2274,23 @@ fn main() -> eframe::Result {
     // Do not turn graphical-runner failure into a fake green smoke.
     // Real backend errors are reported and returned to the caller.
     let result=eframe::run_native("Multi Backup", options,
-        Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))));
+        Box::new(move |cc| {
+            #[cfg(windows)]
+            if mesa_software_rendering {
+                use eframe::glow::HasContext;
+                // Verify the REAL native GL renderer, not only an environment
+                // variable, before counting the Windows GPU-less GUI as PASS.
+                let gl=cc.gl.as_ref().ok_or_else(||std::io::Error::other(
+                    "Cannot create a native Windows OpenGL context"))?;
+                let renderer=unsafe {gl.get_parameter_string(eframe::glow::RENDERER)};
+                if !renderer.to_ascii_lowercase().contains("llvmpipe") {
+                    return Err(std::io::Error::other(
+                        format!("Mesa software renderer required; actual OpenGL adapter={renderer}")).into());
+                }
+                println!("MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe actual={renderer}");
+            }
+            Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))
+        }));
     if let Err(ref failure)=result {
         eprintln!("Native GUI startup failed: {failure}");
     }
@@ -2390,8 +2409,8 @@ mod provider_gui_tests{
             matches!(p.backup_input,plugins::Stage::Ready) ||
             matches!(p.backup_output,plugins::Stage::Ready)).collect::<Vec<_>>();
         assert_eq!(ready.iter().map(|p|p.id).collect::<Vec<_>>(),
-            vec!["posix","s3","webdav","cephfs","lustre","rbd","iscsi","mysql",
-                 "postgresql","oracle","ssh","sshfs","anti-ransomware-vault"]);
+            vec!["posix","s3","webdav","nfs","smb","cephfs","glusterfs","lustre","rbd",
+                 "iscsi","mysql","postgresql","oracle","ssh","sshfs","anti-ransomware-vault"]);
         assert!(ready.iter().all(|p|p.ready_scope.is_some()),
             "Every visible Ready label must reveal the exact supported scope");
         assert!(plugins::CATALOG.iter().filter(|p|p.ready_scope.is_none())
