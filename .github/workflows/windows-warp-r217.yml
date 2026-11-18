@@ -1,0 +1,75 @@
+name: Multi Backup r217 - real Windows D3D12 WARP GUI and installed native Rust Inno smoke
+on:
+  push:
+    branches: ["feature/r217-win-warp-installable-rc"]
+    paths:
+      - "rust-desktop/**"
+      - "scripts/package-rust-windows-preview.ps1"
+      - "packaging/windows/rust-native-preview.iss"
+      - ".github/workflows/windows-warp-r217.yml"
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-r217-windows-warp-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-windows-warp:
+    name: Actual WARP D3D12 adapter, installed Windows Rust GUI, 10 pages and age backup/restore
+    runs-on: windows-2025
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native Rust Windows GUI, encrypted CLI and Inno installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Wrong source SHA' }
+          ./scripts/package-rust-windows-preview.ps1
+      - name: Install actual Inno EXE at new destination and exercise full Windows software GUI
+        shell: pwsh
+        env:
+          MULTI_BACKUP_FORCE_WARP: "1"
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $PWD 'installers/multi-backup-rust-preview-windows-x64.exe'
+          if (!(Test-Path $installer)) { throw 'Native installer not produced' }
+          $dest=Join-Path $env:RUNNER_TEMP 'MultiBackupR217FreshInstall'
+          if (Test-Path $dest) { throw 'Non-disposable installation path' }
+          $args="/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=$dest"
+          $process=Start-Process -FilePath $installer -ArgumentList $args -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installation error $($process.ExitCode)" }
+          $gui=Join-Path $dest 'MultiBackupRust.exe'
+          $cli=Join-Path $dest 'bin/multi-backup-native.exe'
+          $age=Join-Path $dest 'bin/age.exe'
+          foreach ($path in @($gui,$cli,$age)) { if (!(Test-Path $path)) { throw "Missing installed binary: $path" } }
+          & $gui --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Installed GUI self-test failed' }
+          $logFile=Join-Path $env:RUNNER_TEMP 'multi-backup-warp-gui-r217.log'
+          & $gui --smoke *>&1 | Tee-Object -FilePath $logFile
+          if ($LASTEXITCODE -ne 0) { throw 'Actual WARP GPU GUI failed to render Windows window' }
+          if (!(Select-String -LiteralPath $logFile -Pattern 'MULTI_BACKUP_GUI_RENDERER=Windows_D3D12_WARP' -Quiet)) {
+            throw 'WARP native adapter did not initialize; refusing a synthetic GUI PASS'
+          }
+          if (!(Select-String -LiteralPath $logFile -Pattern 'RUST_GUI_PAGE_SMOKE=About' -Quiet)) {
+            throw 'Native GUI never rendered/navigated every page'
+          }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed native Rust CLI failed' }
+          & $age --version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed actual age helper failed' }
+          $sha=(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  $([IO.Path]::GetFileName($installer))" | Set-Content -Encoding ascii SHA256SUMS-win-r217.txt
+          Set-Content -Encoding ascii -Path SOURCE_SHA-win-r217.txt -Value $env:GITHUB_SHA
+          Write-Output 'PASS actual installed Windows native GUI with software D3D12 WARP, ten UI pages, Rust CLI, age'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r217-windows-x64-native-inno-real-warp
+          path: |
+            installers/multi-backup-rust-preview-windows-x64.exe
+            multi-backup-rust-preview-windows-x64.zip
+            SHA256SUMS-win-r217.txt
+            SOURCE_SHA-win-r217.txt
+          retention-days: 14
+          if-no-files-found: error
