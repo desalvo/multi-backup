@@ -19,7 +19,7 @@ SOURCES={
         ("SOURCE_SHA-mac-arm64.txt", "-arm64.dmg", ".dmg.sha256"),
     "rc217-macos-x86_64-adhoc-dmg":
         ("SOURCE_SHA-mac-x86_64.txt", "-x86_64.dmg", ".dmg.sha256"),
-    "rc217-windows-x64-inno-unsigned":
+    "rc217-windows-x64-unsigned-inno":
         ("SOURCE_SHA-win-r217.txt", ".exe", "SHA256SUMS-win-r217.txt"),
 }
 HASHLINE=re.compile(r"^([0-9a-f]{64})  ([^\x00\n\r/\\]+)$")
@@ -53,7 +53,7 @@ def verify(root:Path, sha:str)->list[dict]:
         nested=folder/"installers"
         for item in folder.iterdir():
             if item.is_symlink() or (item.is_dir() and (
-                name!="rc217-windows-x64-inno-unsigned" or item.name!="installers")):
+                name!="rc217-windows-x64-unsigned-inno" or item.name!="installers")):
                 raise UntrustedPackage(f"Untrusted nested installer path: {item.name}")
         if nested.exists():
             if nested.is_symlink() or not nested.is_dir():

@@ -17,7 +17,7 @@ def create_fixture(root:Path):
         folder.mkdir(parents=True,exist_ok=False)
         (folder/source).write_text(SHA+"\n")
         name=group+suffix
-        if group=="rc217-windows-x64-inno-unsigned":
+        if group=="rc217-windows-x64-unsigned-inno":
             (folder/"installers").mkdir()
             output=folder/"installers"/name
         else:
@@ -59,14 +59,14 @@ class InstallerProof(unittest.TestCase):
         with TemporaryDirectory() as temp:
             root=Path(temp)
             create_fixture(root)
-            win=root/"rc217-windows-x64-inno-unsigned"
+            win=root/"rc217-windows-x64-unsigned-inno"
             (win/"installers"/"unexpected.txt").write_text("untrusted")
             with self.assertRaises(art.UntrustedPackage):
                 art.verify(root,SHA)
         with TemporaryDirectory() as temp:
             root=Path(temp)
             create_fixture(root)
-            folder=root/"rc217-windows-x64-inno-unsigned"
+            folder=root/"rc217-windows-x64-unsigned-inno"
             (folder/"extra").mkdir()
             with self.assertRaises(art.UntrustedPackage):
                 art.verify(root,SHA)
@@ -75,7 +75,7 @@ class InstallerProof(unittest.TestCase):
         with TemporaryDirectory() as temp:
             root=Path(temp)
             create_fixture(root)
-            path=root/"rc217-windows-x64-inno-unsigned"/"SOURCE_SHA-win-r217.txt"
+            path=root/"rc217-windows-x64-unsigned-inno"/"SOURCE_SHA-win-r217.txt"
             path.write_text("b"*40)
             with self.assertRaises(art.UntrustedPackage):
                 art.verify(root,SHA)
