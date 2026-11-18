@@ -93,3 +93,18 @@ select{color:#f3f6ff;background:#0a1f49;border:1px solid #7286bd;
   input,select,textarea{font-size:16px}
   .mobile-nav{margin:-2px 0 6px}
 }
+
+/* r218 universal remote cloud drive explorer */
+.cloud-files{display:flex;flex-direction:column;gap:6px;margin:12px 0;
+  min-width:0;max-height:min(60vh,480px);overflow:auto}
+.cloud-entry{display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  padding:9px 10px;background:#0d214e;border:1px solid #465e98;border-radius:9px}
+.cloud-entry span{flex:1;min-width:130px;overflow-wrap:anywhere}
+.cloud-entry button{min-height:44px}
+#cloud-drives label{min-width:180px}
+#cloud-drives select{min-width:150px}
+@media(max-width:480px){
+  .cloud-entry span{flex-basis:100%}
+  #cloud-drives label{flex-basis:100%}
+  .cloud-entry button{flex:1 1 44%}
+}

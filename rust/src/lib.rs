@@ -14,6 +14,8 @@ pub mod remote_restore;
 pub mod updater;
 pub mod dropbox_hash;
 pub mod dropbox_client;
+pub mod icloud_drive;
+pub mod cloud_drive;
 pub mod github_client;
 pub mod vault;
 pub mod immutable_vault;

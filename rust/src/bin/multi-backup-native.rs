@@ -2,7 +2,7 @@
 //! the primary development path; Python data migration is optional.
 #[cfg(target_os="linux")]
 use multi_backup_core::{iscsi_snapshot, iscsi_new_lun, pve_media, pve_guest_restore, pbs_pve_guest_restore, pbs_native};
-use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, github_client, journal, remote_restore, updater, vault, immutable_vault, worm_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, vmware_ovf, ovirt_imageio, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
+use multi_backup_core::{portable, chunk_store, archive, archive_management, checkpoint_audit, dropbox_client, dropbox_hash, icloud_drive, cloud_drive, github_client, journal, remote_restore, updater, vault, immutable_vault, worm_vault, s3_vault, plugins, virtualization_inventory, hypervisor_inventory, vmware_ovf, ovirt_imageio, plugin_executor, mounted_output, webdav_output, ssh_input, oracle_rman, rbd_native, fs_metadata_archive, backup_chain, account_restore, scheduler, afs_volume, database, execution_policy::ExecutionLimits};
 use zeroize::Zeroizing;
 use std::io::{self, Read};
 use std::{collections::BTreeMap, env, path::{Path,Component}, process};
@@ -22,6 +22,13 @@ fn usage() -> &'static str {
        multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount EXACT_MOUNT --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins mounted-restore --input MOUNT_PROVIDER --mount EXACT_MOUNT --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_DIR [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins s3-object-backup --config S3.json --object-key KEY --version-id VERSION --sha256 RAW_SHA256 --root EXISTING_CHUNK_STORE --identity AGE_ID --label LABEL [--top-namespace NS] [--json] (B-In versioned S3 / Ceph RGW / RustFS -> age chunk store)\n\
+       multi-backup-native plugins cloud-list --config PRIVATE_RCLONE.conf --provider dropbox|google-drive|icloud|onedrive|owncloud|nextcloud|box [--directory PATH] [--json]
+       multi-backup-native plugins cloud-download --config PRIVATE_RCLONE.conf --provider PROVIDER --path FILE --destination NEW_FILE [--json]
+       multi-backup-native plugins cloud-upload --config PRIVATE_RCLONE.conf --provider PROVIDER --directory PATH --file EXISTING_LOCAL_FILE [--json] (create unique new file, <=8MiB)
+       multi-backup-native plugins cloud-delete --config PRIVATE_RCLONE.conf --provider PROVIDER --path EXACT_FILE --expected-sha256 SHA256 --confirm DELETE:PROVIDER:PATH [--json] (explicit destructive operation)
+       multi-backup-native plugins cloud-mount --config PRIVATE_RCLONE.conf --provider PROVIDER --mountpoint EMPTY_DIR [--access ro|rw] [--confirm-rw EXACT_PROVIDER] (foreground FUSE/WinFsp; RO by default)
+       multi-backup-native plugins icloud-import --config PRIVATE_RCLONE.conf --remote icloud:path/file --recipient age1PUBLIC --expected-sha256 SHA256 --destination NEW.age [--max-bytes N] [--json] (B-In single pinned iCloud Drive file; age stream)
+       multi-backup-native plugins icloud-upload --config PRIVATE_RCLONE.conf --remote-parent icloud:NewBackup --archive VERIFIED.age --identity AGE_PRIVATE --expected-sha256 SHA256 [--max-bytes N] [--json] (B-Out unique encrypted object + remote SHA256 readback; PREVIEW)
        multi-backup-native plugins dropbox-upload --archive VERIFIED.tar.gz.age --remote-path /New/Archive.tar.gz.age [--json] (B-Out Dropbox: create-only encrypted upload)\n\
        multi-backup-native plugins dropbox-backup --source LOCAL_DIR --remote-path /New/Archive.tar.gz.age --recipient AGE_PUBLIC [--json] (B-Out encrypted, no plaintext archive)\n\
        multi-backup-native plugins virtualization-inventory --config-json OWNER_ONLY_PVE_OR_PBS.json [--json] (READ-ONLY; no backup/restore)\n\
@@ -522,6 +529,101 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             flags.get("--top-namespace").copied().unwrap_or(""))?;
         if json {println!("{}",serde_json::to_string_pretty(&result)?);}
         else {println!("S3 versioned object imported into verified age chunks: {}",result.id);}
+        return Ok(());
+    }
+    if family=="plugins" && matches!(command,
+        "cloud-list"|"cloud-download"|"cloud-upload"|"cloud-delete"|"cloud-mount"){
+        if password_stdin {
+            return Err("Cloud credentials are supplied through externally configured private rclone.conf only".into());
+        }
+        let provider=required(&flags,"--provider")?;
+        let cfg=Path::new(required(&flags,"--config")?);
+        let result=match command {
+            "cloud-list"=>{
+                accepted(&flags,&["--config","--provider","--directory"])?;
+                cloud_drive::list(cfg,provider,flags.get("--directory").copied().unwrap_or(""))?
+            },
+            "cloud-download"=>{
+                accepted(&flags,&["--config","--provider","--path","--destination"])?;
+                let data=cloud_drive::read(cfg,provider,required(&flags,"--path")?,64*1024*1024)?;
+                let target=Path::new(required(&flags,"--destination")?);
+                let parent=target.parent().ok_or("No destination parent")?;
+                let meta=std::fs::symlink_metadata(parent)?;
+                if !meta.is_dir() || target.exists(){return Err("Cloud download destination must be new inside an existing directory".into());}
+                let mut tmp=tempfile::NamedTempFile::new_in(parent)?;
+                #[cfg(unix)]{
+                    use std::os::unix::fs::PermissionsExt;
+                    tmp.as_file().set_permissions(std::fs::Permissions::from_mode(0o600))?;
+                }
+                use std::io::Write;
+                tmp.write_all(&data)?;
+                tmp.as_file().sync_all()?;
+                std::fs::hard_link(tmp.path(),target)?;
+                serde_json::json!({"provider":provider,"downloaded_to":target,"bytes":data.len(),
+                     "sha256":hex::encode(Sha256::digest(&data))})
+            },
+            "cloud-upload"=>{
+                accepted(&flags,&["--config","--provider","--directory","--file"])?;
+                let source=Path::new(required(&flags,"--file")?);
+                let info=std::fs::symlink_metadata(source)?;
+                if !info.file_type().is_file() || info.len()==0 || info.len()>8*1024*1024 {
+                    return Err("Cloud upload requires regular existing file <=8 MiB".into());
+                }
+                let data=std::fs::read(source)?;
+                let filename=source.file_name().and_then(|s|s.to_str()).ok_or("Invalid source filename")?;
+                cloud_drive::write_new(cfg,provider,flags.get("--directory").copied().unwrap_or(""),
+                    filename,&data)?
+            },
+            "cloud-delete"=>{
+                accepted(&flags,&["--config","--provider","--path","--expected-sha256","--confirm"])?;
+                let path=required(&flags,"--path")?;
+                let expected=format!("DELETE:{provider}:{path}");
+                if required(&flags,"--confirm")?!=expected{
+                    return Err("Cloud delete requires exact typed DELETE:provider:path confirmation".into());
+                }
+                cloud_drive::delete_file(cfg,provider,path,required(&flags,"--expected-sha256")?,
+                                         &format!("DELETE {provider}:{path}"))?
+            },
+            "cloud-mount"=>{
+                accepted(&flags,&["--config","--provider","--mountpoint","--access","--confirm-rw"])?;
+                let rw=match flags.get("--access").copied().unwrap_or("ro"){
+                    "ro"=>false,"rw"=>true,_=>return Err("Mount access must be ro or rw".into())};
+                if rw && flags.get("--confirm-rw").copied()!=Some(provider){
+                    return Err("Writable mount requires --confirm-rw matching the exact provider".into());
+                }
+                cloud_drive::mount_foreground(cfg,provider,
+                    Path::new(required(&flags,"--mountpoint")?),rw)?;
+                serde_json::json!({"mounted":false,"stopped":true,"provider":provider,"read_write":rw})
+            },
+            _=>unreachable!(),
+        };
+        if json{println!("{}",serde_json::to_string_pretty(&result)?);}
+        else{println!("{}",result);}
+        return Ok(());
+    }
+    if family=="plugins" && matches!(command,"icloud-import"|"icloud-upload"){
+        if password_stdin {return Err("iCloud rclone Apple authentication uses an external owner-only config; no passwords on CLI".into());}
+        let cap:u64=flags.get("--max-bytes").copied().unwrap_or("8589934592").parse()?;
+        let config=Path::new(required(&flags,"--config")?);
+        let expected=required(&flags,"--expected-sha256")?;
+        let receipt=if command=="icloud-import" {
+            accepted(&flags,&["--config","--remote","--recipient","--expected-sha256",
+                              "--destination","--max-bytes"])?;
+            let _=plugins::plan(plugins::Mode::Backup,"icloud","posix")?;
+            icloud_drive::import_file(config,required(&flags,"--remote")?,
+                required(&flags,"--recipient")?,expected,
+                Path::new(required(&flags,"--destination")?),cap)?
+        } else {
+            accepted(&flags,&["--config","--remote-parent","--archive","--identity",
+                              "--expected-sha256","--max-bytes"])?;
+            let _=plugins::plan(plugins::Mode::Backup,"posix","icloud")?;
+            icloud_drive::upload_ciphertext(config,required(&flags,"--remote-parent")?,
+                Path::new(required(&flags,"--archive")?),
+                Path::new(required(&flags,"--identity")?),expected,cap)?
+        };
+        if json {println!("{}",serde_json::to_string_pretty(&receipt)?);}
+        else{println!("iCloud Drive {} preview verified: {}",
+            receipt["direction"],receipt["ciphertext_sha256"]);}
         return Ok(());
     }
     if family=="plugins" && matches!(command,"dropbox-upload"|"dropbox-backup"){

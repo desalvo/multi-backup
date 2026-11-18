@@ -3,6 +3,7 @@
 <main><nav class="mobile-nav" aria-label="Sezioni della console"><label for="section-jump">Sezione <select id="section-jump">
 <option value="archives">Archivi e ripristino</option>
 <option value="cluster-overview">Cluster e agenti</option>
+<option value="cloud-drives">Cloud Drive</option>
 <option value="monitoring">Monitoraggio</option>
 <option value="internal-db">Database e HA</option>
 <option value="immutable-vault">Vault anti-ransomware</option>
@@ -26,6 +27,23 @@ un filesystem locale resta assegnato soltanto alla replica che lo possiede.</p>
 <div><h3>Repliche e storage</h3><div id="cluster-replicas"></div><div id="cluster-storage"></div></div>
 <div><h3>Job e agenti</h3><div id="cluster-jobs"></div><div id="cluster-agents"></div></div>
 </div>
+</section>
+<section id="cloud-drives">
+<div class="controls"><h2>Cloud Drive · esplora e gestisci</h2>
+<button id="cloud-refresh" type="button">Ricarica drive</button></div>
+<p class="muted">I cloud remoti sono configurati esclusivamente sul server. Download e navigazione sono disponibili in sola lettura; upload e cancellazione richiedono attivazione amministrativa e autorizzazione offline. La lista dei backup cifrati non equivale ad accesso ai loro contenuti in chiaro.</p>
+<div class="controls">
+<label>Provider<select id="cloud-provider" aria-label="Cloud provider"></select></label>
+<label>Cartella corrente<input id="cloud-dir" type="text" maxlength="768" value="" placeholder="radice"></label>
+<button id="cloud-open" type="button">Apri</button>
+<button id="cloud-up" type="button">Cartella superiore</button>
+</div>
+<p id="cloud-status" class="muted" role="status"></p>
+<div id="cloud-files" role="region" aria-label="File del cloud" class="cloud-files"></div>
+<div class="controls"><label>Upload di un nuovo file (max 8 MiB)
+<input type="file" id="cloud-upload-file"></label>
+<button id="cloud-upload" type="button" disabled>Carica nuovo</button></div>
+<p class="muted">L'upload aggiunge un identificatore casuale al nome, senza sostituire file preesistenti. Per la cancellazione di un singolo file occorre confermare il percorso esatto e il suo SHA-256; la cancellazione è disabilitata per default.</p>
 </section>
 <section id="monitoring">
 <div class="controls"><h2>Monitoraggio e API di stato</h2>

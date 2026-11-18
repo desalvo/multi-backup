@@ -477,3 +477,117 @@ if (sectionJump) {
     target.scrollIntoView({behavior: reduceMotion ? "auto" : "smooth", block:"start"});
   });
 }
+
+/* r218 server-side cloud explorer. The backend owns credentials and permissions. */
+const cloudProvider=document.getElementById("cloud-provider");
+const cloudDir=document.getElementById("cloud-dir");
+const cloudStatus=document.getElementById("cloud-status");
+const cloudFiles=document.getElementById("cloud-files");
+const cloudUpload=document.getElementById("cloud-upload");
+const cloudUploadFile=document.getElementById("cloud-upload-file");
+let cloudCaps={write_enabled:false,delete_enabled:false};
+function cloudQuery(path){
+  return new URLSearchParams({provider:cloudProvider.value,path}).toString();
+}
+function cloudHeaders(){
+  const result={"Content-Type":"application/json","X-CSRF-Token":csrf};
+  const token=document.getElementById("recovery-authorization").value.trim();
+  if(token) result["X-Multi-Backup-Recovery-Authorization"]=token;
+  return result;
+}
+async function cloudRefresh(){
+  cloudStatus.textContent="Lettura provider configurati...";
+  const resp=await fetch("/api/cloud/remotes",{credentials:"same-origin"});
+  if(!resp.ok){cloudStatus.textContent="Nessun cloud configurato sul server";return;}
+  const info=await resp.json();
+  cloudCaps=info;
+  const before=cloudProvider.value;
+  cloudProvider.replaceChildren();
+  for(const provider of info.providers||[]){
+    const opt=document.createElement("option");opt.value=provider;
+    opt.textContent=provider.replaceAll("-"," ");cloudProvider.append(opt);
+  }
+  if([...cloudProvider.options].some(o=>o.value===before))cloudProvider.value=before;
+  cloudUpload.disabled=!cloudCaps.write_enabled;
+  if(!cloudProvider.value){cloudFiles.replaceChildren();cloudStatus.textContent="Nessun cloud approvato";return;}
+  await cloudList();
+}
+async function cloudList(){
+  if(!cloudProvider.value)return;
+  cloudStatus.textContent="Lettura directory in corso...";
+  cloudFiles.replaceChildren();
+  const url="/api/cloud/list?"+cloudQuery(cloudDir.value.trim());
+  const response=await fetch(url,{credentials:"same-origin"});
+  if(!response.ok){cloudStatus.textContent="Directory non disponibile o permessi insufficienti";return;}
+  const payload=await response.json();
+  const items=payload.entries||[];
+  cloudStatus.textContent=items.length+" elementi · "+cloudProvider.value+" / "+cloudDir.value;
+  for(const file of items){
+    const full=[cloudDir.value.trim(),file.name].filter(Boolean).join("/");
+    const row=document.createElement("div");row.className="cloud-entry";
+    const name=document.createElement("span");
+    name.textContent=(file.is_dir?"📁 ":"📄 ")+file.name;
+    row.append(name);
+    if(file.size!=null){const size=document.createElement("small");size.className="muted";size.textContent=file.size+" B";row.append(size);}
+    const action=document.createElement("button");action.type="button";
+    action.textContent=file.is_dir?"Apri cartella":"Scarica";
+    action.addEventListener("click",()=>{
+      if(file.is_dir){cloudDir.value=full;cloudList().catch(e=>cloudStatus.textContent=e.message);}
+      else window.location.assign("/api/cloud/download?"+cloudQuery(full));
+    });
+    row.append(action);
+    if(!file.is_dir && cloudCaps.delete_enabled){
+      const remove=document.createElement("button");
+      remove.type="button";remove.textContent="Elimina…";
+      remove.addEventListener("click",async()=>{
+        const hash=window.prompt("SHA-256 esatto del file remoto da eliminare (64 caratteri):","");
+        if(!hash)return;
+        const expected="DELETE "+cloudProvider.value+":"+full;
+        const confirmation=window.prompt("Conferma digitando ESATTAMENTE:\n"+expected,"");
+        if(confirmation!==expected)return;
+        const response=await fetch("/api/cloud/delete",{method:"POST",
+          credentials:"same-origin",headers:cloudHeaders(),
+          body:JSON.stringify({provider:cloudProvider.value,path:full,
+            expected_sha256:hash,confirmation})});
+        cloudStatus.textContent=response.ok?"File eliminato (verifica non atomica): "+full:
+          "Eliminazione negata: token, permessi o file cambiato";
+        if(response.ok)await cloudList();
+      });
+      row.append(remove);
+    }
+    cloudFiles.append(row);
+  }
+}
+async function cloudUploadFileAction(){
+  const file=cloudUploadFile.files?.[0];
+  if(!file||file.size===0||file.size>8*1024*1024){
+    cloudStatus.textContent="Selezionare un file da 1 a 8 MiB";return;
+  }
+  cloudUpload.disabled=true;cloudStatus.textContent="Caricamento del nuovo oggetto...";
+  try{
+    const bytes=new Uint8Array(await file.arrayBuffer());let binary="";
+    for(let i=0;i<bytes.length;i+=16384){
+      binary+=String.fromCharCode(...bytes.subarray(i,i+16384));
+    }
+    const response=await fetch("/api/cloud/upload",{method:"POST",
+      credentials:"same-origin",headers:cloudHeaders(),
+      body:JSON.stringify({provider:cloudProvider.value,directory:cloudDir.value.trim(),
+      filename:file.name,content_base64:btoa(binary)})});
+    cloudStatus.textContent=response.ok?
+      "Nuovo file creato e verificato. Non è stata sovrascritta una destinazione scelta dal client.":
+      "Upload negato o verifica remota fallita";
+    if(response.ok)await cloudList();
+  }catch(_){cloudStatus.textContent="Upload cloud non disponibile";}
+  finally{cloudUpload.disabled=!cloudCaps.write_enabled;}
+}
+document.getElementById("cloud-refresh").addEventListener("click",()=>
+  cloudRefresh().catch(e=>cloudStatus.textContent=e.message));
+document.getElementById("cloud-open").addEventListener("click",()=>
+  cloudList().catch(e=>cloudStatus.textContent=e.message));
+document.getElementById("cloud-up").addEventListener("click",()=>{
+  cloudDir.value=cloudDir.value.trim().split("/").slice(0,-1).join("/");
+  cloudList().catch(e=>cloudStatus.textContent=e.message);
+});
+cloudProvider.addEventListener("change",()=>{cloudDir.value="";cloudList().catch(e=>cloudStatus.textContent=e.message);});
+cloudUpload.addEventListener("click",()=>cloudUploadFileAction());
+cloudRefresh().catch(e=>cloudStatus.textContent=e.message);

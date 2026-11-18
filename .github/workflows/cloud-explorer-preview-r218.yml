@@ -1,0 +1,47 @@
+name: Multi Backup r218 - optional universal cloud explorer and POSIX mount preview
+on:
+  push:
+    branches: ["feature/r218-mobile-clients"]
+    paths:
+      - "rust/src/cloud_drive.rs"
+      - "rust/src/icloud_drive.rs"
+      - "rust/src/lib.rs"
+      - "rust/src/bin/multi-backup-native.rs"
+      - "rust/src/plugins.rs"
+      - "rust-server/src/cloud_api.rs"
+      - "rust-server/src/main.rs"
+      - "rust-server/public/**"
+      - "scripts/ci/test-cloud-explorer-r218.sh"
+      - ".github/workflows/cloud-explorer-preview-r218.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-cloud-explorer-r218-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cloud-adapter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate cloud test and browser syntax
+        run: |
+          set -euo pipefail
+          bash -n scripts/ci/test-cloud-explorer-r218.sh
+          node --check rust-server/public/app.js
+      - name: Compile Rust core and cloud security tests
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml cloud_drive -- --nocapture
+          cargo test --manifest-path rust/Cargo.toml icloud_drive -- --nocapture
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+      - name: Run CLI local synthetic cloud matrix
+        run: bash scripts/ci/test-cloud-explorer-r218.sh
+      - name: Compile actual Rust web server with authenticated cloud routes
+        run: cargo test --manifest-path rust-server/Cargo.toml cloud_api -- --nocapture
+      - name: Keep cloud adapter in Preview unless real backend E2E passes
+        if: success()
+        run: |
+          echo 'PASS: Rust cloud core, CLI, gateway routes and synthetic rclone. NOT an actual account/provider test.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This optional cloud CI is not part of the r217 exact-SHA RC gate.' >> "$GITHUB_STEP_SUMMARY"
