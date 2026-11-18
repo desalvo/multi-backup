@@ -1,0 +1,107 @@
+name: Multi Backup r218 - cloud mounts, iCloud Swift, genuine Rust server CRUD demo
+on:
+  push:
+    branches: ["feature/r218-icloud-bidir-server-demo"]
+    paths:
+      - "rust/src/plugins.rs"
+      - "rust-server/**"
+      - "scripts/cloud/**"
+      - "scripts/macos/multi-backup-icloud*"
+      - "tests/test_cloud_mount_r218.py"
+      - "deploy/cloud/**"
+      - ".github/workflows/cloud-bridge-r218.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-r218-cloud-branch
+  cancel-in-progress: true
+jobs:
+  cloud-security:
+    name: Cloud mount capability/path denial and CLI syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify explicit cloud restrictions
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_cloud_mount_r218.py -v
+          bash -n scripts/macos/multi-backup-icloud.sh
+          python3 -m py_compile scripts/cloud/cloud_mount.py
+  icloud-macos:
+    name: Genuine macOS Swift File Provider bridge compile and path safety
+    runs-on: macos-15
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift compile and negative path testing, no Apple account required
+        run: |
+          set -euo pipefail
+          swiftc -O scripts/macos/multi-backup-icloud.swift -o /tmp/mb-icloud-bridge
+          /tmp/mb-icloud-bridge --self-test
+          echo 'PASS actual Swift binary; iCloud account sync NOT certified' >> "$GITHUB_STEP_SUMMARY"
+  genuine-local-server:
+    name: Docker Rust server/login/encrypted backup and real rclone alias file CRUD
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build real native server and encrypted archive demo image
+        run: |
+          set -euo pipefail
+          docker compose -f deploy/cloud/compose.demo.yml up -d --build
+          for attempt in $(seq 1 120);do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1;then break;fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8080/healthz >/dev/null
+      - name: Verify authenticated real server cloud browse, download, upload, delete, and age backup
+        run: |
+          set -euo pipefail
+          base=http://127.0.0.1:8080
+          curl -sS -D /tmp/login-headers -c /tmp/mb-cookies -X POST \
+            --data-urlencode 'username=admin' --data-urlencode 'password=Demo-Backup-2026!' \
+            -H 'Origin: http://127.0.0.1:8080' "$base/login" >/dev/null
+          grep -q mb_session /tmp/mb-cookies
+          curl -fsS -b /tmp/mb-cookies "$base/api/cloud/profiles" > /tmp/profiles.json
+          curl -fsS -b /tmp/mb-cookies "$base/api/cloud/list?profile=demo&path=Projects" > /tmp/files.json
+          curl -fsS -b /tmp/mb-cookies "$base/api/backups" > /tmp/backups.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/profiles.json'))['profiles']
+          f=json.load(open('/tmp/files.json'))['items']
+          b=json.load(open('/tmp/backups.json'))['backups']
+          assert len(p)==1 and p[0]['upload'] and p[0]['delete'], p
+          assert any(x['name']=='readme.txt' for x in f), f
+          assert b and b[0]['files'], b
+          print('PASS admin cloud inventory, alias files and real age-backed backup')
+          PY
+          curl -fsS -b /tmp/mb-cookies "$base/api/cloud/download?profile=demo&path=Projects/readme.txt" > /tmp/readback.txt
+          grep -q 'REAL file in a disposable' /tmp/readback.txt
+          curl -fsS -b /tmp/mb-cookies "$base/" > /tmp/dashboard.html
+          csrf="$(grep -oE 'name="csrf-token" content="[a-f0-9]{64}"' /tmp/dashboard.html | head -1 | cut -d '"' -f4)"
+          test -n "$csrf"
+          printf 'upload smoke\n' > /tmp/to-upload.txt
+          curl -fsS -b /tmp/mb-cookies -H 'Origin: http://127.0.0.1:8080' \
+            -H "X-CSRF-Token: $csrf" --data-binary @/tmp/to-upload.txt \
+            "$base/api/cloud/upload?profile=demo&path=Projects/created-demo.txt" > /tmp/upload.json
+          python3 - <<'PY'
+          import json
+          assert json.load(open('/tmp/upload.json'))['uploaded']
+          PY
+          curl -fsS -b /tmp/mb-cookies "$base/api/cloud/download?profile=demo&path=Projects/created-demo.txt" >/tmp/upload-readback.txt
+          cmp /tmp/to-upload.txt /tmp/upload-readback.txt
+          curl -fsS -b /tmp/mb-cookies -H 'Origin: http://127.0.0.1:8080' \
+            -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+            -d '{"profile":"demo","path":"Projects/created-demo.txt","confirm":"DELETE:demo:Projects/created-demo.txt"}' \
+            "$base/api/cloud/delete" > /tmp/delete.json
+          python3 - <<'PY'
+          import json
+          assert json.load(open('/tmp/delete.json'))['deleted']
+          PY
+          echo 'PASS actual Rust server, session/CSRF, rclone alias CRUD and age backup' >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispose credentials and data after the job
+        if: always()
+        run: |
+          docker compose -f deploy/cloud/compose.demo.yml logs --tail=90 || true
+          docker compose -f deploy/cloud/compose.demo.yml down -v || true
