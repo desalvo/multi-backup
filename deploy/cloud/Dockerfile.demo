@@ -1,0 +1,16 @@
+FROM rust:1-bookworm AS builder
+WORKDIR /build
+COPY rust/ rust/
+COPY rust-server/ rust-server/
+RUN cargo build --manifest-path rust-server/Cargo.toml --release && cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends age rclone ca-certificates tini && rm -rf /var/lib/apt/lists/* && groupadd --gid 10001 multi-backup && useradd --uid 10001 --gid 10001 -M -s /usr/sbin/nologin multi-backup && mkdir -p /data && chown 10001:10001 /data
+COPY --from=builder /build/rust-server/target/release/multi-backup-server /usr/local/bin/
+COPY --from=builder /build/rust/target/release/multi-backup-native /usr/local/bin/
+COPY deploy/cloud/entrypoint.demo.sh /usr/local/bin/entrypoint-demo.sh
+RUN chmod 0755 /usr/local/bin/entrypoint-demo.sh
+USER 10001:10001
+VOLUME ["/data"]
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/tini","--","/bin/sh","/usr/local/bin/entrypoint-demo.sh"]

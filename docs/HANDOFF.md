@@ -1124,3 +1124,22 @@ One-line English commit summary: Normalize Ubuntu SHA checksum path and version 
 - Implemented `scripts/ci/ceph-osd-crush-align.py` validation of actual OSD container ready/running; added negative tests rejecting unready/restarting/missing status. Added these code paths to full r217 workflow path filter.
 - Next step: wait for latest exact-SHA r217 full CI, inspect Ceph and final artifact jobs. No claims of r217 readiness/RC publication until complete. Still open: signed/notarized native installers, true physical 3-host HA, hypervisor VM boot restores and vendor-specific provider gaps.
 - Commit one-line summary: Repair real Ceph OSD CRUSH convergence with bounded fail-closed retries and exact-source r217 RC validation.
+
+## 2026-11-18 — r218 unified cloud Drive POSIX/server CRUD + selective restore
+
+- Branch feature/r218-icloud-bidir-server-demo based on green r217 SHA b085abc81f986e053fd0655e0fb24656a47665aa (CI run #44246558178 32/32 green). This remains a separate nonpublishing Preview feature.
+- Added iCloud catalog B-In/B-Out at PREVIEW, native macOS NSFileCoordinator Swift bridge + age CLI wrapper for local File Provider. Server-side rclone iCloud is read-only; Apple cloud sync receipt and login not certified.
+- Added authenticated Rust server cloud profiles/list/download/upload/delete with exact configured rclone profiles, no RC management listener, CSRF/origin/offline approval on mutations, 8 MiB limit, encrypted .age delete refusal. Browser cloud UI integrated.
+- Added supervised rclone desktop mount manager (Linux/macOS/Windows where FUSE/WinFsp exists), provider capabilities and security negatives.
+- Added genuine Docker Rust demo with loopback-only fixed demo account and seeded age chunk store, local rclone alias provider, login and real HTTP CRUD. Test workflow #44251158056 was 3/3 green for mount paths, Swift compilation and Docker server end-to-end. NOT a real cloud-provider certification.
+- Added scripts/cloud/mounted_backup_restore.py: real mounted-cloud chunk store staging with preflight, private cache, source double-read SHA256 and Rust age list/verify-chain/create-only selective restore. Snapshot consistency remains external/attested; GUI integration pending.
+- Document in docs/CLOUD_DRIVE_ACCESS_R218_IT.md. READY scope for r217 stays unchanged at 16/33; r218 adds iCloud Preview as 34th provider (16/34 with a bounded Ready operation, subject to prior field evidence). Cloud/global HA is NOT READY.
+- Handoff: do not publish cloud credentials or broaden iCloud API claims. Do not merge or tag before all new tests and real provider lab evidence. One-line English commit summary: Implement scoped cloud Drive mounts, authenticated Rust server CRUD and verified encrypted-store selective restore preview.
+
+## 2026-11-18 — r218 Rust native desktop cloud mount sidebar
+
+- Following cloud/server demo 3/3 SUCCESS on run #44252778460, added `rust-desktop/src/cloud_mount.rs` Rust-native rclone mount manager (private config + per-profile B-In/B-Out capability, no Python/shell/rclone RC, supervised child, deny unsafe remote/mountpoint). Added sidebar page Cloud Drive and UI start/stop/monitor, child terminated in Drop, no credentials persisted.
+- First GUI compile on e804cda9 failed single Rust documentation order issue E0753. Fixed in commit `84c9f4cd72b7d8532fd735ebd118e7c8e35679a6`. New Rust focused run #44253655613 must be checked before claiming success.
+- The entire r218 PR #56 is draft and targets r217 preview branch. No merges to main, stable tags, provider production credentials or falsely certified remote iCloud writes.
+- Persistent cloud requirement: all possible cloud drive backends must expose capability-aware B-In/B-Out, native desktop mount+POSIX/WinFsp where available, secured server file CRUD and verified selective browsing/restore from mounted encrypted backup stores; missing capabilities are clearly marked, not faked.
+- One-line English commit summary: Add supervised Rust desktop cloud mounts with per-provider safety policy and preserve verified backup browsing.

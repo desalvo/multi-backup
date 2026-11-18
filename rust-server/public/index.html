@@ -6,6 +6,27 @@
 <button id="view" type="button" aria-pressed="false">Vista a icone</button>
 <button id="export-selected" type="button" disabled>Esporta selezione</button>
 <span id="selected-count" class="muted">0 elementi selezionati</span></div><div id="alert" role="status"></div><div id="backups"></div></section>
+<section id="cloud-drive">
+<div class="controls"><h2>Cloud Drive · File manager</h2>
+<button id="cloud-refresh" type="button">Aggiorna account</button></div>
+<p class="muted">Esplora i cloud autorizzati, scarica e carica documenti. I mount desktop sono configurati separatamente.
+La cancellazione richiede approvazione offline; gli archivi .age sono protetti dalla policy di retention.
+Le credenziali del provider non sono mai inviate al browser.</p>
+<div class="controls">
+<label>Cloud <select id="cloud-profile" aria-label="Seleziona cloud"></select></label>
+<label>Percorso <input id="cloud-path" type="text" value="" placeholder="Cartella (vuoto = radice)" autocomplete="off"></label>
+<button id="cloud-back" type="button">Cartella superiore</button>
+<button id="cloud-list" type="button">Apri cartella</button></div>
+<div id="cloud-capabilities" class="muted"></div>
+<div id="cloud-feedback" role="status" class="muted"></div>
+<div id="cloud-items" class="cloud-files"></div>
+<div class="controls">
+<label>Carica un file (max 8 MiB) <input type="file" id="cloud-upload-file"></label>
+<button type="button" id="cloud-upload">Upload nuovo file</button>
+</div>
+<p class="muted">Preview: l'upload rifiuta le sovrascritture ordinarie, ma il create-only atomico lato provider non è ancora certificato.
+I file dei backup cifrati si aprono tramite il catalogo verificato, non con la cancellazione diretta del cloud.</p>
+</section>
 <section id="cluster-overview">
 <div class="controls"><h2>Cluster, agenti e backup paralleli</h2>
 <button id="cluster-refresh" type="button">Aggiorna cluster</button></div>

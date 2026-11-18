@@ -42,5 +42,4 @@ axum-server = { version = "=0.7.3", features = ["tls-rustls"] }
 # transitively enable ring and aws-lc-rs simultaneously.
 rustls = { version = "0.23", features = ["aws_lc_rs"] }
 
-[dev-dependencies]
 tempfile = "3.10"

@@ -1,0 +1,33 @@
+# This demonstration must never be published to a public IP.
+services:
+  demo:
+    build:
+      context: ../..
+      dockerfile: deploy/cloud/Dockerfile.demo
+    image: multi-backup-r218-local-demo
+    container_name: multi-backup-r218-demo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      MULTI_BACKUP_BIND: 0.0.0.0:8080
+      MULTI_BACKUP_ADMIN_USER: admin
+      MULTI_BACKUP_ADMIN_HASH_FILE: /data/config/admin_hash
+      MULTI_BACKUP_PUBLIC_ORIGIN: http://127.0.0.1:8080
+      MULTI_BACKUP_DATA_ROOT: /data/backups
+      MULTI_BACKUP_EXPORT_ROOT: /data/exports
+      MULTI_BACKUP_AGE_IDENTITY_FILE: /data/config/age-identity.txt
+      MULTI_BACKUP_AUDIT_LOG: /data/audit/events.jsonl
+      MULTI_BACKUP_CLOUD_PROFILES_FILE: /data/config/cloud-profiles.json
+      MULTI_BACKUP_RCLONE_BIN: /usr/bin/rclone
+    volumes:
+      - demo-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  demo-data:
