@@ -230,7 +230,8 @@ kubectl -n rook-ceph rollout status deploy/rook-ceph-tools --timeout=900s
 # OSD and three distinct CRUSH hosts. No MOCK/skip/single-OSD fallback.
 ready=0
 cluster_errors=0
-crush_fixed=0
+crush_repairs=0
+last_crush_repair=-5
 osd_pod_fixed=0
 for attempt in $(seq 1 55); do
   if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status -f json \
@@ -277,17 +278,26 @@ for attempt in $(seq 1 55); do
   # Work around a Ceph kind auto-placement defect ONLY after actual
   # three-node running OSD/device identity is independently verified.
   # Never change CRUSH on untrusted operator clusters or emulate OSDs.
-  if [ "$crush_fixed" -eq 0 ] && [ "$attempt" -ge 8 ] &&
+  if [ "$attempt" -ge 8 ] && [ "$crush_repairs" -lt 4 ] &&
+     [ "$((attempt - last_crush_repair))" -ge 5 ] &&
      [ -s "$TEMP/ceph-status.json" ] && [ -s "$TEMP/osd-tree.json" ];then
     if kubectl -n rook-ceph get pods -l app=rook-ceph-osd -o json            > "$TEMP/osd-pods.json" 2>/dev/null &&
        python3 "$ROOT/scripts/ci/ceph-osd-crush-align.py"            "$TEMP/ceph-status.json" "$TEMP/osd-tree.json" "$TEMP/osd-pods.json"            "${WORKERS[0]}:${OSD_NAMES[0]}"            "${WORKERS[1]}:${OSD_NAMES[1]}"            "${WORKERS[2]}:${OSD_NAMES[2]}"            > "$TEMP/crush-verified-moves" 2> "$TEMP/crush-guard.err";then
       if [ -s "$TEMP/crush-verified-moves" ];then
+        # A replacement OSD pod can reassert its old CRUSH host *after* the
+        # first move. Recheck only from fresh authenticated daemon/pod evidence,
+        # at a bounded interval; never approve a transient/remapped PG map.
+        test "$(kubectl config current-context)" = "kind-$NAME"
         echo "Reconcile actual CRUSH logical hosts with independently proven kind worker/device identities"
         while read -r osdid node;do
           kubectl -n rook-ceph exec deploy/rook-ceph-tools --              ceph osd crush move "osd.$osdid" "root=default" "host=$node"
         done < "$TEMP/crush-verified-moves"
       fi
-      crush_fixed=1
+      if [ -s "$TEMP/crush-verified-moves" ]; then
+        crush_repairs=$((crush_repairs + 1))
+        last_crush_repair="$attempt"
+        echo "Guarded Ceph CRUSH repair $crush_repairs/4; full three-host PG attestation remains mandatory"
+      fi
     fi
   fi
   # Stop early if operator has persistently rejected an invalid cluster config.
