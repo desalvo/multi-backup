@@ -203,6 +203,9 @@ pub const CATALOG: &[PluginDescriptor] = &[
     PluginDescriptor::new("dropbox", "Dropbox", DataKind::Files, PREVIEW, PREVIEW,
         "File ID+revision and content hash",
         "B-In read by file-id/revision and hash; dedicated Rust B-Out accepts only verified age archives, create-only upload sessions, no auto-rename or overwrite, then confirms independent remote metadata id/rev/hash; remote restore still needs an end-to-end qualification"),
+    PluginDescriptor::new("icloud", "Apple iCloud Drive (macOS coordinated local files)", DataKind::Files, PREVIEW, PREVIEW,
+        "User-authorized macOS iCloud Drive local File Provider path; NSFileCoordinator one regular file and ciphertext-only create-only destination",
+        "B-In native macOS helper stages one coordinated readable file then age encrypts locally; B-Out copies only previously verified .age ciphertext into a NEW iCloud Drive file, coordinating with File Provider and checking local byte digest. Requires signed/macOS user filesystem permissions and iCloud sync online for remote durability. NO CloudKit access to entire iCloud Drive; no Apple ID login, remote API, cross-device sync receipt, folder hierarchy parity, ACL/metadata or server-side unattended non-macOS access; not production READY"),
     PluginDescriptor::new("google-drive", "Google Drive", DataKind::Files, PLAN, PLAN,
         "File ID+revision/export format and shared-drive inventory",
         "OAuth-scoped Drive app folder and Google-native export; upload encrypted objects to a new destination with no overwrite").with_access_gate(AccessGate::OAuthScopeReview),
@@ -644,29 +647,42 @@ mod tests {
         assert!(find("gpfs").unwrap().ready_scope.is_none());
     }
     #[test]
-    fn all_32_requested_input_plugins_and_25_outputs_are_listed() {
-        let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
+    fn all_33_requested_input_plugins_and_26_outputs_are_listed() {
+        let inputs = ["github", "dropbox", "icloud", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox", "pbs",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
             "iscsi", "fc", "nvmeof", "glusterfs", "lustre", "gpfs",
             "hdfs", "afs", "alfresco", "owncloud", "nextcloud", "sshfs",
             "oracle"];
-        let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
+        let outputs = ["posix", "dropbox", "icloud", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
             "owncloud", "nextcloud", "sshfs", "smb", "proxmox"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 32);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 25);
-        assert_eq!(CATALOG.len(), 33);
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 33);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 26);
+        assert_eq!(CATALOG.len(), 34);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
         let distinct: HashSet<_> = CATALOG.iter().map(|x| x.id).collect();
         assert_eq!(distinct.len(), CATALOG.len());
     }
     #[test]
+    fn r218_icloud_is_bidirectional_preview_not_generic_or_cloudkit() {
+        let d=find("icloud").expect("iCloud must be listed");
+        assert_eq!([d.backup_input,d.backup_output,d.restore_input,d.restore_output],
+            [Stage::Preview;4]);
+        assert!(d.ready_scope.is_none());
+        assert!(d.notes.contains("NSFileCoordinator") || d.consistency.contains("NSFileCoordinator"));
+        assert!(d.notes.contains("NO CloudKit"));
+        let incoming=plan(Mode::Backup,"icloud","posix").unwrap();
+        let outgoing=plan(Mode::Backup,"posix","icloud").unwrap();
+        assert!(!incoming.executable && !outgoing.executable);
+        assert!(!incoming.preview_executable && !outgoing.preview_executable);
+    }
+    #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 25);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 33);
         for entry in CATALOG {
             if matches!(entry.id,"s3"|"ssh"|"webdav"|"proxmox"|"pbs") {
                 // No S3/SSH/PVE/PBS full native provider-side remote restore.
