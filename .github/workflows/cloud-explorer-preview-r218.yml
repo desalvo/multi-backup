@@ -3,6 +3,10 @@ on:
   push:
     branches: ["feature/r218-mobile-clients"]
     paths:
+      - "rust/src/cloud_recovery.rs"
+      - "rust/src/portable.rs"
+      - "rust/src/chunk_store.rs"
+      - "rust/Cargo.toml"
       - "rust/src/cloud_drive.rs"
       - "rust/src/icloud_drive.rs"
       - "rust/src/lib.rs"
@@ -25,6 +29,10 @@ jobs:
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+      - name: Install real age for portable encrypted cloud recovery
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
       - name: Validate cloud test and browser syntax
         run: |
           set -euo pipefail
@@ -35,6 +43,8 @@ jobs:
           set -euo pipefail
           cargo test --manifest-path rust/Cargo.toml cloud_drive -- --nocapture
           cargo test --manifest-path rust/Cargo.toml icloud_drive -- --nocapture
+          cargo test --manifest-path rust/Cargo.toml cloud_recovery -- --nocapture
+          cargo test --manifest-path rust/Cargo.toml codecs_roundtrip -- --nocapture
           cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
       - name: Run CLI local synthetic cloud matrix
         run: bash scripts/ci/test-cloud-explorer-r218.sh
@@ -43,5 +53,5 @@ jobs:
       - name: Keep cloud adapter in Preview unless real backend E2E passes
         if: success()
         run: |
-          echo 'PASS: Rust cloud core, CLI, gateway routes and synthetic rclone. NOT an actual account/provider test.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PASS: real age/XZ/ZIP64/manifest/chunk selective restore over synthetic rclone; no live cloud provider.' >> "$GITHUB_STEP_SUMMARY"
           echo 'This optional cloud CI is not part of the r217 exact-SHA RC gate.' >> "$GITHUB_STEP_SUMMARY"

@@ -105,4 +105,63 @@ test -f "$TMP/mock/nextcloud/Progetti/readme.txt"
     --path Progetti/readme.txt --expected-sha256 "$HASH" \
     --confirm DELETE:nextcloud:Progetti/readme.txt --json >/dev/null
 test ! -e "$TMP/mock/nextcloud/Progetti/readme.txt"
+# Full cloud portable bundle acceptance: real AGE, real XZ compression, real
+# chunk parity/manifest and ZIP64. Only the rclone transport is synthetic.
+mkdir -p "$TMP/private/source" "$TMP/private/work" "$TMP/mock/nextcloud/Backups"
+printf 'Multi Backup r218 authenticated XZ recovery\n' > "$TMP/private/source/restore.txt"
+age-keygen -o "$TMP/private/key.txt" >/dev/null 2>&1
+RECIPIENT="$(age-keygen -y "$TMP/private/key.txt")"
+"$BIN" storage init --root "$TMP/private/store" --recipient "$RECIPIENT" \
+  --compressor xz --chunk-mib 1
+printf '[{"namespace":"docs","directory":"%s"}]\n' "$TMP/private/source" \
+  > "$TMP/private/sources.json"
+"$BIN" storage backup --root "$TMP/private/store" --identity "$TMP/private/key.txt" \
+  --label "Cloud xz smoke" --sources-json "$TMP/private/sources.json" \
+  > "$TMP/private/snapshot.json"
+ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "$TMP/private/snapshot.json")"
+"$BIN" storage export-zip --root "$TMP/private/store" --identity "$TMP/private/key.txt" \
+  --id "$ID" --destination "$TMP/private/bundle" --volume-mib 8
+cp -a "$TMP/private/bundle" "$TMP/mock/nextcloud/Backups/snap1"
+"$BIN" plugins cloud-backup-inspect --config "$TMP/private/rclone.conf" \
+  --provider nextcloud --directory Backups/snap1 --identity "$TMP/private/key.txt" \
+  --work-dir "$TMP/private/work" --max-bytes 16777216 --json \
+  > "$TMP/private/verified-index.json"
+python3 - "$TMP/private/verified-index.json" "$ID" <<'PY'
+import json,sys
+record=json.load(open(sys.argv[1]))
+assert record["age_authenticated"] and record["sha256_verified"]
+assert record["backup_id"]==sys.argv[2]
+assert record["files"]==[{"path":"docs/restore.txt","size":len(b"Multi Backup r218 authenticated XZ recovery\n")}]
+PY
+"$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
+  --provider nextcloud --directory Backups/snap1 --identity "$TMP/private/key.txt" \
+  --work-dir "$TMP/private/work" --destination "$TMP/private/recovered" \
+  --selection docs/restore.txt --max-bytes 16777216 \
+  --confirm RESTORE:nextcloud:Backups/snap1 --json > "$TMP/private/restore.json"
+cmp "$TMP/private/source/restore.txt" "$TMP/private/recovered/docs/restore.txt"
+# Explicit refusal of existing destinations and wrong restore confirmations.
+if "$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
+  --provider nextcloud --directory Backups/snap1 --identity "$TMP/private/key.txt" \
+  --work-dir "$TMP/private/work" --destination "$TMP/private/recovered" \
+  --confirm RESTORE:nextcloud:Backups/snap1 >/dev/null 2>&1; then
+  echo 'ERROR remote restore overwrote an existing local destination' >&2;exit 1
+fi
+if "$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
+  --provider nextcloud --directory Backups/snap1 --identity "$TMP/private/key.txt" \
+  --work-dir "$TMP/private/work" --destination "$TMP/private/unauthorized" \
+  --confirm BAD >/dev/null 2>&1; then
+  echo 'ERROR cloud recovery accepted incorrect explicit confirmation' >&2;exit 1
+fi
+test ! -e "$TMP/private/unauthorized"
+# Fail on verified ciphertext corruption; never create a plaintext target.
+printf 'tampered' >> "$TMP/mock/nextcloud/Backups/snap1/part-000001.zip"
+if "$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
+  --provider nextcloud --directory Backups/snap1 --identity "$TMP/private/key.txt" \
+  --work-dir "$TMP/private/work" --destination "$TMP/private/corrupt-out" \
+  --confirm RESTORE:nextcloud:Backups/snap1 >/dev/null 2>&1; then
+  echo 'ERROR tampered encrypted volume accepted' >&2;exit 1
+fi
+test ! -e "$TMP/private/corrupt-out"
+echo 'PASS remote AGE/XZ ZIP64 multi-step authenticated selective restore with tamper negatives'
+
 echo 'PASS cloud browser list, download, create-new, delete and fail-closed negative tests (fake rclone only)'
