@@ -12,6 +12,70 @@ type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type HmacSha = Hmac<Sha256>;
 const SUBDIR: &str = ".multi-backup-v1";
 pub const DEFAULT_CHUNK: usize = 4 * 1024 * 1024;
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize,Default)]
+#[serde(rename_all="lowercase")]
+pub enum Compressor {
+    #[default] Zstd,
+    /// XZ stream container; LZMA2 at preset level 6.
+    Xz,
+    Gzip,
+    None,
+}
+impl Compressor {
+    pub fn parse(value:&str)->Result<Self,String>{
+        match value {
+            "zstd"=>Ok(Self::Zstd),"xz"|"lzma2"=>Ok(Self::Xz),
+            "gzip"=>Ok(Self::Gzip),"none"=>Ok(Self::None),
+            _=>Err("Compressor must be zstd, xz, gzip or none".into())
+        }
+    }
+    pub fn name(self)->&'static str {
+        match self{Self::Zstd=>"zstd",Self::Xz=>"xz",Self::Gzip=>"gzip",Self::None=>"none"}
+    }
+    fn encode(self,plain:&[u8])->Res<Vec<u8>>{
+        match self{
+            Self::Zstd=>Ok(zstd::stream::encode_all(plain,3)?),
+            Self::Xz=>{
+                let mut encoder=xz2::write::XzEncoder::new(Vec::new(),6);
+                encoder.write_all(plain)?;
+                Ok(encoder.finish()?)
+            }
+            Self::Gzip=>{
+                let mut encoder=flate2::write::GzEncoder::new(
+                    Vec::new(),flate2::Compression::default());
+                encoder.write_all(plain)?;
+                Ok(encoder.finish()?)
+            }
+            Self::None=>Ok(plain.to_vec())
+        }
+    }
+    fn decode(self,compressed:&[u8],max_bytes:usize)->Res<Vec<u8>>{
+        let mut plain=Vec::new();
+        let cap=(max_bytes as u64).checked_add(1).ok_or("Decoded chunk too large")?;
+        match self{
+            Self::Zstd=>{
+                let reader=zstd::stream::Decoder::new(compressed)?;
+                reader.take(cap).read_to_end(&mut plain)?;
+            }
+            Self::Xz=>{
+                let reader=xz2::read::XzDecoder::new(compressed);
+                reader.take(cap).read_to_end(&mut plain)?;
+            }
+            Self::Gzip=>{
+                let reader=flate2::read::GzDecoder::new(compressed);
+                reader.take(cap).read_to_end(&mut plain)?;
+            }
+            Self::None=>{
+                if compressed.len()>max_bytes {return Err("Uncompressed chunk exceeds limit".into());}
+                plain.extend_from_slice(compressed);
+            }
+        }
+        if plain.len()>max_bytes{return Err("Decompressed chunk exceeds limit".into());}
+        Ok(plain)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkRef { pub id: String, pub sha256: String, pub bytes: usize }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,7 +110,8 @@ pub struct LogicalBackup {
     pub parent_id: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
-struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: String }
+struct Config { version: u32, recipient: String, chunk_bytes: usize, secret: String,
+    #[serde(default)] compressor: Compressor }
 pub struct Source { pub namespace: String, pub directory: PathBuf }
 pub struct Store { root: PathBuf, cfg: Config, key: [u8;32] }
 #[derive(Serialize,Deserialize)]
@@ -131,6 +196,10 @@ impl Store {
         Ok(hex::encode(mac.finalize().into_bytes()))
     }
     pub fn init(root: &Path, recipient: &str, chunk_bytes: usize) -> Res<()> {
+        Self::init_compressed(root,recipient,chunk_bytes,Compressor::Zstd)
+    }
+    pub fn init_compressed(root:&Path,recipient:&str,chunk_bytes:usize,
+                           compressor:Compressor)->Res<()> {
         if !(1024 * 1024..=16 * 1024 * 1024).contains(&chunk_bytes) {
             return Err("Chunk size must be 1..16 MiB".into());
         }
@@ -140,7 +209,7 @@ impl Store {
         let mut key = [0u8;32];
         rand::rngs::OsRng.fill_bytes(&mut key);
         let cfg = Config {version: 1, recipient: recipient.to_owned(), chunk_bytes,
-            secret: hex::encode(key)};
+            secret: hex::encode(key),compressor};
         let ciphertext = age(&serde_json::to_vec(&cfg)?, Some(recipient), None)?;
         if !write_new(&private.join("config.json.age"), &ciphertext)? {
             return Err("Storage already initialized".into());
@@ -169,7 +238,7 @@ impl Store {
     pub fn read_chunk_ref(&self,identity:&Path,chunk:&ChunkRef)->Res<Vec<u8>>{
         self.read_chunk(identity,chunk)
     }
-    /// Exact zstd size before age encryption; verifies plaintext integrity.
+    /// Exact compressed bytes before age encryption; verifies plaintext integrity.
     pub(crate) fn compressed_chunk_bytes(&self,key:&Path,chunk:&ChunkRef)->Res<u64>{
         self.read_chunk(key,chunk)?;
         let path=self.chunk_path(&chunk.id)?;
@@ -185,9 +254,7 @@ impl Store {
             return Err("Chunk missing or unsafe symlink".into());
         }
         let compressed = age(&fs::read(path)?, None, Some(identity))?;
-        let decoder = zstd::stream::Decoder::new(compressed.as_slice())?;
-        let mut plain = Vec::new();
-        decoder.take((self.cfg.chunk_bytes + 1) as u64).read_to_end(&mut plain)?;
+        let plain = self.cfg.compressor.decode(&compressed,self.cfg.chunk_bytes)?;
         if plain.len() != chunk.bytes || sha(&plain) != chunk.sha256 ||
             self.id(&plain)? != chunk.id { return Err("Corrupt chunk".into()); }
         Ok(plain)
@@ -200,7 +267,7 @@ impl Store {
                 return Err("Existing chunk failed checksum".into());
             }
         } else {
-            let compressed = zstd::stream::encode_all(bytes, 3)?;
+            let compressed = self.cfg.compressor.encode(bytes)?;
             let encrypted = age(&compressed, Some(&self.cfg.recipient), None)?;
             if !write_new(&path, &encrypted)? &&
                 self.read_chunk(identity, &chunk)? != bytes {
@@ -506,6 +573,29 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codecs_roundtrip_and_decompression_limits(){
+        let payload=[b'A';32*1024];
+        for compressor in [Compressor::Zstd,Compressor::Xz,
+                           Compressor::Gzip,Compressor::None]{
+            let bytes=compressor.encode(&payload).unwrap();
+            assert_eq!(compressor.decode(&bytes,payload.len()).unwrap(),payload);
+            assert!(compressor.decode(&bytes,1024).is_err(),
+                    "codec {} ignored decoded size limit",compressor.name());
+        }
+        assert_eq!(Compressor::parse("lzma2").unwrap(),Compressor::Xz);
+        assert!(Compressor::parse("untrusted").is_err());
+    }
+    #[test]
+    fn existing_store_schema_defaults_to_zstd(){
+        let previous=r#"{"version":1,"recipient":"age1dummy","chunk_bytes":4194304,
+                         "secret":"00"}"#;
+        let decoded:Config=serde_json::from_str(previous).unwrap();
+        assert_eq!(decoded.compressor,Compressor::Zstd);
+        assert_eq!(serde_json::to_value(&decoded).unwrap()["compressor"],"zstd");
+    }
+
     #[test]
     fn rejects_traversal_and_unclean_virtual_names() {
         for s in ["../passwd", "github//repo", "github/./repo",
@@ -522,7 +612,7 @@ mod tests {
         let store=Store{
             root:root.path().join(".multi-backup-v1"),
             cfg:Config{version:1,recipient:"age1dummy".into(),
-                chunk_bytes:DEFAULT_CHUNK,secret:String::new()},
+                chunk_bytes:DEFAULT_CHUNK,secret:String::new(),compressor:Compressor::Zstd},
             key:[7u8;32]
         };
         let source=Source{namespace:"files".into(),
@@ -544,7 +634,7 @@ mod tests {
     fn keyed_name_does_not_disclose_content_sha256() {
         let st = Store {root: PathBuf::new(),
             cfg: Config {version:1, recipient: "age1notused".into(),
-                chunk_bytes: DEFAULT_CHUNK, secret: "".into()},
+                chunk_bytes: DEFAULT_CHUNK, secret: "".into(),compressor:Compressor::Zstd},
             key: [1u8;32]};
         let a = st.id(b"same").unwrap();
         assert_eq!(a, st.id(b"same").unwrap());
@@ -757,9 +847,7 @@ impl Store {
     fn decode_cipher(&self, identity: &Path, reference: &ChunkRef,
                      encrypted: &[u8]) -> Res<()> {
         let compressed = age(encrypted,None,Some(identity))?;
-        let decoder = zstd::stream::Decoder::new(compressed.as_slice())?;
-        let mut plain = Vec::new();
-        decoder.take((self.cfg.chunk_bytes+1) as u64).read_to_end(&mut plain)?;
+        let plain = self.cfg.compressor.decode(&compressed,self.cfg.chunk_bytes)?;
         if plain.len()!=reference.bytes || sha(&plain)!=reference.sha256 ||
            self.id(&plain)?!=reference.id {
             return Err("Recovered ciphertext does not match authenticated manifest".into());

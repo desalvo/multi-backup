@@ -69,7 +69,7 @@ fn usage() -> &'static str {
        multi-backup-native plugins restore --input posix --output posix|nfs|smb|gpfs|sshfs|cephfs|glusterfs|lustre --root STORE --identity AGE_KEY --id HASH --destination NEW_DIR [--selection PATH] [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native schedule run --config JOBS.json --state PRIVATE_STATE.json [--force] [--json]\n\
        multi-backup-native schedule daemon --config JOBS.json --state PRIVATE_STATE.json [--poll-seconds 60]\n\
-       multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4]\n\
+       multi-backup-native storage init --root DIR --recipient age1KEY [--chunk-mib 4] [--compressor zstd|xz|gzip|none]\n\
        multi-backup-native storage backup --root DIR --identity IDENTITY --label NAME --sources-json SOURCES.json [--mode full|incremental] [--parent BACKUP_ID] [--top-namespace PATH]\n\
        multi-backup-native storage info --root DIR --identity IDENTITY --id HASH [--json]\n\
        multi-backup-native storage verify-chain --root DIR --identity IDENTITY --id HASH [--no-chain] [--json]\n\
@@ -1126,11 +1126,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let root = Path::new(required(&flags, "--root")?);
         match command {
             "init" => {
-                accepted(&flags, &["--root","--recipient","--chunk-mib"])?;
+                accepted(&flags, &["--root","--recipient","--chunk-mib","--compressor"])?;
                 let chunk_mib = flags.get("--chunk-mib").copied().unwrap_or("4").parse::<usize>()?;
                 let bytes = chunk_mib.checked_mul(1024*1024).ok_or("Invalid chunk size")?;
-                chunk_store::Store::init(root, required(&flags,"--recipient")?, bytes)?;
-                println!("Initialized immutable age/Zstandard storage; legacy archives untouched");
+                let compressor=chunk_store::Compressor::parse(
+                    flags.get("--compressor").copied().unwrap_or("zstd"))?;
+                chunk_store::Store::init_compressed(
+                    root,required(&flags,"--recipient")?,bytes,compressor)?;
+                println!("Initialized age-encrypted chunk store ({}); legacy archives untouched",compressor.name());
             }
             "backup" => {
                 accepted(&flags, &["--root","--identity","--label","--sources-json",
