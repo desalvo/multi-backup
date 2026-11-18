@@ -31,7 +31,7 @@ else:
     BASE, BOLD = "Helvetica", "Helvetica-Bold"
 STYLES = {
     "title": ParagraphStyle("mb_title", fontName=BOLD, fontSize=28, leading=35, textColor=NAVY, spaceAfter=12),
-    "h1": ParagraphStyle("mb_h1", fontName=BOLD, fontSize=16, leading=22, textColor=NAVY, spaceBefore=14, spaceAfter=8),
+    "h1": ParagraphStyle("mb_h1", fontName=BOLD, fontSize=16, leading=22, textColor=NAVY, spaceBefore=14, spaceAfter=8, keepWithNext=True),
     "h2": ParagraphStyle("mb_h2", fontName=BOLD, fontSize=11, leading=15, textColor=BLUE, spaceBefore=9, spaceAfter=5),
     "body": ParagraphStyle("mb_body", fontName=BASE, fontSize=9.1, leading=14.7, textColor=INK, spaceAfter=7),
     "small": ParagraphStyle("mb_small", fontName=BASE, fontSize=7.7, leading=12, textColor=GRAY, spaceAfter=6),
