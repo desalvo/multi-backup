@@ -97,3 +97,14 @@ Restore one selected file to a completely new local directory:
 On a signed-in Mac, --file-provider-macos permits the system-managed local iCloud Drive directory instead of a distinct FUSE mount, but only within that exact File Provider root.
 
 Current RC distinction: the old server UI already browses/restores local age-backed logical archives; this new tool stages remote cloud encrypted stores and calls the same Rust CLI. Automatic background hydration, GUI drag-and-drop and streaming >8MiB cloud HTTP uploads still require further integration.
+
+## Integrazione GUI Rust Desktop r218 (stato del collaudo da verificare sullo SHA finale)
+
+Oltre allo script CLI di montaggio, `rust-desktop/src/cloud_mount.rs` implementa un **mount manager completamente compilato in Rust**, invocando il binario rclone configurato, senza Python, shell, listener di amministrazione RC o password salvate nelle impostazioni. L'app gestisce il processo figlio e lo termina in smontaggio e alla chiusura.
+
+La pagina **Cloud Drive** della sidebar desktop consente caricamento del registro privato, scelta account, lettura delle capacità RO/RW, specifica di mountpoint locale esistente e vuoto, avvio/smontaggio, stato del processo. Il backend remoto iCloud rimane obbligatoriamente RO; su macOS l'accesso File Provider locale è distinto.
+
+Il nuovo codice desktop è sul commit `84c9f4cd72b7d8532fd735ebd118e7c8e35679a6`. Verificare la sua CI di compilazione e unit test `44253655613` prima di dichiarare la pagina desktop collaudata. Gli altri test cloud/server 3/3 hanno già successo sul commit `a2b2c2d4fe35f74939bd342053c2aa2b2e9d8b33`.
+
+**Limitazioni da non nascondere:** rclone mount non equivale a POSIX pieno, né offre un mount trasparente su tutte le piattaforme senza macFUSE/FUSE/WinFsp; il mount non è uno snapshot atomico. Browsing/restore selettivo dai backup richiedono l'acquisizione di uno store cifrato coerente, la verifica age e la creazione di un percorso nuovo. L'integrazione automatica in GUI del selettore dei file dai backup montati è ancora parziale; il comando `mounted_backup_restore.py` fornisce intanto il percorso funzionale.
+
