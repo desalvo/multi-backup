@@ -16,7 +16,9 @@ def inputs():
        {"name":"ROOK_OSD_ID","value":str(i)},
        {"name":"ROOK_BLOCK_PATH","value":"/dev/"+d},
        {"name":"ROOK_CRUSHMAP_HOSTNAME","value":n}]}]},
-       "status":{"phase":"Running"}} for i,(n,d) in enumerate(B)]}
+       "status":{"phase":"Running","containerStatuses":[
+           {"name":"osd","ready":True,"state":{"running":{"startedAt":"2026-11-18T00:00:00Z"}}}
+       ]}} for i,(n,d) in enumerate(B)]}
     return status,tree,pods
 class Safety(unittest.TestCase):
     def test_real_pod_evidence_required_for_move(self):
@@ -35,6 +37,19 @@ class Safety(unittest.TestCase):
         s,t,p=inputs()
         p["items"][1]["spec"]["containers"][0]["env"][2]["value"]=B[0][0]
         with self.assertRaises(ValueError):mod.reconcile(s,t,p,B)
+    def test_refuses_pods_not_yet_ready_or_restarting(self):
+        s,t,p=inputs()
+        p["items"][2]["status"]["containerStatuses"][0]["ready"]=False
+        with self.assertRaisesRegex(ValueError,"not ready"):
+            mod.reconcile(s,t,p,B)
+        s,t,p=inputs()
+        p["items"][2]["status"]["containerStatuses"][0]["state"]={"waiting":{"reason":"ContainerCreating"}}
+        with self.assertRaisesRegex(ValueError,"not ready"):
+            mod.reconcile(s,t,p,B)
+        s,t,p=inputs()
+        del p["items"][2]["status"]["containerStatuses"]
+        with self.assertRaisesRegex(ValueError,"not ready"):
+            mod.reconcile(s,t,p,B)
     def test_refuses_missing_quorum_or_osd(self):
         s,t,p=inputs();s["osdmap"]["osdmap"]["num_in_osds"]=2
         with self.assertRaises(ValueError):mod.reconcile(s,t,p,B)

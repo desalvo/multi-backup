@@ -1,5 +1,5 @@
 #define MyAppName "Multi Backup Rust Preview"
-#define MyAppVersion "0.1.0-r216-rc0"
+#define MyAppVersion "0.1.0-r217-rc0"
 #define MyAppPublisher "Alessandro De Salvo"
 #define MyAppExeName "MultiBackupRust.exe"
 
@@ -23,13 +23,15 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
-VersionInfoVersion=0.1.0.216
+VersionInfoVersion=0.1.0.217
 VersionInfoDescription=Multi Backup Rust native preview
 AppMutex=MultiBackupRustPreview
 
 [Files]
 Source: "..\..\dist-rust-win\MultiBackupRust.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\dist-rust-win\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist-rust-win\opengl32.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist-rust-win\Mesa-LLVMpipe-NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\dist-rust-win\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\dist-rust-win\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\dist-rust-win\README.IT.md"; DestDir: "{app}"; Flags: ignoreversion

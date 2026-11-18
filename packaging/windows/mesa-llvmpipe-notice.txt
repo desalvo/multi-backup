@@ -1,0 +1,14 @@
+Mesa LLVMpipe native Windows software OpenGL renderer — preliminary RC distribution.
+
+Upstream source: https://gitlab.freedesktop.org/mesa/mesa
+Upstream Windows build and source instructions: https://github.com/mmozeiko/build-mesa
+Pinned release version: 26.3.0
+Pinned release asset: mesa-llvmpipe-x64-26.3.0.7z
+Archive SHA256: 11dc079e356f33ce2ff84aa399c975da1a7bdd4c470f6eef4cf359ad8b9ca80f
+Copyright: Mesa and LLVM contributors.
+Licenses: Mesa licenses are primarily MIT/X11; LLVM is Apache-2.0 WITH LLVM-exception.
+Read the upstream bundled LICENSE and source files before any signed/stable release.
+The unmodified vendor opengl32.dll binary is placed beside MultiBackupRust.exe.
+The release archive SHA256 is verified BEFORE extraction; failure aborts installer construction.
+No system OpenGL DLL is replaced and no global graphics driver is installed.
+This is not an endorsement of the third-party binary nor a completed vendor security audit.

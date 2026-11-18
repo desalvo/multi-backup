@@ -1246,3 +1246,13 @@ One-line English commit summary: Qualify four narrow SSH SSHFS WebDAV Lustre ope
 - No main merge, stable tag, release, Apple Developer ID notarization or Windows Authenticode. Real VM/hypervisor/three physical host HA remain outside certified scope.
 
 One-line English commit summary: Normalize Ubuntu SHA checksum path and version native Mac and Windows RC0 installers with exact-source evidence.
+
+## 2026-11-18 — r217 Ceph CRUSH fail-closed repair and RC resumption
+
+- Exact source branch: `feature/r217-win-warp-installable-rc`; open draft PR #54, based on r216; do not merge to main/tag/stable without full gate.
+- CI #44235174489: 30/32 jobs green, Ceph 3 MON / 3 OSD Rook field job failed, and the final RC artifact fan-in failed closed. All four actual native installation jobs and remaining software/provider field jobs passed on that prior SHA.
+- Evidence: Rook Ceph OSD placement corrected, then startup of a replacement OSD reverted the CRUSH host. Final Ceph status: 3 MON quorum, 3 OSD UP+IN, but CRUSH only two populated hosts, 89 PGs active+clean+remapped. Properly NOT READY.
+- Implemented patch in `scripts/ci/ceph-rgw-kind-cluster.sh`: bounded guarded CRUSH corrections with independent OSD/pod proof, kind-only context guard; final assertion still requires three actual hosts and zero remapped PGs.
+- Implemented `scripts/ci/ceph-osd-crush-align.py` validation of actual OSD container ready/running; added negative tests rejecting unready/restarting/missing status. Added these code paths to full r217 workflow path filter.
+- Next step: wait for latest exact-SHA r217 full CI, inspect Ceph and final artifact jobs. No claims of r217 readiness/RC publication until complete. Still open: signed/notarized native installers, true physical 3-host HA, hypervisor VM boot restores and vendor-specific provider gaps.
+- Commit one-line summary: Repair real Ceph OSD CRUSH convergence with bounded fail-closed retries and exact-source r217 RC validation.

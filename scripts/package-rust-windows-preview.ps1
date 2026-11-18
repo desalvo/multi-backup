@@ -38,8 +38,50 @@ foreach ($name in @('gh.exe','git-lfs.exe')) {
 }
 & (Join-Path $bundle 'bin/age.exe') --version
 & (Join-Path $bundle 'bin/multi-backup-native.exe') --version
+# Pin the independent Mesa LLVMpipe software OpenGL implementation. This is
+# required by Windows Server GPU-less runners and users whose GPU driver is
+# unavailable. Never download an unpinned/latest executable into the package.
+$mesaVersion = '26.3.0'
+$mesaUrl = "https://github.com/mmozeiko/build-mesa/releases/download/$mesaVersion/mesa-llvmpipe-x64-$mesaVersion.7z"
+$mesaSha256 = '11dc079e356f33ce2ff84aa399c975da1a7bdd4c470f6eef4cf359ad8b9ca80f'
+$mesaArchive = Join-Path $env:RUNNER_TEMP "mesa-llvmpipe-$mesaVersion.7z"
+$mesaStage = Join-Path $env:RUNNER_TEMP "mesa-llvmpipe-unpacked-$mesaVersion"
+if (Test-Path $mesaStage) { throw 'Mesa staging path already exists' }
+Invoke-WebRequest -Uri $mesaUrl -OutFile $mesaArchive -ErrorAction Stop
+$actualSha=(Get-FileHash -LiteralPath $mesaArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualSha -ne $mesaSha256) { throw "Mesa software OpenGL SHA mismatch, refusing supply-chain payload: $actualSha" }
+$sevenZip='C:\Program Files\7-Zip\7z.exe'
+if (!(Test-Path $sevenZip)) { throw 'Trusted installed 7-Zip missing' }
+New-Item -ItemType Directory -Force $mesaStage | Out-Null
+& $sevenZip x -y $mesaArchive "-o$mesaStage" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Mesa archive extraction failed' }
+$glFiles=@(Get-ChildItem -LiteralPath $mesaStage -File -Filter 'opengl32.dll' -Recurse)
+if ($glFiles.Count -ne 1) { throw "Expected exactly one pinned Mesa opengl32.dll, found $($glFiles.Count)" }
+Copy-Item -LiteralPath $glFiles[0].FullName -Destination (Join-Path $bundle 'opengl32.dll')
+Copy-Item -LiteralPath 'packaging/windows/mesa-llvmpipe-notice.txt' -Destination (Join-Path $bundle 'Mesa-LLVMpipe-NOTICE.txt')
+$glSha=(Get-FileHash (Join-Path $bundle 'opengl32.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Output "Bundled pinned Mesa 26.3.0 software OpenGL x64, GL_DLL_SHA256=$glSha"
+
 & (Join-Path $bundle 'MultiBackupRust.exe') --self-test
 if ($LASTEXITCODE -ne 0) { throw 'Bundled Rust preview self-test failed' }
+# Exercise the actual GUI's Mesa llvmpipe software rasterizer before packaging;
+# a CLI-only or fake Win32 test is not accepted.
+$previousMesa=$env:MULTI_BACKUP_FORCE_LLVMPIPE
+try {
+    $env:MULTI_BACKUP_FORCE_LLVMPIPE='1'
+    $mesaGuiLog=Join-Path $env:RUNNER_TEMP 'mesa-llvmpipe-r217-native-gui.txt'
+    & (Join-Path $bundle 'MultiBackupRust.exe') --smoke *>&1 |
+        Tee-Object -FilePath $mesaGuiLog
+    if ($LASTEXITCODE -ne 0) { throw 'Real Windows LLVMpipe egui renderer did not start' }
+    if (!(Select-String -LiteralPath $mesaGuiLog -Pattern 'MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe' -Quiet)) {
+        throw 'Actual Mesa GL renderer identity missing'
+    }
+    if (!(Select-String -LiteralPath $mesaGuiLog -Pattern 'RUST_GUI_PAGE_SMOKE=About' -Quiet)) {
+        throw 'Real GUI did not traverse every page'
+    }
+} finally {
+    $env:MULTI_BACKUP_FORCE_LLVMPIPE=$previousMesa
+}
 # Make the real packaged age.exe/age-keygen.exe available to the native Rust
 # encrypted restore acceptance test. The installed GUI contains no Python.
 $previousPath = $env:PATH

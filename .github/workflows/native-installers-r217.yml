@@ -1,0 +1,157 @@
+name: Multi Backup r217 - actual native Rust installers for Linux Mac and Windows
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ubuntu-deb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare native Rust GUI, age and package dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libasound2-dev libgl1-mesa-dri \
+            xvfb xauth dpkg-dev age jq git git-lfs gh ca-certificates
+      - name: Compile exact SHA GUI CLI agent, install DEB and prove restore
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          cargo build --manifest-path rust/Cargo.toml --release --bin multi-backup-native --bin multi-backup-agent
+          cargo build --manifest-path rust-desktop/Cargo.toml --release --bin multi-backup-desktop
+          bash scripts/ci/package-ubuntu24-r217.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc217-ubuntu24-amd64-native-deb
+          path: packages/*
+          retention-days: 21
+          if-no-files-found: error
+
+  mac-dmg:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build authentic native GUI and relocatable DMG
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -m)" = "$MAC_ARCH"
+          brew install age gh git-lfs
+          bash scripts/package-rust-macos-preview.sh
+      - name: Install from mounted DMG into fresh Applications directory and open GUI
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          old="multi-backup-rust-preview-macos-$MAC_ARCH.dmg"
+          new="multi-backup-r217-rc-preview-macos-$MAC_ARCH.dmg"
+          test -s "$old" && mv "$old" "$new"
+          work="$(mktemp -d)"
+          mkdir -p "$work/mount" "$work/Applications"
+          cleanup(){ hdiutil detach "$work/mount" -quiet || true;rm -rf "$work"; }
+          trap cleanup EXIT
+          hdiutil attach "$new" -readonly -nobrowse -mountpoint "$work/mount" -quiet
+          ditto "$work/mount/Multi Backup Rust Preview.app" "$work/Applications/Multi Backup Rust Preview.app"
+          app="$work/Applications/Multi Backup Rust Preview.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          "$app/Contents/MacOS/Multi Backup" --self-test
+          "$app/Contents/MacOS/Multi Backup" --smoke
+          "$app/Contents/Resources/bin/multi-backup-native" --version
+          "$app/Contents/Resources/bin/age" --version
+          shasum -a 256 "$new" > "$new.sha256"
+          printf '%s\n' "$GITHUB_SHA" > "SOURCE_SHA-mac-$MAC_ARCH.txt"
+          echo 'Verified installed ad-hoc signed Rust DMG; NOT Apple-notarized' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc217-macos-${{ matrix.arch }}-adhoc-dmg
+          path: |
+            multi-backup-r217-rc-preview-macos-${{ matrix.arch }}.dmg
+            multi-backup-r217-rc-preview-macos-${{ matrix.arch }}.dmg.sha256
+            SOURCE_SHA-mac-${{ matrix.arch }}.txt
+          retention-days: 21
+          if-no-files-found: error
+
+  win-inno:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native Rust CLI/GUI, verify real Inno Setup compiler and generate installer
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Wrong source SHA' }
+          if (!(Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) { throw 'Inno Setup compiler absent' }
+          ./scripts/package-rust-windows-preview.ps1
+      - name: Silent install EXE at new path and launch real Windows D3D12 LLVMpipe GUI
+        shell: pwsh
+        env:
+          MULTI_BACKUP_FORCE_LLVMPIPE: "1"
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $PWD 'installers/multi-backup-rust-preview-windows-x64.exe'
+          if (!(Test-Path $installer)) { throw 'Native installer missing' }
+          $dest=Join-Path $env:RUNNER_TEMP 'MBR217FreshInstall'
+          if (Test-Path $dest) { throw 'Expected fresh installation path' }
+          $arg="/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=$dest"
+          $process=Start-Process -FilePath $installer -ArgumentList $arg -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer code $($process.ExitCode)" }
+          $gui=Join-Path $dest 'MultiBackupRust.exe'
+          $cli=Join-Path $dest 'bin/multi-backup-native.exe'
+          $age=Join-Path $dest 'bin/age.exe'
+          foreach ($p in @($gui,$cli,$age)) { if (!(Test-Path $p)) { throw "Installed file missing: $p" } }
+          & $gui --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'GUI self-test failed' }
+          $guiLog=Join-Path $env:RUNNER_TEMP 'multi-backup-warp-installed-r217.log'
+          & $gui --smoke *>&1 | Tee-Object -FilePath $guiLog
+          if ($LASTEXITCODE -ne 0) { throw 'Native GUI launch failed' }
+          if (!(Select-String -LiteralPath $guiLog -Pattern 'MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe' -Quiet)) { throw 'Real LLVMpipe rendering not activated' }
+          if (!(Select-String -LiteralPath $guiLog -Pattern 'RUST_GUI_PAGE_SMOKE=About' -Quiet)) { throw 'Native GUI did not render all sidebar pages' }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw 'CLI failed' }
+          & $age --version
+          if ($LASTEXITCODE -ne 0) { throw 'Age helper failed' }
+          $sha=(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  $([IO.Path]::GetFileName($installer))" | Set-Content -Encoding ascii SHA256SUMS-win-r217.txt
+          Set-Content -Encoding ascii SOURCE_SHA-win-r217.txt $env:GITHUB_SHA
+          Write-Output 'PASS installed Inno native Windows Rust GUI, CLI and age; UNSIGNED RC preview'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc217-windows-x64-unsigned-inno
+          path: |
+            installers/multi-backup-rust-preview-windows-x64.exe
+            multi-backup-rust-preview-windows-x64.zip
+            SHA256SUMS-win-r217.txt
+            SOURCE_SHA-win-r217.txt
+          retention-days: 21
+          if-no-files-found: error
+
+  all-platforms:
+    needs: [ubuntu-deb, mac-dmg, win-inno]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every real installation job successful
+        env:
+          LINUX: ${{ needs.ubuntu-deb.result }}
+          MAC_BOTH: ${{ needs.mac-dmg.result }}
+          WINDOWS: ${{ needs.win-inno.result }}
+        run: |
+          set -euo pipefail
+          for result in "$LINUX" "$MAC_BOTH" "$WINDOWS"; do
+            if test "$result" != success;then echo "DENY native RC: $result" >&2; exit 1; fi
+          done
+          echo 'PASS Linux DEB, macOS ARM+Intel installed DMGs, Windows Inno installed EXE; all unsigned/adhoc early RC only' >> "$GITHUB_STEP_SUMMARY"

@@ -2174,6 +2174,59 @@ fn configure_bundled_helpers() {
     }
 }
 
+/// On virtual Windows hosts (including GitHub's Windows 2025 runner) a D3D12
+/// device may be present only as Microsoft WARP. eframe 0.30 explicitly asks
+/// wgpu for force_fallback_adapter=false, so the default window cannot start.
+/// Create the real D3D12 WARP device instead and give eframe its real adapter,
+/// device and queue. This is actual egui rendering, not a placeholder window.
+#[cfg(windows)]
+fn windows_warp_wgpu() -> Result<eframe::egui_wgpu::WgpuConfiguration,String> {
+    use eframe::{egui_wgpu::WgpuSetup, wgpu};
+    let instance=wgpu::Instance::new(wgpu::InstanceDescriptor{
+        backends:wgpu::Backends::DX12, ..Default::default()
+    });
+    let adapter=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions{
+        power_preference:wgpu::PowerPreference::LowPower,
+        compatible_surface:None,
+        force_fallback_adapter:true,
+    })).ok_or("No genuine Microsoft WARP / CPU D3D12 adapter is available")?;
+    let info=adapter.get_info();
+    if !matches!(info.device_type,wgpu::DeviceType::Cpu|wgpu::DeviceType::Other){
+        return Err(format!("Software renderer unexpectedly selected non-CPU device: {}",info.name));
+    }
+    let limits=wgpu::Limits{max_texture_dimension_2d:8192.min(adapter.limits().max_texture_dimension_2d),
+        ..wgpu::Limits::downlevel_defaults()};
+    let (device,queue)=pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor{
+            label:Some("Multi Backup Windows CPU renderer"),
+            required_features:wgpu::Features::empty(),
+            required_limits:limits,
+            memory_hints:wgpu::MemoryHints::default(),
+        },None)).map_err(|e|format!("Cannot initialize genuine software device: {e}"))?;
+    let mut config=eframe::egui_wgpu::WgpuConfiguration::default();
+    config.wgpu_setup=WgpuSetup::Existing{
+        instance:Arc::new(instance),
+        adapter:Arc::new(adapter),
+        device:Arc::new(device),
+        queue:Arc::new(queue),
+    };
+    println!("MULTI_BACKUP_GUI_RENDERER=Windows_D3D12_WARP name={}",info.name);
+    Ok(config)
+}
+
+#[cfg(windows)]
+fn windows_requires_software_renderer()->bool{
+    use eframe::wgpu;
+    // Explicit opt-in is useful for verifying WARP on actual GPU hosts.
+    if std::env::var_os("MULTI_BACKUP_FORCE_WARP").is_some(){return true;}
+    let instance=wgpu::Instance::new(wgpu::InstanceDescriptor{
+        backends:wgpu::Backends::DX12,..Default::default()
+    });
+    !instance.enumerate_adapters(wgpu::Backends::DX12)
+        .iter().any(|a|matches!(a.get_info().device_type,
+            wgpu::DeviceType::DiscreteGpu|wgpu::DeviceType::IntegratedGpu|wgpu::DeviceType::VirtualGpu))
+}
+
 fn main() -> eframe::Result {
     configure_bundled_helpers();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -2191,19 +2244,53 @@ fn main() -> eframe::Result {
         println!("Native Rust GUI self-test OK"); return Ok(());
     }
     let smoke = args.len() == 1 && args[0] == "--smoke";
-    let options = eframe::NativeOptions {
+    #[cfg(windows)]
+    let software_rendering=windows_requires_software_renderer();
+    #[cfg(windows)]
+    let mesa_software_rendering=std::env::var_os("MULTI_BACKUP_FORCE_LLVMPIPE").is_some() ||
+        (software_rendering && std::env::var_os("MULTI_BACKUP_FORCE_WARP").is_none());
+    let mut options = eframe::NativeOptions {
         #[cfg(windows)]
-        renderer: eframe::Renderer::Wgpu,
+        renderer: if mesa_software_rendering { eframe::Renderer::Glow } else { eframe::Renderer::Wgpu },
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("Multi Backup · {VERSION}"))
             .with_inner_size([1320.0, 890.0])
             .with_min_inner_size([860.0, 620.0]),
         ..Default::default()
     };
+    #[cfg(windows)]
+    if software_rendering && !mesa_software_rendering {
+        // Request a real WARP D3D12 device; fail closed if no such adapter can
+        // create a real surface. No synthetic PASS in software-only CI.
+        options.wgpu_options=match windows_warp_wgpu(){
+            Ok(config)=>config,
+            Err(error)=>{
+                eprintln!("No actual Windows software GUI renderer: {error}");
+                return Err(eframe::Error::Wgpu(
+                    eframe::egui_wgpu::WgpuError::NoSuitableAdapterFound));
+            }
+        };
+    }
     // Do not turn graphical-runner failure into a fake green smoke.
     // Real backend errors are reported and returned to the caller.
     let result=eframe::run_native("Multi Backup", options,
-        Box::new(move |cc| Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))));
+        Box::new(move |cc| {
+            #[cfg(windows)]
+            if mesa_software_rendering {
+                use eframe::glow::HasContext;
+                // Verify the REAL native GL renderer, not only an environment
+                // variable, before counting the Windows GPU-less GUI as PASS.
+                let gl=cc.gl.as_ref().ok_or_else(||std::io::Error::other(
+                    "Cannot create a native Windows OpenGL context"))?;
+                let renderer=unsafe {gl.get_parameter_string(eframe::glow::RENDERER)};
+                if !renderer.to_ascii_lowercase().contains("llvmpipe") {
+                    return Err(std::io::Error::other(
+                        format!("Mesa software renderer required; actual OpenGL adapter={renderer}")).into());
+                }
+                println!("MULTI_BACKUP_GUI_RENDERER=Windows_Mesa_LLVMpipe actual={renderer}");
+            }
+            Ok(Box::new(NativeApp::new(&cc.egui_ctx, smoke)))
+        }));
     if let Err(ref failure)=result {
         eprintln!("Native GUI startup failed: {failure}");
     }
@@ -2322,8 +2409,8 @@ mod provider_gui_tests{
             matches!(p.backup_input,plugins::Stage::Ready) ||
             matches!(p.backup_output,plugins::Stage::Ready)).collect::<Vec<_>>();
         assert_eq!(ready.iter().map(|p|p.id).collect::<Vec<_>>(),
-            vec!["posix","s3","webdav","cephfs","lustre","rbd","iscsi","mysql",
-                 "postgresql","oracle","ssh","sshfs","anti-ransomware-vault"]);
+            vec!["posix","s3","webdav","nfs","smb","cephfs","glusterfs","lustre","rbd",
+                 "iscsi","mysql","postgresql","oracle","ssh","sshfs","anti-ransomware-vault"]);
         assert!(ready.iter().all(|p|p.ready_scope.is_some()),
             "Every visible Ready label must reveal the exact supported scope");
         assert!(plugins::CATALOG.iter().filter(|p|p.ready_scope.is_none())
