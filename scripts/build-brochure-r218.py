@@ -159,7 +159,21 @@ READY = [
  ("SSH / SSHFS / Lustre", "Pinned file, mounted target and real kernel MDT/OST byte contents"),
  ("NFSv3 / SMB3 / GlusterFS", "Mounted file FULL/INC and new-path restore on genuine server labs")
 ]
-def build(lang, destination):
+
+def captured_screen(root,name,caption):
+    """Never silently fall back to a legacy Tk screenshot or a mock drawing."""
+    from PIL import Image as PIL
+    file=root/name
+    if not file.is_file():
+        raise FileNotFoundError(f"Missing actual Rust UI screenshot: {file}")
+    with PIL.open(file) as im:
+        width,height=im.size
+    if width<360 or height<300:raise RuntimeError("Unusable screenshot")
+    scale=min(172*mm/width,119*mm/height)
+    return [Image(str(file),width*scale,height*scale),
+            p(caption,"small")]
+
+def build(lang, destination, screenshots):
     content = TEXT[lang]
     destination.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(str(destination), pagesize=A4,
@@ -189,6 +203,29 @@ def build(lang, destination):
     story.append(p(content["limits"],"h1"))
     for value in content["limits_items"]:
         story.append(p("•  "+value))
+    story.append(PageBreak())
+    if lang=="IT":
+        story.append(p("Interfaccia desktop Rust attuale","h1"))
+        story.append(p("Schermata della vera applicazione Rust egui, acquisita in un profilo isolato senza credenziali. Non è l'interfaccia Tk delle vecchie versioni.","body"))
+    else:
+        story.append(p("Current native Rust desktop","h1"))
+        story.append(p("Screenshot of the actual Rust egui app with a credential-free disposable profile. This is not the former Tk application.","body"))
+    story.extend(captured_screen(screenshots,"desktop-dashboard.png",
+        "Real native Rust application · screenshot at the source SHA."))
+    story.append(PageBreak())
+    story.append(p("Console server Rust · Cloud Drive" if lang=="IT" else
+                   "Rust web server · Cloud Drive","h1"))
+    story.append(p("Interfaccia HTML/CSS/JS reale del server con dati di test sintetici, non account reali." if lang=="IT" else
+                   "Actual server HTML/CSS/JS UI with synthetic API fixture data, not a live account.","body"))
+    story.extend(captured_screen(screenshots,"web-cloud-drives-fixture.png",
+        "REAL Rust server frontend; SYNTHETIC test data / dati sintetici."))
+    story.append(PageBreak())
+    story.append(p("Client remoti responsive" if lang=="IT" else
+                   "Responsive mobile remote clients","h1"))
+    story.append(p("Rendering web responsive corrente; non uno screenshot acquisito da dispositivo iOS/Android." if lang=="IT" else
+                   "Current responsive web rendering; not a physical iOS/Android device capture.","body"))
+    story.extend(captured_screen(screenshots,"mobile-cloud-drive-fixture.png",
+        "Actual mobile-sized Rust server UI; SYNTHETIC fixture, not a native device capture."))
     story.extend([Spacer(1,10*mm),p(content["footer"],"small"),
                   p("github.com/desalvo/multi-backup", "h2")])
     doc.build(story,onFirstPage=mark,onLaterPages=mark)
@@ -196,8 +233,10 @@ def build(lang, destination):
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--out",type=Path,default=ROOT/"docs/brochures")
+    parser.add_argument("--screenshots",type=Path,required=True,
+                        help="Real current-SHA desktop and server UI captures")
     args=parser.parse_args()
     for language in ("IT","EN"):
         output=args.out/f"Multi-Backup-Brochure-{language}.pdf"
-        build(language,output)
+        build(language,output,args.screenshots)
         print(output,output.stat().st_size)
