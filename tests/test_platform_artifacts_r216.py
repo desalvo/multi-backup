@@ -23,7 +23,8 @@ def create_fixture(root:Path):
         check=folder/(name+checksum if checksum!="SHA256SUMS-win-r216.txt" else checksum)
         if not check.name.endswith(checksum):
             check=folder/(name+checksum)
-        check.write_text(f"{hashval}  {name}\n")
+        recorded=f"packages/{name}" if group=="rc216-ubuntu24-amd64-native-deb" else name
+        check.write_text(f"{hashval}  {recorded}\n")
 
 class InstallerProof(unittest.TestCase):
     def test_valid_four_full_artifacts(self):

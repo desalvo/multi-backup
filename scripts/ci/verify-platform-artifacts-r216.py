@@ -53,6 +53,11 @@ def verify(root:Path, sha:str)->list[dict]:
         if archive.stat().st_size<16384:
             raise UntrustedPackage(f"Installer unexpectedly small: {archive.name}")
         line=checks[0].read_text(encoding="ascii").strip()
+        # The Ubuntu packager correctly emits "packages/filename.deb" because
+        # it hashes before upload. Artifacts are flattened by upload-artifact,
+        # so accept exactly that one trusted prefix, never arbitrary paths.
+        if name=="rc216-ubuntu24-amd64-native-deb" and line.count("  packages/")==1:
+            line=line.replace("  packages/","  ",1)
         hit=HASHLINE.fullmatch(line)
         if hit is None or hit.group(2)!=archive.name:
             raise UntrustedPackage(f"Checksum not strictly associated with packaged binary: {name}")
