@@ -1067,7 +1067,7 @@ impl NativeApp {
         ui.heading("Cloud Drive · mount nativo locale");
         ui.label("Dropbox, Google Drive, OneDrive, ownCloud, Nextcloud, iCloud e cloud compatibili. "
             .to_owned()+"Il mount e' un processo rclone subordinato alla app, senza Python e senza interfacce rclone RC.");
-        ui.label(RichText::new("La configurazione rclone, i token e le password NON sono salvati nelle preferenze GUI. "+
+        ui.label(RichText::new("La configurazione rclone, i token e le password NON sono salvati nelle preferenze GUI. ".to_owned()+
             "Un mount FUSE/WinFsp non garantisce metadata POSIX o snapshot atomici.").color(MUTED));
         ui.separator();
         ui.label("Registro cloud JSON privato (chmod 0600 / ACL utenti)");
@@ -1106,7 +1106,7 @@ impl NativeApp {
                 if p.provider=="icloud"||!p.allow_upload{"non abilitato"}else{"consentito dal profilo"},
                 if p.allow_delete{"permessa dalla policy"}else{"vietata"}));
             if p.provider=="icloud"{
-                ui.label(RichText::new("Il backend rclone remoto iCloud è RO. "+
+                ui.label(RichText::new("Il backend rclone remoto iCloud è RO. ".to_owned()+
                     "Per B-Out usare il File Provider locale macOS con accesso esplicitamente autorizzato.").color(MUTED));
             }
         }
@@ -1137,7 +1137,7 @@ impl NativeApp {
         });
         ui.label(RichText::new(&self.cloud_mount_status).color(MUTED));
         ui.separator();
-        ui.label("I backup cifrati sul mount si visualizzano e ripristinano solo dopo "+
+        ui.label("I backup cifrati sul mount si visualizzano e ripristinano solo dopo ".to_owned()+
             "copia coerente in cache privata e verifica age; non scrivere su un live chunk store FUSE.");
     }
 
