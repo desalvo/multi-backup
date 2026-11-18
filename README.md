@@ -1,5 +1,15 @@
 # Multi Backup
 
+## r218 — Cloud Drive, iCloud B-In/B-Out and native mobile server consoles
+
+**r217 installable RC0 CI: PASS** [full CI #44246558178](https://github.com/desalvo/multi-backup/actions/runs/44246558178), exact SHA b085abc. Four genuine native installer smoke tests, CephFS/RBD and required field groups passed. The CI-produced unsigned RC0 bundle is not a signed stable public release.
+
+**r218 development preview** adds universal unsigned iOS/iPadOS and Android remote-server clients, responsive server GUI, and seven rclone-backed cloud-drive explorers/mounts (Dropbox, Google Drive, iCloud Drive, OneDrive, ownCloud, Nextcloud, Box). Linux/macOS FUSE and Windows WinFsp mounts are read-only by default; the authenticated server browser exposes directory listing, bounded downloads, and separately opt-in admin upload/delete. iCloud Drive now has native Rust single-file age-encrypted B-In and encrypted create-new B-Out, **PREVIEW, not READY**. Backup catalog is now **34** entries, **16** bounded READY scopes. Non-atomic cloud object deletion/creation and mobile unsigned install require further qualification.
+
+Guides: [platforms](docs/PLATFORMS_R218_EN.md), [mobile](docs/MOBILE_CLIENTS_R218_EN.md), [cloud mount + restore (IT)](docs/CLOUD_DRIVES_MOUNT_RESTORE_R218_IT.md), [iCloud backup (IT)](docs/ICLOUD_B_IN_OUT_R218_IT.md), [optional fresh bilingual brochures](docs/brochures/README.md).
+
+
+
 ### r039+ Native Rust filesystem and OpenAFS executors (development preview)
 
 Eight generic input filesystem paths to encrypted POSIX chunk storage now include CephFS, GlusterFS and Lustre, requiring an exact pre-mounted Linux RO filesystem and explicit snapshot attestation. Six verified POSIX-store restore outputs can create new directories on POSIX, NFS, SSHFS, CephFS, GlusterFS and Lustre, with exact RW mount checks. The separate OpenAFS plugin streams typed local/SSH-agentless full/incremental vos dump into age/zstd/8+2 protected chunks, and can restore a verified volume dump chain to a NEW AFS volume only, with explicit confirmation. See [IT](docs/PLUGIN_EXECUTORS_R039_IT.md) and [EN](docs/PLUGIN_EXECUTORS_R039_EN.md). These are NOT production certified; provider credentials/keytab, remote recovery and live AFS/ACL/VLDB/HA tests remain open.

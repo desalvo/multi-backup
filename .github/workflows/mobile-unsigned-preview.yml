@@ -36,12 +36,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
-      - name: Install Android 35 SDK from preinstalled runner command line tools
-        run: |
-          set -euo pipefail
-          command -v sdkmanager
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platforms;android-35 build-tools;35.0.0 platform-tools"
       - name: Compile genuine native unsigned APK
         run: gradle -p mobile/android --no-daemon :app:assembleRelease
       - name: Verify unsigned output and source SHA

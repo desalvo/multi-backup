@@ -647,19 +647,19 @@ mod tests {
         assert!(find("gpfs").unwrap().ready_scope.is_none());
     }
     #[test]
-    fn all_32_requested_input_plugins_and_25_outputs_are_listed() {
-        let inputs = ["github", "dropbox", "google-drive", "onedrive", "posix",
+    fn all_33_requested_input_plugins_and_26_outputs_are_listed() {
+        let inputs = ["github", "dropbox", "icloud", "google-drive", "onedrive", "posix",
             "s3", "webdav", "nfs", "smb", "cephfs", "rbd", "proxmox", "pbs",
             "kubernetes", "vmware", "ovirt", "mysql", "postgresql", "ssh",
             "iscsi", "fc", "nvmeof", "glusterfs", "lustre", "gpfs",
             "hdfs", "afs", "alfresco", "owncloud", "nextcloud", "sshfs",
             "oracle"];
-        let outputs = ["posix", "dropbox", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
+        let outputs = ["posix", "dropbox", "icloud", "s3", "webdav", "cephfs", "nfs", "ssh", "pbs",
             "iscsi", "fc", "nvmeof", "anti-ransomware-vault", "glusterfs",
             "lustre", "gpfs", "hdfs", "afs", "alfresco", "google-drive", "onedrive",
             "owncloud", "nextcloud", "sshfs", "smb", "proxmox"];
-        assert_eq!(catalog_for(Mode::Backup, true).len(), 32);
-        assert_eq!(catalog_for(Mode::Backup, false).len(), 25);
+        assert_eq!(catalog_for(Mode::Backup, true).len(), 33);
+        assert_eq!(catalog_for(Mode::Backup, false).len(), 26);
         assert_eq!(CATALOG.len(), 34);
         for id in inputs { assert!(find(id).unwrap().backup_input.listed(), "{id}"); }
         for id in outputs { assert!(find(id).unwrap().backup_output.listed(), "{id}"); }
@@ -668,8 +668,8 @@ mod tests {
     }
     #[test]
     fn restore_reverses_backup_roles_without_claiming_write_support() {
-        assert_eq!(catalog_for(Mode::Restore, true).len(), 25);
-        assert_eq!(catalog_for(Mode::Restore, false).len(), 32);
+        assert_eq!(catalog_for(Mode::Restore, true).len(), 26);
+        assert_eq!(catalog_for(Mode::Restore, false).len(), 33);
         for entry in CATALOG {
             if matches!(entry.id,"s3"|"ssh"|"webdav"|"proxmox"|"pbs") {
                 // No S3/SSH/PVE/PBS full native provider-side remote restore.

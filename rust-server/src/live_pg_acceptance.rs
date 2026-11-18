@@ -399,6 +399,7 @@ fn real_pg_agent_encrypted_upload_no_clobber_and_restore(){
         password_hash:String::new(),
         origin:"http://127.0.0.1:8080".into(),
         security:SecurityPolicy::from_env("http://127.0.0.1:8080").unwrap(),
+        cloud_config:None,cloud_write_enabled:false,cloud_delete_enabled:false,
         root:PathBuf::from(temp.path()),
         identity:None,
         immutable_vault_root:None,

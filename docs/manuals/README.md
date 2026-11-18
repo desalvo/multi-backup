@@ -7,3 +7,8 @@
 - Non presumere che i PDF attualmente tracciati nel repository siano stati già sostituiti: per una copia rigenerata usare gli artifact della CI `native-gui-and-about-preview` relativi a un run r038 completato positivamente. Pubblicare/sostituire i PDF ufficiali solo quando la versione e la certificazione dei pacchetti sono allineate.
 
 Per verifiche e limiti si veda [l'indice della documentazione](../DOCUMENTATION_INDEX_R038.md).
+
+
+## r218 addendum (2026-11-18)
+
+La documentazione per l'attuale console Rust responsive, le app mobili iOS/iPadOS/Android, il mount cloud FUSE/WinFsp e il browser cloud autenticato è disponibile in [matrice piattaforme](../PLATFORMS_R218_IT.md), [client mobili](../MOBILE_CLIENTS_R218_IT.md), [Cloud Drive e restore](../CLOUD_DRIVES_MOUNT_RESTORE_R218_IT.md), [iCloud Drive B-In/B-Out](../ICLOUD_B_IN_OUT_R218_IT.md). I PDF storici di questa directory contengono schermate Python/Tk precedenti e NON descrivono queste preview.

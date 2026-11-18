@@ -48,3 +48,8 @@ xcodebuild -project mobile/ios/MultiBackupMobile.xcodeproj -scheme MultiBackupMo
 ```
 
 Le build sono solo preview: prima di chiamare READY un client richiedere test di login/logout effettivi, attacco TLS, UI su schermi piccoli e restore server controllato. Le brochure aggiornate sono generate in workflow separato e mostrano chiaramente questi limiti.
+
+
+## r218 Cloud Drive
+
+L'app mobile visualizza la stessa console web Rust del server, ora con sezione **Cloud Drive** per navigare directory, scaricare file e, solo se abilitate dal server, effettuare upload di nuovi oggetti o cancellazioni puntuali autorizzate. I mount FUSE/WinFsp POSIX non sono disponibili nativamente su iPhone/iPad/Android; il client vi accede attraverso il server. Il browser di un cloud remoto non è l'elenco dei file interni a un archivio age: quello richiede import verificato, manifest e selezione di restore. Vedi [guida cloud](CLOUD_DRIVES_MOUNT_RESTORE_R218_IT.md).

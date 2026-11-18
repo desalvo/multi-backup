@@ -76,14 +76,15 @@ def mark(page, doc):
 TEXT = {
  "IT": {
  "tag": "Backup cifrati, restore verificato e gestione remota multi-piattaforma.",
- "notice": "Edizione di sviluppo 18 novembre 2026. La r218 aggiunge sorgenti di client mobili non firmati; la RC r217 non è ancora certificata.",
+ "notice": "Edizione di sviluppo 18 novembre 2026. La r218 aggiunge client mobili e cloud remoti; il gate CI della RC0 r217 è verde ma la distribuzione pubblica firmata non è ancora certificata.",
  "intro": "Una piattaforma, più ambienti",
  "intro_text": "Motore Rust, server web autenticato, agenti e catalogo plugin per acquisire dati e ripristinarli in destinazioni nuove senza sovrascrivere gli originali. Archivi cifrati age, verifica SHA-256, checkpoint, audit e regole di sicurezza a privilegi minimi.",
  "news": "Principali novità dalla brochure precedente (r038)",
  "news_items": [
+  "Cloud Drive unificati: Dropbox, Google Drive, iCloud Drive, OneDrive, ownCloud, Nextcloud e Box, con mount FUSE/WinFsp e browser remoti, download e upload/delete opt-in (Preview).",
   "Client nativi REMOTI iOS/iPadOS (SwiftUI e WKWebView) e Android (Java e WebView), stessa console server e layout responsive per smartphone/tablet.",
   "App Rust desktop con installer reali: Ubuntu 24 .deb; macOS Apple Silicon e Intel .dmg; Windows x64 Inno con rendering software su host senza GPU.",
-  "16 percorsi di provider READY soltanto per operazioni circoscritte, testati con laboratori veri; catalogo completo di 33 plugin. Ogni altro scenario resta preview.",
+  "16 percorsi di provider READY soltanto per operazioni circoscritte, testati con laboratori veri; catalogo completo di 34 plugin. Ogni altro scenario resta preview.",
   "Server Rust con cluster PostgreSQL, agenti, Kubernetes, gestione job, audit, REST monitoraggio, SNMP, SMTP e policy di accesso.",
   "Vault cifrato con esperimenti MinIO Object Lock COMPLIANCE e IAM separato; l'immunità contro root/guasti fisici non è certificata.",
   "Laboratori reali MySQL 8.4, PostgreSQL/MariaDB, Oracle Free RMAN, CephFS/RBD, iSCSI, S3, NFS, SMB, GlusterFS, SSH/SSHFS, WebDAV e Lustre."
@@ -101,7 +102,7 @@ TEXT = {
   ("Browser", "Console responsive via HTTPS sul server", "Stesse API e sessioni del server; login locale")
  ],
  "status": "Stato della release candidate",
- "status_text": "La full CI r217 ha collaudato separatamente quattro installer nativi e molte famiglie di provider. Il gate complessivo richiede anche CephFS/RBD: un run fallito non genera la RC. Le build mobili sono volutamente indipendenti e non bloccano la RC.",
+ "status_text": "Full CI r217 #44246558178 completata verde su SHA b085abc: quattro installer nativi realmente collaudati, CephFS/RBD incluso, bundle RC0 CI non firmato creato. Mancano firme, notarizzazione e release stabile. Le build r218 mobili/cloud rimangono indipendenti e non bloccano questa RC.",
  "limits": "Limiti di certificazione ancora aperti",
  "limits_items": [
   "Firma Apple, notarizzazione, Windows Authenticode e package signing RPM/DEB.",
@@ -113,14 +114,15 @@ TEXT = {
  },
  "EN": {
  "tag": "Encrypted backups, verified recovery and cross-platform remote operations.",
- "notice": "Development edition, 18 November 2026. r218 adds unsigned mobile client sources; r217 RC is not yet certified.",
+ "notice": "Development edition, 18 November 2026. r218 adds unsigned mobile clients and cloud browsing; r217 RC0 exact-source CI is green, but signed public distribution remains uncertified.",
  "intro": "One platform, many environments",
  "intro_text": "Rust engine, authenticated web server, agents and a pluggable provider catalog for acquisition and new-target restore without overwriting original data. Age encryption, SHA-256 verification, checkpoints, audit logs and least-privilege security controls.",
  "news": "What's new since the previous r038 brochure",
  "news_items": [
+  "Universal Cloud Drive browser and FUSE/WinFsp mount: Dropbox, Google Drive, iCloud Drive, OneDrive, ownCloud, Nextcloud, Box; download and opt-in upload/delete (Preview).",
   "Native REMOTE iOS/iPadOS (SwiftUI/WKWebView) and Android (Java/WebView) clients, sharing the server console with responsive mobile/tablet layouts.",
   "Rust desktop native installers: Ubuntu 24 .deb; macOS Apple Silicon and Intel .dmg; Windows x64 Inno with software rendering on GPU-less hosts.",
-  "16 provider paths READY only for tightly bounded operations, field-tested in genuine labs; 33 total catalog entries. Other scopes remain preview.",
+  "16 provider paths READY only for tightly bounded operations, field-tested in genuine labs; 34 total catalog entries. Other scopes remain preview.",
   "Rust server with PostgreSQL shared cluster, agents, Kubernetes, job orchestration, audit, monitoring REST, SNMP, SMTP and access policy.",
   "Encrypted vault and real MinIO Object Lock COMPLIANCE with separate IAM; root/physical immunity is not certified.",
   "Real labs for MySQL 8.4, PostgreSQL/MariaDB, Oracle Free RMAN, CephFS/RBD, iSCSI, S3, NFS, SMB, GlusterFS, SSH/SSHFS, WebDAV and Lustre."
@@ -138,7 +140,7 @@ TEXT = {
   ("Browser", "Responsive HTTPS web console", "Existing server APIs and sessions; local login")
  ],
  "status": "Release candidate status",
- "status_text": "r217 CI separately passed four real native installer tests and many provider field families. The complete gate also requires CephFS/RBD: failed runs cannot produce an RC. Mobile builds are intentionally independent and cannot block the RC.",
+ "status_text": "r217 full CI #44246558178 passed at SHA b085abc, including four real native installer tests, CephFS/RBD and an unsigned installable RC0 CI bundle. Signed public release is still pending. r218 mobile and cloud workflows are independent and cannot block this RC.",
  "limits": "Certification gaps",
  "limits_items": [
   "Apple signing/notarization, Windows Authenticode, signed RPM/DEB packages.",

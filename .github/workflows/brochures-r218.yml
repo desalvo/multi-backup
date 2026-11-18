@@ -35,7 +35,7 @@ jobs:
               pdf=PdfReader(str(path))
               content=" ".join(page.extract_text() or "" for page in pdf.pages)
               assert len(pdf.pages)>=3
-              for marker in ("Multi Backup", "Android", "iPadOS", "16", "33", "VMware"):
+              for marker in ("Multi Backup", "Android", "iPadOS", "16", "34", "VMware"):
                   if marker=="VMware": continue # explained in platform documentation
                   assert marker in content, marker
               print(lang,len(pdf.pages),path.stat().st_size)
