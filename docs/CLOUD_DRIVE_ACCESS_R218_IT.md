@@ -71,3 +71,29 @@ Il workflow cloud-bridge-r218.yml collauda i profili/mount con test negativi, la
 
 ## Blocchi per READY completo
 Provisioning/supervisione mount dalla GUI multi-OS; streaming upload/download >8MiB; autentico collaudo OAuth/provider e File Provider iCloud su Apple ID isolato; recupero browsing da chunk store remoto con caching coerente; policy fine-grained per utenti/ruoli; lock per oggetti; upload create-only atomico, idempotenza e retry; audit persistente dei CRUD; sincronizzazione/vettore versione cloud; retention/hold remoti; negative test offline/token scaduto e rollback; collaudo su Windows WinFsp e macOS Finder oltre al Linux FUSE.
+
+## Selective restore from a mounted cloud age chunk store (new r218 tool)
+
+The Rust backup browsing/selection requirement is supported by scripts/cloud/mounted_backup_restore.py. It checks that the source is a real mounted cloud filesystem, rejects symlinks/special files/unsafe paths, requires an explicit source quiescence assertion, and copies encrypted store objects to a private local cache with double-read SHA checks. Rust authenticates the age manifest and chunk-chain before listing or writing selected content to a NEW destination. The cache is temporary and deleted even when the operation fails. This is a Preview; not proof of multi-object atomic snapshot support.
+
+Read-only list of logical archives (on a trusted actual FUSE mount, with the original age identity stored locally):
+
+    python3 scripts/cloud/mounted_backup_restore.py \
+      --mount-point /mnt/nextcloud --cloud-store-subdir MultiBackup \
+      --source-quiesced YES_SOURCE_QUIESCED \
+      --cache-parent /private/cache --age-identity /private/keys/identity.txt \
+      --native /usr/local/bin/multi-backup-native --mode list
+
+Restore one selected file to a completely new local directory:
+
+    python3 scripts/cloud/mounted_backup_restore.py \
+      --mount-point /mnt/nextcloud --cloud-store-subdir MultiBackup \
+      --source-quiesced YES_SOURCE_QUIESCED \
+      --cache-parent /private/cache --age-identity /private/keys/identity.txt \
+      --native /usr/local/bin/multi-backup-native --mode restore \
+      --id FULL_64_HEX_BACKUP_ID --selection example/readme.txt \
+      --destination /private/restore-new
+
+On a signed-in Mac, --file-provider-macos permits the system-managed local iCloud Drive directory instead of a distinct FUSE mount, but only within that exact File Provider root.
+
+Current RC distinction: the old server UI already browses/restores local age-backed logical archives; this new tool stages remote cloud encrypted stores and calls the same Rust CLI. Automatic background hydration, GUI drag-and-drop and streaming >8MiB cloud HTTP uploads still require further integration.

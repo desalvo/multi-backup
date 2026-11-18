@@ -26,6 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_cloud_mount_r218.py -v
+          python3 -m unittest discover -s tests -p test_mounted_backup_restore_r218.py -v
           bash -n scripts/macos/multi-backup-icloud.sh
           python3 -m py_compile scripts/cloud/cloud_mount.py
   icloud-macos:

@@ -1124,3 +1124,14 @@ One-line English commit summary: Normalize Ubuntu SHA checksum path and version 
 - Implemented `scripts/ci/ceph-osd-crush-align.py` validation of actual OSD container ready/running; added negative tests rejecting unready/restarting/missing status. Added these code paths to full r217 workflow path filter.
 - Next step: wait for latest exact-SHA r217 full CI, inspect Ceph and final artifact jobs. No claims of r217 readiness/RC publication until complete. Still open: signed/notarized native installers, true physical 3-host HA, hypervisor VM boot restores and vendor-specific provider gaps.
 - Commit one-line summary: Repair real Ceph OSD CRUSH convergence with bounded fail-closed retries and exact-source r217 RC validation.
+
+## 2026-11-18 — r218 unified cloud Drive POSIX/server CRUD + selective restore
+
+- Branch feature/r218-icloud-bidir-server-demo based on green r217 SHA b085abc81f986e053fd0655e0fb24656a47665aa (CI run #44246558178 32/32 green). This remains a separate nonpublishing Preview feature.
+- Added iCloud catalog B-In/B-Out at PREVIEW, native macOS NSFileCoordinator Swift bridge + age CLI wrapper for local File Provider. Server-side rclone iCloud is read-only; Apple cloud sync receipt and login not certified.
+- Added authenticated Rust server cloud profiles/list/download/upload/delete with exact configured rclone profiles, no RC management listener, CSRF/origin/offline approval on mutations, 8 MiB limit, encrypted .age delete refusal. Browser cloud UI integrated.
+- Added supervised rclone desktop mount manager (Linux/macOS/Windows where FUSE/WinFsp exists), provider capabilities and security negatives.
+- Added genuine Docker Rust demo with loopback-only fixed demo account and seeded age chunk store, local rclone alias provider, login and real HTTP CRUD. Test workflow #44251158056 was 3/3 green for mount paths, Swift compilation and Docker server end-to-end. NOT a real cloud-provider certification.
+- Added scripts/cloud/mounted_backup_restore.py: real mounted-cloud chunk store staging with preflight, private cache, source double-read SHA256 and Rust age list/verify-chain/create-only selective restore. Snapshot consistency remains external/attested; GUI integration pending.
+- Document in docs/CLOUD_DRIVE_ACCESS_R218_IT.md. READY scope for r217 stays unchanged at 16/33; r218 adds iCloud Preview as 34th provider (16/34 with a bounded Ready operation, subject to prior field evidence). Cloud/global HA is NOT READY.
+- Handoff: do not publish cloud credentials or broaden iCloud API claims. Do not merge or tag before all new tests and real provider lab evidence. One-line English commit summary: Implement scoped cloud Drive mounts, authenticated Rust server CRUD and verified encrypted-store selective restore preview.
