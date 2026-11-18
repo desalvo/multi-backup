@@ -44,6 +44,21 @@ un filesystem locale resta assegnato soltanto alla replica che lo possiede.</p>
 <input type="file" id="cloud-upload-file"></label>
 <button id="cloud-upload" type="button" disabled>Carica nuovo</button></div>
 <p class="muted">L'upload aggiunge un identificatore casuale al nome, senza sostituire file preesistenti. Per la cancellazione di un singolo file occorre confermare il percorso esatto e il suo SHA-256; la cancellazione è disabilitata per default.</p>
+<div class="cloud-recovery">
+<h3>Backup cifrati · ZIP64 · ripristino selettivo</h3>
+<p class="muted">Indica una cartella cloud contenente bundle.index.age e part-NNNNNN.zip. La verifica scarica e autentica tutti i volumi prima di visualizzare il contenuto. Questa funzione è Preview e disabilitata per default; richiede amministratore, HTTPS, CSRF e autorizzazione offline.</p>
+<div class="controls">
+<label>Cartella del backup ZIP64<input id="cloud-backup-dir" type="text" maxlength="768" placeholder="Backups/ID"></label>
+<button type="button" id="cloud-backup-inspect" disabled>Verifica ed esplora il backup</button>
+</div>
+<p class="muted" id="cloud-backup-status" role="status">Recupero cloud disabilitato finché non viene abilitato dall'amministratore.</p>
+<div id="cloud-backup-files" class="cloud-files" role="region" aria-label="Voci verificate del backup remoto"></div>
+<div class="controls">
+<label><input id="cloud-backup-all" type="checkbox"> Ripristina l'intero backup</label>
+<button type="button" id="cloud-backup-restore" disabled>Ripristina selezione in nuova directory server</button>
+</div>
+<p class="muted">Il ripristino scrive esclusivamente su una nuova directory privata del server. Il ripristino direttamente verso un altro cloud remoto non è ancora disponibile.</p>
+</div>
 </section>
 <section id="monitoring">
 <div class="controls"><h2>Monitoraggio e API di stato</h2>

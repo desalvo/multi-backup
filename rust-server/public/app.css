@@ -108,3 +108,12 @@ select{color:#f3f6ff;background:#0a1f49;border:1px solid #7286bd;
   #cloud-drives label{flex-basis:100%}
   .cloud-entry button{flex:1 1 44%}
 }
+
+/* Current r218 Cloud ZIP64 verified backup browsing & create-only recovery */
+.cloud-recovery{margin-top:18px;padding:15px;border:1px solid #526eac;border-radius:12px;background:#0a1d43}
+.cloud-recovery h3{margin-top:0}
+.cloud-recovery .cloud-entry{width:100%;font-weight:normal;display:flex;align-items:center}
+.cloud-recovery .cloud-entry input{flex:none}
+.cloud-recovery label{min-width:0}
+#cloud-backup-status{overflow-wrap:anywhere}
+@media(max-width:480px){.cloud-recovery{padding:11px}.cloud-recovery .controls{flex-direction:column}}

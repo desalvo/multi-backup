@@ -501,6 +501,8 @@ async function cloudRefresh(){
   if(!resp.ok){cloudStatus.textContent="Nessun cloud configurato sul server";return;}
   const info=await resp.json();
   cloudCaps=info;
+  cloudBackupInspect.disabled=!cloudCaps.cloud_recovery_enabled;
+  resetCloudBackup();
   const before=cloudProvider.value;
   cloudProvider.replaceChildren();
   for(const provider of info.providers||[]){
@@ -580,6 +582,109 @@ async function cloudUploadFileAction(){
   }catch(_){cloudStatus.textContent="Upload cloud non disponibile";}
   finally{cloudUpload.disabled=!cloudCaps.write_enabled;}
 }
+
+const cloudBackupDir=document.getElementById("cloud-backup-dir");
+const cloudBackupStatus=document.getElementById("cloud-backup-status");
+const cloudBackupFiles=document.getElementById("cloud-backup-files");
+const cloudBackupInspect=document.getElementById("cloud-backup-inspect");
+const cloudBackupRestore=document.getElementById("cloud-backup-restore");
+const cloudBackupAll=document.getElementById("cloud-backup-all");
+let verifiedCloudBackup=null;
+const cloudBackupChoices=new Set();
+function resetCloudBackup(){
+  verifiedCloudBackup=null;
+  cloudBackupChoices.clear();
+  cloudBackupFiles.replaceChildren();
+  cloudBackupRestore.disabled=true;
+  cloudBackupAll.checked=false;
+}
+async function cloudBackupCall(action){
+  if(!cloudCaps.cloud_recovery_enabled){
+    cloudBackupStatus.textContent="Recupero cloud non abilitato sul server";return;
+  }
+  const provider=cloudProvider.value;
+  const directory=(cloudBackupDir.value.trim()||cloudDir.value.trim());
+  if(!provider||!directory){cloudBackupStatus.textContent="Specificare provider e cartella ZIP64";return;}
+  const inspect=action==="inspect";
+  if(!inspect && (!verifiedCloudBackup ||
+      verifiedCloudBackup.provider!==provider ||
+      verifiedCloudBackup.remote_directory!==directory)){
+    cloudBackupStatus.textContent="Rieseguire la verifica prima del ripristino";return;
+  }
+  if(!inspect && !cloudBackupAll.checked && cloudBackupChoices.size===0){
+    cloudBackupStatus.textContent="Selezionare almeno un file/cartella o l'intero backup";return;
+  }
+  let confirmation="";
+  if(!inspect){
+    const expected="RESTORE:"+provider+":"+directory;
+    confirmation=window.prompt("Conferma creando una NUOVA directory server. Digita ESATTAMENTE:\n"+expected,"")||"";
+    if(confirmation!==expected){cloudBackupStatus.textContent="Conferma diversa: operazione annullata";return;}
+  }
+  cloudBackupInspect.disabled=true;
+  cloudBackupRestore.disabled=true;
+  cloudBackupStatus.textContent=inspect?
+    "Download cifrato e verifica completa dei volumi age/ZIP64 in corso...":
+    "Ripristino selettivo autenticato in una nuova directory privata...";
+  const headers=cloudHeaders();
+  // Consume the one-time offline authorization code from the visible input.
+  const approval=document.getElementById("recovery-authorization");
+  approval.value="";
+  const body={
+    provider,directory,
+    selections:inspect?[]:(cloudBackupAll.checked?[]:[...cloudBackupChoices]),
+    confirmation
+  };
+  try{
+    const response=await fetch("/api/cloud/backup/"+action,{
+      method:"POST",credentials:"same-origin",headers,body:JSON.stringify(body)
+    });
+    const result=await response.json();
+    if(!response.ok){
+      cloudBackupStatus.textContent="Verifica o ripristino non riuscito: "+(result.error||response.status);
+      if(inspect)resetCloudBackup();
+      return;
+    }
+    if(inspect){
+      resetCloudBackup();
+      verifiedCloudBackup=result;
+      const files=result.files||[];
+      cloudBackupStatus.textContent="Backup "+result.backup_id+
+         " verificato; "+files.length+" file, "+result.volumes+
+         " volumi, "+result.downloaded_bytes+" byte cifrati. "+
+         "Version fencing cloud non atomico.";
+      for(const file of files){
+        const row=document.createElement("label");row.className="cloud-entry";
+        const check=document.createElement("input");check.type="checkbox";
+        check.setAttribute("aria-label","Ripristina "+file.path);
+        check.addEventListener("change",()=>{
+          if(check.checked)cloudBackupChoices.add(file.path);
+          else cloudBackupChoices.delete(file.path);
+        });
+        row.append(check,el("span",file.path),el("small",file.size+" B","muted"));
+        cloudBackupFiles.append(row);
+      }
+    }else{
+      cloudBackupStatus.textContent="Ripristinati "+result.restored_files+
+         " file in nuova directory server: "+result.new_restore_directory+
+         ". Nessun file esistente sovrascritto.";
+    }
+  }catch(_){cloudBackupStatus.textContent="Server cloud recovery non raggiungibile";}
+  finally{
+    cloudBackupInspect.disabled=!cloudCaps.cloud_recovery_enabled;
+    cloudBackupRestore.disabled=!cloudCaps.cloud_recovery_enabled || !verifiedCloudBackup;
+  }
+}
+cloudBackupInspect.addEventListener("click",()=>cloudBackupCall("inspect"));
+cloudBackupRestore.addEventListener("click",()=>cloudBackupCall("restore"));
+cloudBackupDir.addEventListener("input",resetCloudBackup);
+cloudBackupAll.addEventListener("change",()=>{
+  if(!cloudBackupAll.checked)return;
+  cloudBackupChoices.clear();
+  for(const checkbox of cloudBackupFiles.querySelectorAll("input[type=checkbox]")){
+    checkbox.checked=false;
+  }
+});
+
 document.getElementById("cloud-refresh").addEventListener("click",()=>
   cloudRefresh().catch(e=>cloudStatus.textContent=e.message));
 document.getElementById("cloud-open").addEventListener("click",()=>
