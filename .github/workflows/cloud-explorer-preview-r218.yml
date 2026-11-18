@@ -18,10 +18,11 @@ on:
       - "scripts/ci/test-cloud-explorer-r218.sh"
       - ".github/workflows/cloud-explorer-preview-r218.yml"
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
-  group: mb-cloud-explorer-r218-${{ github.ref }}
+  group: mb-cloud-explorer-r218-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   cloud-adapter:
