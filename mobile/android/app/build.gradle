@@ -1,0 +1,24 @@
+plugins {
+    id 'com.android.application'
+}
+android {
+    namespace 'eu.desalvo.multibackup.mobile'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'eu.desalvo.multibackup.mobile'
+        minSdk 26
+        targetSdk 35
+        versionCode 218
+        versionName '0.1.0-r218-preview'
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Deliberately no signingConfig: app-release-unsigned.apk only.
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

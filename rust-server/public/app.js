@@ -466,3 +466,14 @@ document.getElementById("vault-refresh").addEventListener("click",()=>loadImmuta
 document.getElementById("vault-backup").addEventListener("click",()=>vaultMutation("backup"));
 document.getElementById("vault-restore").addEventListener("click",()=>vaultMutation("restore"));
 loadImmutableVault().catch(()=>{vaultStatus.textContent="Vault non disponibile";});
+
+/* r218 shared phone/tablet navigation: no parallel API or embedded app secrets. */
+const sectionJump = document.getElementById("section-jump");
+if (sectionJump) {
+  sectionJump.addEventListener("change", event => {
+    const target = document.getElementById(event.target.value);
+    if (!target) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({behavior: reduceMotion ? "auto" : "smooth", block:"start"});
+  });
+}

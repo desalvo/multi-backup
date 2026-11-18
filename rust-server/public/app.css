@@ -52,3 +52,44 @@ button[disabled]{opacity:.6;cursor:default}input{border:1px solid #667bb6;backgr
 .cluster-record[data-status="local"]{border-left:4px solid #e7bd60}
 .cluster-record[data-status="shared"]{border-left:4px solid #62c3e6}
 @media(max-width:850px){.cluster-columns{grid-template-columns:1fr}}
+
+/* r218: the SAME authenticated Rust server console for mobile shells and web. */
+.mobile-nav{display:none}
+section{scroll-margin-top:78px;min-width:0}
+main, .layout, .cluster-columns, .cluster-record{min-width:0}
+button,select,summary{touch-action:manipulation}
+select{color:#f3f6ff;background:#0a1f49;border:1px solid #7286bd;
+  border-radius:10px;padding:10px;max-width:100%;font:inherit}
+@media(max-width:900px){
+  .layout{grid-template-columns:1fr}
+  aside{padding:13px 16px;border-right:0;border-bottom:1px solid #425d9c;
+    flex-direction:row;align-items:center}
+  aside .footer{display:none}
+  main{padding:12px 14px calc(18px + env(safe-area-inset-bottom,0px))}
+  .mobile-nav{display:block;position:sticky;top:env(safe-area-inset-top,0px);
+    z-index:20;background:#0e2049;border:1px solid #516ba8;border-radius:12px;
+    padding:9px 13px;box-shadow:0 8px 20px #0009}
+  .mobile-nav label{display:flex;gap:12px;align-items:center;font-weight:700}
+  .mobile-nav select{flex:1;min-width:0;min-height:44px;font-size:16px}
+  .controls{align-items:stretch}
+  .controls button,.file button{min-height:44px}
+  .controls>label{max-width:100%}
+  .controls>input[type=search],.controls>label.search{flex-basis:100%}
+  #audit-search{min-width:0}
+  .cluster-columns{grid-template-columns:minmax(0,1fr)}
+  section{padding:14px;margin:14px 0}
+  .virtual-list,.virtual-grid{max-width:100%;overflow-x:auto}
+  .hero{min-height:110px;padding:17px}
+  .cloud{display:none}
+}
+@media(max-width:480px){
+  body{overflow-x:hidden}
+  h1{font-size:1.7rem}
+  section h2{font-size:1.12rem}
+  .controls button{flex:1 1 auto}
+  .virtual-file{display:flex;flex-wrap:wrap;gap:7px}
+  .virtual-file span{flex:1 1 65%}
+  .virtual-file button{margin:0 0 0 auto}
+  input,select,textarea{font-size:16px}
+  .mobile-nav{margin:-2px 0 6px}
+}

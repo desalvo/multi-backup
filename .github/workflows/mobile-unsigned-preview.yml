@@ -1,0 +1,109 @@
+name: Multi Backup r218 - optional unsigned iOS iPadOS Android remote clients
+on:
+  push:
+    branches: ["feature/r218-mobile-clients"]
+    paths:
+      - "mobile/**"
+      - "rust-server/public/**"
+      - ".github/workflows/mobile-unsigned-preview.yml"
+      - "tests/test_mobile_source_r218.py"
+      - "docs/MOBILE_CLIENTS_R218_IT.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mb-mobile-r218-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mobile-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify mobile HTTPS, source contracts and RC isolation
+        run: python3 -m unittest discover -s tests -p test_mobile_source_r218.py -v
+
+  android-unsigned:
+    runs-on: ubuntu-24.04
+    needs: mobile-contract
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Install Android 35 SDK without release signing secrets
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Compile genuine native unsigned APK
+        run: gradle -p mobile/android --no-daemon :app:assembleRelease
+      - name: Verify unsigned output and source SHA
+        run: |
+          set -euo pipefail
+          mkdir -p mobile-artifacts
+          apk=mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$apk"
+          unzip -t "$apk" >/dev/null
+          cp "$apk" mobile-artifacts/multi-backup-r218-android-unsigned.apk
+          printf '%s\n' "$GITHUB_SHA" > mobile-artifacts/SOURCE_SHA
+          (cd mobile-artifacts && sha256sum *.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: multi-backup-r218-android-unsigned
+          path: mobile-artifacts/
+          retention-days: 14
+          if-no-files-found: error
+
+  ios-ipados-unsigned:
+    runs-on: macos-15
+    needs: mobile-contract
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate genuine native iPhone/iPad Xcode project
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen version
+          xcodegen generate --spec mobile/ios/project.yml
+      - name: Compile unsigned iPhone/iPad device .app
+        run: |
+          set -euo pipefail
+          xcodebuild -project mobile/ios/MultiBackupMobile.xcodeproj -scheme MultiBackupMobile \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/mb-device" CODE_SIGNING_ALLOWED=NO build
+      - name: Compile unsigned iOS/iPadOS Simulator .app
+        run: |
+          set -euo pipefail
+          xcodebuild -project mobile/ios/MultiBackupMobile.xcodeproj -scheme MultiBackupMobile \
+            -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/mb-simulator" CODE_SIGNING_ALLOWED=NO build
+      - name: Validate real unsigned app bundles and package source-bound artifacts
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/mb-device/Build/Products/Release-iphoneos/MultiBackupMobile.app"
+          sim="$RUNNER_TEMP/mb-simulator/Build/Products/Release-iphonesimulator/MultiBackupMobile.app"
+          test -s "$app/MultiBackupMobile"
+          test -s "$sim/MultiBackupMobile"
+          if codesign -dv "$app" >/dev/null 2>&1; then
+            echo "Rejected: device build was signed" >&2
+            exit 1
+          fi
+          mkdir -p mobile-artifacts/Payload
+          ditto "$app" mobile-artifacts/Payload/MultiBackupMobile.app
+          (cd mobile-artifacts && zip -qry multi-backup-r218-ios-ipados-unsigned.ipa Payload)
+          rm -rf mobile-artifacts/Payload
+          ditto -c -k --sequesterRsrc --keepParent "$sim" \
+            mobile-artifacts/multi-backup-r218-ios-ipados-simulator.zip
+          printf '%s\n' "$GITHUB_SHA" > mobile-artifacts/SOURCE_SHA
+          (cd mobile-artifacts && shasum -a 256 *.ipa *.zip > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: multi-backup-r218-ios-ipados-unsigned
+          path: mobile-artifacts/
+          retention-days: 14
+          if-no-files-found: error

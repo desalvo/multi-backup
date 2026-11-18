@@ -1,7 +1,15 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="csrf-token" content="CSRF_TOKEN"><title>Multi Backup</title><link rel="stylesheet" href="/app.css"></head><body>
 <div class="layout"><aside><div class="logo"><span>◈</span> Multi Backup</div><div class="footer">Alessandro De Salvo<br>EUPL-1.2 · Rust server preview</div></aside>
-<main><div class="hero"><div><h1>Multi Backup</h1><p>Backup logici unificati, chunk cifrati e browsing verificato</p></div><div class="cloud" aria-hidden="true">☁</div></div>
-<section><div class="controls"><h2>Archivi logici</h2><button id="refresh" type="button">Aggiorna</button><button id="logout" type="button">Esci</button></div>
+<main><nav class="mobile-nav" aria-label="Sezioni della console"><label for="section-jump">Sezione <select id="section-jump">
+<option value="archives">Archivi e ripristino</option>
+<option value="cluster-overview">Cluster e agenti</option>
+<option value="monitoring">Monitoraggio</option>
+<option value="internal-db">Database e HA</option>
+<option value="immutable-vault">Vault anti-ransomware</option>
+<option value="smtp">Notifiche</option>
+<option value="recovery">Esportazione</option>
+<option value="audit">Audit</option></select></label></nav><div class="hero"><div><h1>Multi Backup</h1><p>Backup logici unificati, chunk cifrati e browsing verificato</p></div><div class="cloud" aria-hidden="true">☁</div></div>
+<section id="archives"><div class="controls"><h2>Archivi logici</h2><button id="refresh" type="button">Aggiorna</button><button id="logout" type="button">Esci</button></div>
 <div class="controls"><label class="search">Cerca nei file <input id="search" type="search" placeholder="Nome, percorso..."></label>
 <button id="view" type="button" aria-pressed="false">Vista a icone</button>
 <button id="export-selected" type="button" disabled>Esporta selezione</button>
@@ -80,12 +88,12 @@ riconciliazione: non viene eseguito automaticamente un secondo writer.</p>
 <p class="muted">Il restore richiede l’autorizzazione offline già presente nella sezione esportazione. Non scrive mai sullo store originale.</p>
 <div id="vault-snapshots" role="status"></div>
 </section>
-<section><h2>Notifiche SMTP(S)</h2>
+<section id="smtp"><h2>Notifiche SMTP(S)</h2>
 <p class="muted">Il server può inviare un messaggio di prova al destinatario configurato.
 La password viene letta da un Secret separato; TLS e certificato server sono obbligatori.</p>
 <div class="controls"><button type="button" id="smtp-test">Invia messaggio di prova</button>
 <span id="smtp-result" role="status" class="muted"></span></div></section>
-<section><h2>Esportazione selettiva</h2>
+<section id="recovery"><h2>Esportazione selettiva</h2>
 <p class="muted">In modalità protetta, il ripristino richiede l'accesso amministrativo
 e un codice di approvazione indipendente, che non viene salvato dal browser.</p>
 <label for="recovery-authorization">Autorizzazione temporanea di recupero</label>
@@ -93,7 +101,7 @@ e un codice di approvazione indipendente, che non viene salvato dal browser.</p>
   spellcheck="false" placeholder="Codice offline (64 caratteri)" maxlength="128">
 <p class="muted">Non condividere il codice di recupero con gli altri utenti. Il server non espone mai il vault.</p>
 <p class="muted">Seleziona un singolo file o una cartella. Il restore viene verificato e scritto in una nuova directory sul server, senza sovrascrivere l'origine.</p><div id="result" role="status"></div></section>
-<section><h2>Audit · amministratore</h2>
+<section id="audit"><h2>Audit · amministratore</h2>
 <div class="controls"><input id="audit-search" type="search" placeholder="Cerca evento o utente">
 <button id="audit-refresh" type="button">Aggiorna audit</button>
 <button id="audit-older" type="button">Pagina successiva</button></div>

@@ -1,0 +1,23 @@
+name: MultiBackupMobile
+options:
+  bundleIdPrefix: eu.desalvo.multibackup
+targets:
+  MultiBackupMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: App
+    info:
+      path: App/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: eu.desalvo.multibackup.mobile
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGNING_ALLOWED: NO
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "218"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    scheme:
+      testTargets: []
