@@ -43,6 +43,7 @@ struct AppConfig {
     cloud_config: Option<PathBuf>,
     cloud_write_enabled: bool,
     cloud_delete_enabled: bool,
+    cloud_recovery_enabled: bool,
     root: PathBuf,
     identity: Option<PathBuf>,
     immutable_vault_root: Option<PathBuf>,
@@ -871,6 +872,12 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .ok().as_deref()==Some("1");
     let cloud_delete_enabled=std::env::var("MULTI_BACKUP_CLOUD_DELETE_ENABLED")
         .ok().as_deref()==Some("1");
+    let cloud_recovery_enabled=std::env::var("MULTI_BACKUP_CLOUD_RECOVERY_ENABLED")
+        .ok().as_deref()==Some("1");
+    if cloud_recovery_enabled &&
+       (!security.hardened() || cloud_config.is_none() || identity.is_none()) {
+        return Err("Cloud recovery requires hardened HTTPS, rclone config and age identity".into());
+    }
     if cloud_write_enabled || cloud_delete_enabled {
         if !security.hardened() || cloud_config.is_none() ||
            (cloud_delete_enabled && !cloud_write_enabled) {
@@ -895,7 +902,7 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
     let oidc=OidcConfig::from_env(&origin)?;
     let state=AppState(Arc::new(AppConfig {
         name,password_hash:hash,origin,security,cloud_config,
-        cloud_write_enabled,cloud_delete_enabled,
+        cloud_write_enabled,cloud_delete_enabled,cloud_recovery_enabled,
         root,exports,identity,immutable_vault_root,s3_vault_config,audit,smtp,dav,ldap,oidc,
         pending_oidc:Mutex::new(HashMap::new()),
         sessions:Mutex::new(HashMap::new()),
@@ -917,6 +924,10 @@ async fn main()->Result<(),Box<dyn std::error::Error+Send+Sync>> {
         .route("/api/cloud/upload",post(cloud_api::upload)
             .layer(cloud_api::upload_body_limit()))
         .route("/api/cloud/delete",post(cloud_api::delete))
+        .route("/api/cloud/backup/inspect",post(cloud_api::inspect_backup)
+            .layer(cloud_api::recovery_body_limit()))
+        .route("/api/cloud/backup/restore",post(cloud_api::restore_backup)
+            .layer(cloud_api::recovery_body_limit()))
         .route("/api/s3-vault/status",get(s3_vault_status))
         .route("/api/s3-vault/backup",post(s3_vault_backup))
         .route("/api/s3-vault/verify",post(s3_vault_verify))

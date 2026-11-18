@@ -12,7 +12,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json,Value};
 use std::path::PathBuf;
-use multi_backup_core::cloud_drive;
+use multi_backup_core::{cloud_drive,cloud_recovery};
 use base64::Engine;
 type ApiError=(StatusCode,Json<Value>);
 fn denied(code:StatusCode,message:&'static str)->ApiError{
@@ -76,7 +76,8 @@ pub async fn remotes(State(state):State<AppState>,headers:HeaderMap)
     Ok(Json(json!({"providers":providers,
         "write_enabled":state.0.cloud_write_enabled && state.0.security.hardened(),
         "delete_enabled":state.0.cloud_delete_enabled && state.0.cloud_write_enabled &&
-          state.0.security.hardened(),"mount_is_local_desktop_only":true})))
+          state.0.security.hardened(),"mount_is_local_desktop_only":true,
+        "cloud_recovery_enabled":state.0.cloud_recovery_enabled})))
 }
 pub async fn list(State(state):State<AppState>,headers:HeaderMap,
                   Query(req):Query<Selection>)->Result<Json<Value>,ApiError>{
@@ -135,6 +136,75 @@ pub async fn delete(State(state):State<AppState>,headers:HeaderMap,
     audit_actor(&state.0,"cloud_exact_file_deleted",&actor);
     Ok(Json(result))
 }
+
+#[derive(Deserialize)]
+pub struct Recovery {
+    provider:String,
+    directory:String,
+    #[serde(default)]
+    selections:Vec<String>,
+    #[serde(default)]
+    confirmation:String,
+}
+async fn can_recover(state:&AppState,headers:&HeaderMap)->Result<String,ApiError>{
+    let auth=session(headers,&state.0).await.ok_or_else(unauthorized)?.1;
+    if auth.user!=state.0.name ||
+       !same_origin(headers,&state.0) ||
+       headers.get("x-csrf-token").and_then(|v|v.to_str().ok())!=Some(auth.csrf.as_str()) ||
+       !state.0.security.can_restore(&auth.user,&state.0.name) ||
+       !state.0.security.recovery_ok(headers) ||
+       !state.0.security.hardened() ||
+       !state.0.cloud_recovery_enabled {
+        audit_actor(&state.0,"cloud_recovery_denied",&auth.user);
+        return Err(denied(StatusCode::FORBIDDEN,
+            "cloud_recovery_requires_admin_https_csrf_offline_approval_and_opt_in"));
+    }
+    Ok(auth.user)
+}
+pub async fn inspect_backup(State(state):State<AppState>,headers:HeaderMap,
+                            Json(req):Json<Recovery>)->Result<Json<Value>,ApiError>{
+    let actor=can_recover(&state,&headers).await?;
+    if !req.selections.is_empty() || !req.confirmation.is_empty(){
+        return Err(denied(StatusCode::BAD_REQUEST,"inspect_accepts_no_restore_selection"));
+    }
+    let cfg=config(&state)?;
+    let identity=state.0.identity.clone().ok_or_else(||denied(
+        StatusCode::SERVICE_UNAVAILABLE,"age_identity_not_configured"))?;
+    let workspace=state.0.exports.clone();
+    let result=tokio::task::spawn_blocking(move||{
+        std::fs::create_dir_all(&workspace)?;
+        cloud_recovery::inspect(&cfg,&req.provider,&req.directory,
+             &identity,&workspace,cloud_recovery::DEFAULT_MAX_BYTES)
+    }).await.map_err(|_|denied(StatusCode::SERVICE_UNAVAILABLE,"recovery_worker_failed"))?
+      .map_err(|_|denied(StatusCode::BAD_GATEWAY,"cloud_backup_authentication_failed"))?;
+    audit_actor(&state.0,"cloud_backup_manifest_verified",&actor);
+    Ok(Json(result))
+}
+pub async fn restore_backup(State(state):State<AppState>,headers:HeaderMap,
+                            Json(req):Json<Recovery>)->Result<Json<Value>,ApiError>{
+    let actor=can_recover(&state,&headers).await?;
+    if req.confirmation!=format!("RESTORE:{}:{}",req.provider,req.directory) {
+        return Err(denied(StatusCode::FORBIDDEN,"explicit_restore_confirmation_required"));
+    }
+    let cfg=config(&state)?;
+    let identity=state.0.identity.clone().ok_or_else(||denied(
+        StatusCode::SERVICE_UNAVAILABLE,"age_identity_not_configured"))?;
+    let workspace=state.0.exports.clone();
+    let destination=workspace.join(format!("cloud-restore-{}",&super::random_token()[..24]));
+    let result=tokio::task::spawn_blocking(move||{
+        std::fs::create_dir_all(&workspace)?;
+        cloud_recovery::restore(&cfg,&req.provider,&req.directory,
+            &identity,&workspace,&destination,&req.selections,
+            cloud_recovery::DEFAULT_MAX_BYTES)
+    }).await.map_err(|_|denied(StatusCode::SERVICE_UNAVAILABLE,"recovery_worker_failed"))?
+      .map_err(|_|denied(StatusCode::BAD_GATEWAY,"cloud_backup_restore_failed"))?;
+    audit_actor(&state.0,"cloud_backup_selected_restore_completed",&actor);
+    Ok(Json(result))
+}
+pub fn recovery_body_limit()->DefaultBodyLimit {
+    DefaultBodyLimit::max(128*1024)
+}
+
 pub fn upload_body_limit()->DefaultBodyLimit{
     DefaultBodyLimit::max(12*1024*1024)
 }

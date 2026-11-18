@@ -22,6 +22,8 @@ fn usage() -> &'static str {
        multi-backup-native plugins mounted-backup --output nfs|smb|webdav|cephfs|glusterfs|lustre|gpfs|sshfs --mount EXACT_MOUNT --source LOCAL_DIR --filename NEW.tar.gz.age --recipient AGE_PUBLIC --identity AGE_PRIVATE [--output-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins mounted-restore --input MOUNT_PROVIDER --mount EXACT_MOUNT --filename VERIFIED.tar.gz.age --identity AGE_PRIVATE --destination NEW_DIR [--input-gpfs-access ces-nfs|ces-smb] [--json]\n\
        multi-backup-native plugins s3-object-backup --config S3.json --object-key KEY --version-id VERSION --sha256 RAW_SHA256 --root EXISTING_CHUNK_STORE --identity AGE_ID --label LABEL [--top-namespace NS] [--json] (B-In versioned S3 / Ceph RGW / RustFS -> age chunk store)\n\
+       multi-backup-native plugins cloud-backup-inspect --config PRIVATE_RCLONE.conf --provider PROVIDER --directory REMOTE_PORTABLE_ZIP_DIR --identity AGE_ID --work-dir PRIVATE_EXISTING_DIR [--max-bytes N] [--json] (verified encrypted index, ZIP64 volumes, manifest and file listing)
+       multi-backup-native plugins cloud-backup-restore --config PRIVATE_RCLONE.conf --provider PROVIDER --directory REMOTE_PORTABLE_ZIP_DIR --identity AGE_ID --work-dir PRIVATE_EXISTING_DIR --destination NEW_LOCAL_DIR --confirm RESTORE:PROVIDER:REMOTE_PORTABLE_ZIP_DIR [--selection FILE_OR_FOLDER] [--max-bytes N] [--json] (full authentication before create-only selective restore)
        multi-backup-native plugins cloud-list --config PRIVATE_RCLONE.conf --provider dropbox|google-drive|icloud|onedrive|owncloud|nextcloud|box [--directory PATH] [--json]
        multi-backup-native plugins cloud-download --config PRIVATE_RCLONE.conf --provider PROVIDER --path FILE --destination NEW_FILE [--json]
        multi-backup-native plugins cloud-upload --config PRIVATE_RCLONE.conf --provider PROVIDER --directory PATH --file EXISTING_LOCAL_FILE [--json] (create unique new file, <=8MiB)
@@ -529,6 +531,37 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             flags.get("--top-namespace").copied().unwrap_or(""))?;
         if json {println!("{}",serde_json::to_string_pretty(&result)?);}
         else {println!("S3 versioned object imported into verified age chunks: {}",result.id);}
+        return Ok(());
+    }
+    if family=="plugins" && matches!(command,"cloud-backup-inspect"|"cloud-backup-restore"){
+        if password_stdin{return Err("Cloud recovery requires a separately supplied age identity file".into());}
+        accepted(&flags,&["--config","--provider","--directory","--identity",
+            "--work-dir","--max-bytes","--destination","--selection","--confirm"])?;
+        let provider=required(&flags,"--provider")?;
+        let directory=required(&flags,"--directory")?;
+        let config=Path::new(required(&flags,"--config")?);
+        let identity=Path::new(required(&flags,"--identity")?);
+        let workspace=Path::new(required(&flags,"--work-dir")?);
+        let cap=flags.get("--max-bytes").copied().unwrap_or("8589934592").parse()?;
+        let result=if command=="cloud-backup-inspect"{
+            if flags.contains_key("--destination")||flags.contains_key("--selection")||
+               flags.contains_key("--confirm"){
+                return Err("Inspect does not accept restore-only options".into());
+            }
+            multi_backup_core::cloud_recovery::inspect(
+                config,provider,directory,identity,workspace,cap)?
+        }else{
+            if required(&flags,"--confirm")?!=format!("RESTORE:{provider}:{directory}"){
+                return Err("Restore requires --confirm RESTORE:provider:directory".into());
+            }
+            let selections=flags.get("--selection").map(|v|vec![(*v).to_owned()])
+                .unwrap_or_default();
+            multi_backup_core::cloud_recovery::restore(
+                config,provider,directory,identity,workspace,
+                Path::new(required(&flags,"--destination")?),&selections,cap)?
+        };
+        if json{println!("{}",serde_json::to_string_pretty(&result)?);}
+        else{println!("{result}");}
         return Ok(());
     }
     if family=="plugins" && matches!(command,
