@@ -1,4 +1,5 @@
 //! Standalone Rust GUI preview. This is NOT a Python/Tk wrapper.
+mod cloud_mount;
 //! Backend functions are the same compiled Rust operations as the native CLI.
 use eframe::egui::{self, Align, Color32, Context, RichText, TextureHandle, Vec2};
 use multi_backup_core::{chunk_store, portable, archive, archive_management, dropbox_client, github_client, progress_rgb, remote_restore, updater, vault, immutable_vault, s3_vault, plugins, plugin_executor, backup_chain, virtualization_inventory, hypervisor_inventory};
@@ -25,18 +26,18 @@ const VIOLET: Color32 = Color32::from_rgb(113, 87, 231);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Page {
-    Dashboard, Backup, Archives, Restore, Storage, Plugins, Server, Vault, Updates, Settings,
+    Dashboard, Backup, Archives, Restore, Storage, Plugins, CloudDrive, Server, Vault, Updates, Settings,
 }
 impl Page {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::Dashboard, Self::Backup, Self::Archives, Self::Restore, Self::Storage,
-        Self::Plugins, Self::Server, Self::Vault, Self::Updates, Self::Settings,
+        Self::Plugins, Self::CloudDrive, Self::Server, Self::Vault, Self::Updates, Self::Settings,
     ];
     fn label(self) -> &'static str {
         match self {
             Self::Dashboard => "Dashboard", Self::Backup => "Backup",
             Self::Archives => "Archivi", Self::Restore => "Ripristina", Self::Storage => "Storage chunk",
-            Self::Plugins => "Plugin", Self::Server => "Server e agenti", Self::Vault => "Vault e chiavi",
+            Self::Plugins => "Plugin", Self::CloudDrive => "Cloud Drive", Self::Server => "Server e agenti", Self::Vault => "Vault e chiavi",
             Self::Updates => "Aggiornamenti", Self::Settings => "Impostazioni",
         }
     }
@@ -192,6 +193,10 @@ struct Fields {
     plugin_pbs_namespace: String,
     server_monitor_origin: String,
     server_monitor_token_file: String,
+    cloud_registry: String,
+    cloud_profile: String,
+    cloud_mountpoint: String,
+    cloud_rclone: String,
 }
 fn load_photo(ctx: &Context, key: &str, raw: &[u8]) -> Option<TextureHandle> {
     let input = image::load_from_memory(raw).ok()?.to_rgba8();
@@ -391,6 +396,9 @@ struct NativeApp {
     chunk_confirmation: Option<(String,String)>,
     provider_inventory_result: String,
     server_monitor_result: String,
+    cloud_mount_process: Option<std::process::Child>,
+    cloud_profiles: Vec<cloud_mount::Profile>,
+    cloud_mount_status: String,
 }
 impl NativeApp {
     fn new(ctx: &egui::Context, smoke: bool) -> Self {
@@ -443,6 +451,9 @@ impl NativeApp {
             plugin_input: "posix".into(),
             plugin_namespace: "files".into(),
             plugin_gpfs_access: "ces-nfs".into(),
+            cloud_rclone: if cfg!(windows) {r"C:\Program Files\rclone\rclone.exe".into()}
+                else if cfg!(target_os="macos") {"/opt/homebrew/bin/rclone".into()}
+                else {"/usr/bin/rclone".into()},
             ..Fields::default()
         };
         let entries = archive_catalog(Path::new(&fields.output));
@@ -470,6 +481,9 @@ impl NativeApp {
             chunk_confirmation: None,
             provider_inventory_result: String::new(),
             server_monitor_result: String::new(),
+            cloud_mount_process: None,
+            cloud_profiles: Vec::new(),
+            cloud_mount_status: "Nessun cloud montato".into(),
         }
     }
     fn rescan(&mut self) {
@@ -1049,6 +1063,84 @@ impl NativeApp {
             }
         });
     }
+    fn cloud_drives(&mut self,ui:&mut egui::Ui) {
+        ui.heading("Cloud Drive · mount nativo locale");
+        ui.label("Dropbox, Google Drive, OneDrive, ownCloud, Nextcloud, iCloud e cloud compatibili. "
+            .to_owned()+"Il mount e' un processo rclone subordinato alla app, senza Python e senza interfacce rclone RC.");
+        ui.label(RichText::new("La configurazione rclone, i token e le password NON sono salvati nelle preferenze GUI. "+
+            "Un mount FUSE/WinFsp non garantisce metadata POSIX o snapshot atomici.").color(MUTED));
+        ui.separator();
+        ui.label("Registro cloud JSON privato (chmod 0600 / ACL utenti)");
+        ui.text_edit_singleline(&mut self.fields.cloud_registry);
+        ui.label("Binario rclone installato (percorso assoluto)");
+        ui.text_edit_singleline(&mut self.fields.cloud_rclone);
+        if ui.button("Carica profili autorizzati").clicked(){
+            match cloud_mount::read_registry(Path::new(&self.fields.cloud_registry)){
+                Ok((_,profiles))=>{
+                    self.cloud_profiles=profiles;
+                    self.fields.cloud_profile=self.cloud_profiles.first()
+                        .map(|p|p.id.clone()).unwrap_or_default();
+                    self.cloud_mount_status=format!("{} profili autorizzati caricati (nessuna credenziale in GUI)",
+                        self.cloud_profiles.len());
+                }
+                Err(err)=>{
+                    self.cloud_profiles.clear();
+                    self.fields.cloud_profile.clear();
+                    self.cloud_mount_status=format!("Accesso ai profili negato: {err}");
+                }
+            }
+        }
+        egui::ComboBox::from_label("Account / cloud montabile")
+            .selected_text(if self.fields.cloud_profile.is_empty(){
+                "Nessun profilo".to_owned()
+            }else{self.fields.cloud_profile.clone()})
+            .show_ui(ui,|ui|{
+                for p in &self.cloud_profiles{
+                    let label=format!("{} · {} · {}",
+                        p.id,p.provider,if p.provider=="icloud"||!p.allow_upload{"RO"}else{"RW"});
+                    ui.selectable_value(&mut self.fields.cloud_profile,p.id.clone(),label);
+                }
+            });
+        if let Some(p)=self.cloud_profiles.iter().find(|p|p.id==self.fields.cloud_profile){
+            ui.label(format!("B-In: lettura · B-Out mount: {} · cancellazione cloud: {}",
+                if p.provider=="icloud"||!p.allow_upload{"non abilitato"}else{"consentito dal profilo"},
+                if p.allow_delete{"permessa dalla policy"}else{"vietata"}));
+            if p.provider=="icloud"{
+                ui.label(RichText::new("Il backend rclone remoto iCloud è RO. "+
+                    "Per B-Out usare il File Provider locale macOS con accesso esplicitamente autorizzato.").color(MUTED));
+            }
+        }
+        ui.label("Mountpoint locale già esistente e vuoto (Windows: lettera X: libera)");
+        ui.text_edit_singleline(&mut self.fields.cloud_mountpoint);
+        ui.horizontal(|ui|{
+            if ui.add_enabled(self.cloud_mount_process.is_none(),
+                egui::Button::new("Monta Cloud Drive")).clicked(){
+                match cloud_mount::spawn(Path::new(&self.fields.cloud_registry),
+                    &self.fields.cloud_profile,&self.fields.cloud_mountpoint,
+                    Path::new(&self.fields.cloud_rclone)){
+                    Ok(child)=>{
+                        self.cloud_mount_process=Some(child);
+                        self.cloud_mount_status=format!("Mount avviato su {}. Supervisione attiva.",
+                            self.fields.cloud_mountpoint);
+                    }
+                    Err(err)=>self.cloud_mount_status=format!("Mount negato: {err}"),
+                }
+            }
+            if ui.add_enabled(self.cloud_mount_process.is_some(),
+                egui::Button::new("Smonta (termina mount)")).clicked(){
+                if let Some(mut child)=self.cloud_mount_process.take(){
+                    let _=child.kill();
+                    let _=child.wait();
+                }
+                self.cloud_mount_status="Mount fermato, cache e driver da verificare sul sistema".into();
+            }
+        });
+        ui.label(RichText::new(&self.cloud_mount_status).color(MUTED));
+        ui.separator();
+        ui.label("I backup cifrati sul mount si visualizzano e ripristinano solo dopo "+
+            "copia coerente in cache privata e verifica age; non scrivere su un live chunk store FUSE.");
+    }
+
     fn plugins(&mut self, ui: &mut egui::Ui) {
         ui.heading("Catalogo plugin Rust");
         ui.label("Input = origine del backup; Output = destinazione dell'archivio. "
@@ -2004,6 +2096,14 @@ impl NativeApp {
         self.about = open;
     }
 }
+impl Drop for NativeApp {
+    fn drop(&mut self){
+        if let Some(mut mount)=self.cloud_mount_process.take(){
+            let _=mount.kill();
+            let _=mount.wait();
+        }
+    }
+}
 impl eframe::App for NativeApp {
     fn update(&mut self, ctx: &Context, _: &mut eframe::Frame) {
         if let Some(frames) = &mut self.smoke_frames {
@@ -2026,6 +2126,12 @@ impl eframe::App for NativeApp {
             ctx.request_repaint_after(Duration::from_millis(90));
         }
         self.poll();
+        let mount_exit=self.cloud_mount_process.as_mut()
+            .and_then(|child|child.try_wait().ok().flatten());
+        if let Some(exit)=mount_exit{
+            self.cloud_mount_process=None;
+            self.cloud_mount_status=format!("Mount terminato: {}",exit);
+        }
         if self.must_unlock_on_start && !self.vault_verified {
             self.unlock_screen(ctx);
             if self.about { self.about(ctx); }
@@ -2090,6 +2196,7 @@ impl eframe::App for NativeApp {
                         Page::Restore => self.restore(ui),
                         Page::Storage => self.storage(ui),
                         Page::Plugins => self.plugins(ui),
+                        Page::CloudDrive => self.cloud_drives(ui),
                         Page::Server => self.server_page(ui),
                         Page::Vault => self.vault(ui),
                         Page::Updates => self.updates(ui),
@@ -2335,6 +2442,20 @@ mod provider_gui_tests{
                    "gpfs","nfs","smb","postgresql","anti-ransomware-vault"]{
             assert!(matching_providers(id).iter().any(|d|d.id==id));
         }
+    }
+    #[test]
+    fn cloud_page_is_native_and_credentials_are_not_persisted(){
+        assert!(Page::ALL.contains(&Page::CloudDrive));
+        let mut fields=Fields::default();
+        fields.max_runs="5".into();
+        fields.cloud_registry="/secrets/cloud-registry.json".into();
+        fields.cloud_rclone="/private/bin/rclone".into();
+        fields.cloud_profile="team-cloud".into();
+        let prefs=build_native_prefs(&fields,"github","stable").unwrap();
+        for forbidden in ["cloud-registry.json","team-cloud","/private/bin/rclone"]{
+            assert!(!prefs.to_string().contains(forbidden));
+        }
+        assert!(plugins::find("icloud").is_some());
     }
     #[test]
     fn native_settings_include_no_secret_and_are_privately_written(){
