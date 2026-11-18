@@ -1,5 +1,6 @@
 name: Multi Backup - genuine NFS Samba and GlusterFS Rust recovery acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/**"]
     paths:
@@ -14,8 +15,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: mb-r217-nfs-samba-gluster-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   real-network-fs:
     name: Genuine ${{ matrix.protocol }} server, read-only client, Rust FULL/INC and recovery
