@@ -684,7 +684,7 @@ mod tests {
         for p in ["nfs","smb","webdav","cephfs","glusterfs","lustre","gpfs","sshfs"]{
             let d=find(p).unwrap();
             assert_eq!(d.backup_output,if matches!(p,"webdav"|"sshfs"|"lustre"|"nfs"|"smb"|"glusterfs"){Stage::Ready}else{Stage::Preview});
-            assert_eq!(d.restore_input,if matches!(p,"webdav"|"sshfs"|"lustre"){Stage::Ready}else{Stage::Preview});
+            assert_eq!(d.restore_input,if matches!(p,"webdav"|"sshfs"|"lustre"|"nfs"|"smb"|"glusterfs"){Stage::Ready}else{Stage::Preview});
             let b=plan(Mode::Backup,"posix",p).unwrap();
             let r=plan(Mode::Restore,p,"posix").unwrap();
             assert!(!b.executable && !b.preview_executable);
