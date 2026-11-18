@@ -33,6 +33,13 @@ def reconcile(status,tree,pods,bindings):
         node=pod.get("spec",{}).get("nodeName","")
         if node not in expected or pod.get("status",{}).get("phase")!="Running":
             raise ValueError("OSD not Running on allowed worker")
+        # Phase=Running alone includes replacement pods whose OSD is not yet
+        # ready. Moving CRUSH too early lets a late OSD startup undo the move.
+        statuses=[c for c in pod.get("status",{}).get("containerStatuses",[])
+                  if c.get("name")=="osd" and c.get("ready") is True
+                  and isinstance(c.get("state",{}).get("running"),dict)]
+        if len(statuses)!=1:
+            raise ValueError("OSD container is not ready and running")
         entries=[]
         for container in pod.get("spec",{}).get("containers",[]):
             env={x.get("name"):x.get("value") for x in container.get("env",[])
