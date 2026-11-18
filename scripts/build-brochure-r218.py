@@ -162,6 +162,15 @@ READY = [
  ("NFSv3 / SMB3 / GlusterFS", "Mounted file FULL/INC and new-path restore on genuine server labs")
 ]
 
+READY_IT = [
+  ("POSIX / PostgreSQL 16 / MariaDB-MySQL 8.4", "Ripristino completo su nuova destinazione: file coerenti o singolo database"),
+  ("S3-MinIO / S3 WORM COMPLIANCE", "Oggetti verificati e policy immutabili con IAM delimitato"),
+  ("CephFS / Ceph RBD / Linux iSCSI", "File montati o snapshot selezionati verso nuova immagine o LUN"),
+  ("Oracle RMAN / WebDAV", "Media RMAN cifrati e trasporto HTTPS WebDAV verificato"),
+  ("SSH / SSHFS / Lustre", "File selezionati, mount e dati reali MDT/OST"),
+  ("NFSv3 / SMB3 / GlusterFS", "Backup full/incrementale e restore su nuovo percorso nei laboratori")
+]
+
 def captured_screen(root,name,caption):
     """Never silently fall back to a legacy Tk screenshot or a mock drawing."""
     from PIL import Image as PIL
@@ -194,42 +203,46 @@ def build(lang, destination, screenshots):
     story.append(p(content["news"],"h1"))
     for item in content["news_items"]:
         story.append(p("•  "+item))
-    story.append(PageBreak())
+    # Flow naturally after news: forced breaks previously orphaned content.
     add_text(story,content["operations"],content["scope"])
-    story.append(table(["Provider group","Exact qualified role"],READY,[71*mm,102*mm]))
+    story.append(table(["Gruppo provider","Ambito collaudato"] if lang=="IT" else
+                       ["Provider group","Exact qualified role"],
+                       READY_IT if lang=="IT" else READY,[71*mm,102*mm]))
     story.append(Spacer(1,7*mm))
     story.append(p(content["platform"],"h1"))
     story.append(table(content["plthead"],content["platforms"],[41*mm,62*mm,70*mm]))
-    story.append(PageBreak())
+    # Never orphan a page solely because the last news item overflowed.
+    # Keep each screenshot block together without forcing separate A4 pages.
     add_text(story,content["status"],content["status_text"])
     story.append(p(content["limits"],"h1"))
     for value in content["limits_items"]:
         story.append(p("•  "+value))
-    story.append(PageBreak())
+    desktop=[]
     if lang=="IT":
-        story.append(p("Interfaccia desktop Rust attuale","h1"))
-        story.append(p("Schermata della vera applicazione Rust egui, acquisita in un profilo isolato senza credenziali. Non è l'interfaccia Tk delle vecchie versioni.","body"))
+        desktop.extend([p("Interfaccia desktop Rust attuale","h1"),
+            p("Schermata della vera applicazione Rust egui, acquisita in un profilo isolato senza credenziali. Non è l'interfaccia Tk delle vecchie versioni.","body")])
     else:
-        story.append(p("Current native Rust desktop","h1"))
-        story.append(p("Screenshot of the actual Rust egui app with a credential-free disposable profile. This is not the former Tk application.","body"))
-    story.extend(captured_screen(screenshots,"desktop-dashboard.png",
+        desktop.extend([p("Current native Rust desktop","h1"),
+            p("Screenshot of the actual Rust egui app with a credential-free disposable profile. This is not the former Tk application.","body")])
+    desktop.extend(captured_screen(screenshots,"desktop-dashboard.png",
         "Real native Rust application · screenshot at the source SHA."))
-    story.append(PageBreak())
-    story.append(p("Console server Rust · Cloud Drive" if lang=="IT" else
-                   "Rust web server · Cloud Drive","h1"))
-    story.append(p("Interfaccia HTML/CSS/JS reale del server con dati di test sintetici, non account reali." if lang=="IT" else
-                   "Actual server HTML/CSS/JS UI with synthetic API fixture data, not a live account.","body"))
-    story.extend(captured_screen(screenshots,"web-cloud-drives-fixture.png",
+    story.append(KeepTogether(desktop))
+    server=[p("Console server Rust · Cloud Drive" if lang=="IT" else
+              "Rust web server · Cloud Drive","h1"),
+            p("Interfaccia HTML/CSS/JS reale del server con dati di test sintetici, non account reali." if lang=="IT" else
+              "Actual server HTML/CSS/JS UI with synthetic API fixture data, not a live account.","body")]
+    server.extend(captured_screen(screenshots,"web-cloud-drives-fixture.png",
         "REAL Rust server frontend; SYNTHETIC test data / dati sintetici."))
-    story.append(PageBreak())
-    story.append(p("Client remoti responsive" if lang=="IT" else
-                   "Responsive mobile remote clients","h1"))
-    story.append(p("Rendering web responsive corrente; non uno screenshot acquisito da dispositivo iOS/Android." if lang=="IT" else
-                   "Current responsive web rendering; not a physical iOS/Android device capture.","body"))
-    story.extend(captured_screen(screenshots,"mobile-cloud-drive-fixture.png",
+    story.append(KeepTogether(server))
+    mobile=[p("Client remoti responsive" if lang=="IT" else
+              "Responsive mobile remote clients","h1"),
+            p("Rendering web responsive corrente; non uno screenshot acquisito da dispositivo iOS/Android." if lang=="IT" else
+              "Current responsive web rendering; not a physical iOS/Android device capture.","body")]
+    mobile.extend(captured_screen(screenshots,"mobile-cloud-drive-fixture.png",
         "Actual mobile-sized Rust server UI; SYNTHETIC fixture, not a native device capture."))
-    story.extend([Spacer(1,10*mm),p(content["footer"],"small"),
-                  p("github.com/desalvo/multi-backup", "h2")])
+    mobile.extend([Spacer(1,10*mm),p(content["footer"],"small"),
+                   p("github.com/desalvo/multi-backup","h2")])
+    story.append(KeepTogether(mobile))
     doc.build(story,onFirstPage=mark,onLaterPages=mark)
 
 if __name__=="__main__":
