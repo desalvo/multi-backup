@@ -183,6 +183,51 @@ pub fn delete_file(config:&Path,id:&str,path:&str,
     Ok(json!({"provider":id,"path":path,"deleted":true,
               "atomic_version_guard":false}))
 }
+
+/// Streaming create-only remote read; no complete cloud object in RAM.
+pub fn download_to_new(config:&Path,id:&str,path:&str,destination:&Path,
+                       max_bytes:u64)->Result<(u64,String)>{
+    check_config(config,id)?;
+    valid_path(path,false)?;
+    if max_bytes==0||max_bytes>32*1024*1024*1024 {
+        return Err(error("Remote recovery cap must be 1 byte..32 GiB"));
+    }
+    let parent=destination.parent().ok_or_else(||error("Missing recovery parent"))?;
+    if !fs::symlink_metadata(parent)?.file_type().is_dir()||
+       fs::symlink_metadata(destination).is_ok() {
+        return Err(error("Recovery destination must be new in an ordinary directory"));
+    }
+    let mut stage=tempfile::NamedTempFile::new_in(parent)?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        stage.as_file().set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    let remote_path=remote(id,path);
+    let mut child=command(config,&["cat",&remote_path]).stdout(Stdio::piped()).spawn()?;
+    let stdout=child.stdout.take().ok_or_else(||error("Cloud stdout missing"))?;
+    let copied=std::io::copy(&mut stdout.take(max_bytes+1),stage.as_file_mut());
+    let count=match copied {
+        Ok(n) if n<=max_bytes=>n,
+        _=>{
+            let _=child.kill();let _=child.wait();
+            return Err(error("Remote recovery failed or exceeded transfer cap"));
+        }
+    };
+    if !child.wait()?.success(){return Err(error("Cloud transport exited nonzero"));}
+    stage.as_file().sync_all()?;
+    let mut hasher=Sha256::new();
+    let mut source=File::open(stage.path())?;
+    let mut buffer=[0u8;65536];
+    loop {
+        let n=source.read(&mut buffer)?;
+        if n==0 {break;}
+        hasher.update(&buffer[..n]);
+    }
+    let digest=hex::encode(hasher.finalize());
+    stage.persist_noclobber(destination).map_err(|e|e.error)?;
+    Ok((count,digest))
+}
+
 pub fn mount_foreground(config:&Path,id:&str,mountpoint:&Path,read_write:bool)->Result<()>{
     check_config(config,id)?;
     let meta=fs::symlink_metadata(mountpoint)?;

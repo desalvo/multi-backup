@@ -16,6 +16,7 @@ pub mod dropbox_hash;
 pub mod dropbox_client;
 pub mod icloud_drive;
 pub mod cloud_drive;
+pub mod cloud_recovery;
 pub mod github_client;
 pub mod vault;
 pub mod immutable_vault;
