@@ -875,10 +875,10 @@ mod tests {
             let d = find(id).unwrap();
             // GPFS via standard NFS/SMB now has protocol-only input and
             // create-only mounted output preview, not native GPFS support.
-            assert_eq!(d.backup_input, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
-            assert_eq!(d.backup_output, if matches!(id,"afs"|"lustre"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
-            assert_eq!(d.restore_input, if matches!(id,"afs"|"lustre"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
-            assert_eq!(d.restore_output, if matches!(id,"gpfs"|"lustre"|"afs") {Stage::Preview} else {Stage::Planned}, "{id}");
+            assert_eq!(d.backup_input, if id=="lustre"{Stage::Ready}else if matches!(id,"gpfs"|"afs"){Stage::Preview}else{Stage::Planned}, "{id}");
+            assert_eq!(d.backup_output, if id=="lustre"{Stage::Ready}else if matches!(id,"afs"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
+            assert_eq!(d.restore_input, if id=="lustre"{Stage::Ready}else if matches!(id,"afs"|"gpfs"){Stage::Preview}else{Stage::Planned}, "{id}");
+            assert_eq!(d.restore_output, if id=="lustre"{Stage::Ready}else if matches!(id,"gpfs"|"afs"){Stage::Preview}else{Stage::Planned}, "{id}");
             assert!(!plan(Mode::Backup, id, "anti-ransomware-vault").unwrap().executable);
             assert!(!plan(Mode::Restore, "anti-ransomware-vault", id).unwrap().executable);
         }
