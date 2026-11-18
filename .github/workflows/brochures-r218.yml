@@ -75,15 +75,18 @@ jobs:
               text=" ".join(p.extract_text() or "" for p in pdf.pages)
               assert all(marker.lower() in text.lower() for marker in markers),(filename,markers)
               embedded=0
-          for page in pdf.pages:
-              resources=page.get("/Resources")
-              if resources:
-                  resources=resources.get_object()
-                  xobjects=resources.get("/XObject")
-                  if xobjects:
-                      embedded+=len(xobjects.get_object())
-              assert embedded>=2,(filename,"no rendered UI screenshots")
-              print(filename,len(pdf.pages),"pages",embedded,"image objects")
+              for page in pdf.pages:
+                  resources=page.get("/Resources")
+                  if resources:
+                      resources=resources.get_object()
+                      xobjects=resources.get("/XObject")
+                      if xobjects:
+                          for ref in xobjects.get_object().values():
+                              if ref.get_object().get("/Subtype")=="/Image":
+                                  embedded+=1
+              minimum_images=4 if "Manual" in filename else 3
+              assert embedded>=minimum_images,(filename,embedded,"missing real UI screenshots")
+              print(filename,len(pdf.pages),"pages",embedded,"embedded raster images")
           PY
           printf '%s\n' "$GITHUB_SHA" > generated-publications/SOURCE_SHA
           (cd generated-publications && sha256sum *.pdf > SHA256SUMS)
