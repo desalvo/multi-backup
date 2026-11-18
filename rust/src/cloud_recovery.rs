@@ -9,6 +9,7 @@ type Result<T>=std::result::Result<T,Box<dyn std::error::Error+Send+Sync>>;
 pub const DEFAULT_MAX_BYTES:u64=8*1024*1024*1024;
 struct Ready {
     _stage:TempDir,store:Store,backup:LogicalBackup,transferred:u64,volumes:usize,
+    index_sha256:String,
 }
 fn ordinary_directory(path:&Path)->Result<()> {
     if !fs::symlink_metadata(path)?.file_type().is_dir(){
@@ -30,10 +31,13 @@ fn prepare(config:&Path,provider:&str,directory:&str,identity:&Path,
     let pkg=stage.path().join("bundle");
     fs::create_dir(&pkg)?;
     let index_path=pkg.join("bundle.index.age");
-    let (index_size,_)=cloud_drive::download_to_new(config,provider,
-        &format!("{directory}/bundle.index.age"),&index_path,8*1024*1024)?;
+    let index_remote=format!("{directory}/bundle.index.age");
+    let (index_size,index_sha256)=cloud_drive::download_to_new(config,provider,
+        &index_remote,&index_path,8*1024*1024)?;
     let index=portable::inventory(&fs::read(&index_path)?,identity)?;
-    let mut total=index_size;
+    // Account for BOTH authenticated index reads in the strict byte budget.
+    let mut total=index_size.checked_mul(2).ok_or("Recovery index budget overflow")?;
+    if total>max_bytes{return Err("Cloud recovery budget below catalog read cost".into());}
     for volume in &index.volumes {
         total=total.checked_add(volume.size).ok_or("Recovery byte overflow")?;
         if total>max_bytes{return Err("Cloud backup exceeds transfer budget".into());}
@@ -46,6 +50,16 @@ fn prepare(config:&Path,provider:&str,directory:&str,identity:&Path,
             return Err("Remote encrypted ZIP volume changed or failed SHA256".into());
         }
     }
+    // Recheck the complete remote ciphertext index after all volume downloads.
+    // This catches a concurrent catalog replacement but is NOT atomic
+    // version fencing. For true atomicity, cloud provider conditional reads
+    // (e.g. If-Match + version ID) will still be required.
+    let recheck_path=stage.path().join("index-postflight.age");
+    let (recheck_size,recheck_sha)=cloud_drive::download_to_new(
+        config,provider,&index_remote,&recheck_path,index_size)?;
+    if recheck_size!=index_size || recheck_sha!=index_sha256 {
+        return Err("Remote catalog changed during encrypted volume transfer".into());
+    }
     let store_path=stage.path().join("authenticated-store");
     let id=portable::import(&pkg,identity,&store_path)?;
     if id!=index.backup_id{return Err("Cloud backup ID mismatch".into());}
@@ -54,7 +68,8 @@ fn prepare(config:&Path,provider:&str,directory:&str,identity:&Path,
         return Err("Cloud backup failed authenticated chunk/parity verification".into());
     }
     let backup=store.load(identity,&id)?;
-    Ok(Ready{_stage:stage,store,backup,transferred:total,volumes:index.volumes.len()})
+    Ok(Ready{_stage:stage,store,backup,transferred:total,
+             volumes:index.volumes.len(),index_sha256})
 }
 fn report(ready:&Ready,provider:&str,directory:&str)->Value{
     json!({"provider":provider,"remote_directory":directory,
@@ -63,6 +78,8 @@ fn report(ready:&Ready,provider:&str,directory:&str)->Value{
                json!({"path":e.path,"size":e.bytes})).collect::<Vec<_>>(),
            "volumes":ready.volumes,"downloaded_bytes":ready.transferred,
            "age_authenticated":true,"sha256_verified":true,
+           "remote_index_revalidated":true,
+           "remote_index_sha256":ready.index_sha256,
            "remote_version_atomic":false})
 }
 /// Inspect every authenticated logical file, no plaintext restore.

@@ -34,7 +34,14 @@ if command=="lsjson":
         "Size":v.stat().st_size if v.is_file() else -1,
         "ModTime":"2026-11-18T00:00:00Z"} for v in sorted(directory.iterdir())]))
 elif command=="cat":
-    sys.stdout.buffer.write(locate(args[0]).read_bytes())
+    file=locate(args[0])
+    sys.stdout.buffer.write(file.read_bytes())
+    # Deterministic concurrent index-replacement fault injection, triggered
+    # only AFTER the volume was read so the postflight reread must detect it.
+    if os.environ.get("FAKE_CLOUD_MUTATE_INDEX_ON_VOLUME")=="1" and file.name=="part-000001.zip":
+        index=file.parent/"bundle.index.age"
+        with index.open("ab") as output:
+            output.write(b"concurrent-catalog-replacement")
 elif command=="rcat":
     assert args[0]=="--ignore-existing"
     file=locate(args[1])
@@ -130,6 +137,8 @@ python3 - "$TMP/private/verified-index.json" "$ID" <<'PY'
 import json,sys
 record=json.load(open(sys.argv[1]))
 assert record["age_authenticated"] and record["sha256_verified"]
+assert record["remote_index_revalidated"] and not record["remote_version_atomic"]
+assert len(record["remote_index_sha256"])==64
 assert record["backup_id"]==sys.argv[2]
 assert record["files"]==[{"path":"docs/restore.txt","size":len(b"Multi Backup r218 authenticated XZ recovery\n")}]
 PY
@@ -153,6 +162,20 @@ if "$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
   echo 'ERROR cloud recovery accepted incorrect explicit confirmation' >&2;exit 1
 fi
 test ! -e "$TMP/private/unauthorized"
+# Detect a catalog swap after the first ZIP volume has been streamed. The
+# synthetic mock mutates only the remote ciphertext index; restore MUST fail
+# before creating any selected plaintext target.
+mkdir -p "$TMP/mock/nextcloud/Backups/snap-swap"
+cp -a "$TMP/mock/nextcloud/Backups/snap1/." "$TMP/mock/nextcloud/Backups/snap-swap/"
+if FAKE_CLOUD_MUTATE_INDEX_ON_VOLUME=1 "$BIN" plugins cloud-backup-restore \
+  --config "$TMP/private/rclone.conf" --provider nextcloud \
+  --directory Backups/snap-swap --identity "$TMP/private/key.txt" \
+  --work-dir "$TMP/private/work" --destination "$TMP/private/replaced-catalog-out" \
+  --confirm RESTORE:nextcloud:Backups/snap-swap --max-bytes 16777216 \
+  >/dev/null 2>&1; then
+  echo 'ERROR concurrent encrypted index replacement was accepted' >&2;exit 1
+fi
+test ! -e "$TMP/private/replaced-catalog-out"
 # Fail on verified ciphertext corruption; never create a plaintext target.
 printf 'tampered' >> "$TMP/mock/nextcloud/Backups/snap1/part-000001.zip"
 if "$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
