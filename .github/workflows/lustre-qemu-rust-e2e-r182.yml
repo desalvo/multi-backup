@@ -1,5 +1,6 @@
 name: Multi Backup - actual Lustre QEMU FULL encrypted Rust backup and remote restore
 on:
+  workflow_call:
   push:
     branches: ["feature/r182-cephfs-lustre-oracle-field-ci"]
     paths:

@@ -1,5 +1,6 @@
 name: Multi Backup - real SSH SCP SFTP and SSHFS acceptance
 on:
+  workflow_call:
   push:
     branches: ["feature/**"]
     paths:
@@ -15,8 +16,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: mb-r216-openssh-sshfs-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   ssh-scp-sftp:
     name: Real OpenSSH SSH, SCP and SFTP authentication and byte integrity
