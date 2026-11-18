@@ -1104,3 +1104,13 @@ One-line English commit summary: Expand qualified provider READY scopes to nine 
 - Critical remaining known bug in r213 physical nested lab: root-owned 0600 sentinel required while non-root runner must read it. An operator-owned protected-runner root-owned 0644 public approval marker + protected environment is a possible fix; NOT yet implemented or field-qualified. Keep the physical lab flagged BLOCKED.
 
 One-line English commit summary: Qualify four narrow SSH SSHFS WebDAV Lustre operations and gate installable Rust RC preview on genuine labs and OS installers.
+
+### r216 exact SHA patch and resuming native installation field proof (2026-11-18)
+
+- Full run #44210280386 on c3a930dc530ea6116238694952242c956506a16b proved genuine Ubuntu24 AMD64 DEB install, macOS arm64 ad-hoc DMG GUI app copy, real Oracle Free PDB/CDB/SCN PITR, CephFS/RBD, HTTPS WebDAV, SSH/SSHFS, Rust 13 Ready policy and server Kubernetes software; macOS Intel, Windows and Lustre were not concluded when revised source superseded this run. Do NOT call cancelled final run fully green.
+- Identified deterministically that the Ubuntu installer generator produces SHA256SUMS recorded as packages/filename.deb before artifact upload flattens the path. Hardened scripts/ci/verify-platform-artifacts-r216.py allows only that precise packages/ prefix in the Ubuntu record, still excludes all arbitrary paths/traversal and independently hashes every installer. The test fixture now matches real output.
+- Corrected historical native install metadata: macOS Rust CFBundleVersion 216 (was 38), Windows Rust Inno AppVersion 0.1.0-r216-rc0 and VersionInfoVersion 0.1.0.216 (was r038).
+- Correct current source full test: GitHub Actions #44211992378 at source SHA 059ebcd3906f77c435748282ae86a2883ab3d3f5. Status at this handoff still QUEUED/RUNNING; do not predeclare success. Last fully green baseline r215 #44202991407.
+- No main merge, stable tag, release, Apple Developer ID notarization or Windows Authenticode. Real VM/hypervisor/three physical host HA remain outside certified scope.
+
+One-line English commit summary: Normalize Ubuntu SHA checksum path and version native Mac and Windows RC0 installers with exact-source evidence.
