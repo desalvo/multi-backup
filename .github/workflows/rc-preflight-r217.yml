@@ -1,0 +1,299 @@
+name: Multi Backup r217 - 16 scoped READY, 10 genuine field groups, 4 native installers pre-RC
+on:
+  push:
+    branches: ["feature/r217-win-warp-installable-rc"]
+    paths:
+      - "rust/**"
+      - "rust-desktop/**"
+      - "rust-server/**"
+      - "scripts/ci/rc-preflight-r217.py"
+      - "tests/test_rc_preflight_r217.py"
+      - "scripts/ci/verify-platform-artifacts-r217.py"
+      - "tests/test_platform_artifacts_r217.py"
+      - "scripts/ci/package-ubuntu24-r217.sh"
+      - ".github/workflows/native-installers-r217.yml"
+      - "docs/RC_READINESS_R217_IT.md"
+      - "tests/test_rc_preflight_r217.py"
+      - "tests/test_rc_security_r214.py"
+      - "scripts/ci/ha-three-physical-redfish-r204.py"
+      - "scripts/labs/provision-hypervisor-r213.py"
+      - "requirements.txt"
+      - "requirements-docs.txt"
+      - ".github/workflows/rc-preflight-r217.yml"
+      - ".github/workflows/scoped-ready-r217.yml"
+      - ".github/workflows/mysql84-real-r209.yml"
+      - ".github/workflows/iscsi-live-r198.yml"
+      - ".github/workflows/cephfs-kind-real-r182.yml"
+      - ".github/workflows/oracle-free-live.yml"
+      - ".github/workflows/s3-worm-iam-real-r211.yml"
+      - ".github/workflows/s3-minio-live-r048.yml"
+      - ".github/workflows/ssh-sshfs-live-integration.yml"
+      - ".github/workflows/webdav-live-r046.yml"
+      - ".github/workflows/lustre-qemu-rust-e2e-r182.yml"
+      - ".github/workflows/network-filesystems-live-r042.yml"
+      - "scripts/test-real-network-filesystems-r042.sh"
+      - ".github/workflows/native-installers-r217.yml"
+      - "scripts/ci/package-ubuntu24-r217.sh"
+      - "scripts/ci/verify-platform-artifacts-r217.py"
+      - "tests/test_platform_artifacts_r217.py"
+      - "scripts/package-rust-macos-preview.sh"
+      - "scripts/package-rust-windows-preview.ps1"
+      - "packaging/windows/rust-native-preview.iss"
+      - "scripts/ci/rc-preflight-r217.py"
+      - "tests/test_rc_preflight_r217.py"
+      - ".github/workflows/software-readiness-r168.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: mb-r217-rc-source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scoped_ready:
+    name: Current-SHA 16 bounded READY contracts and native POSIX age acceptance
+    uses: ./.github/workflows/scoped-ready-r217.yml
+
+  full-software:
+    name: Current-SHA Rust/server/PG agents/GUI/K8s full acceptance
+    uses: ./.github/workflows/software-readiness-r168.yml
+
+  real-database-roundtrip:
+    name: Current-SHA real PostgreSQL16 and MariaDB11 encrypted backup/restore
+    uses: ./.github/workflows/database-live-integration.yml
+
+  mysql84:
+    name: Genuine Oracle MySQL8.4 InnoDB encrypted new DB restore
+    uses: ./.github/workflows/mysql84-real-r209.yml
+
+  ceph_rbd_cephfs:
+    name: Genuine CephFS 3 OSD and RBD pinned snapshot new-image field
+    uses: ./.github/workflows/cephfs-kind-real-r182.yml
+
+  iscsi_tgt:
+    name: Real iSCSI kernel initiator and new local TGT LUN readback
+    uses: ./.github/workflows/iscsi-live-r198.yml
+
+  oracle_free:
+    name: Genuine Oracle Free RMAN media, physical PDB/CDB and SCN-PITR
+    uses: ./.github/workflows/oracle-free-live.yml
+
+  minio_worm_iam:
+    name: Real MinIO COMPLIANCE Object Lock with two independent IAM users
+    uses: ./.github/workflows/s3-worm-iam-real-r211.yml
+
+  minio_s3_object:
+    name: Genuine version-pinned MinIO S3 object SHA256 age source import
+    uses: ./.github/workflows/s3-minio-live-r048.yml
+    with:
+      run_under_scoped_ready: true
+
+  openssh_sshfs:
+    name: Genuine OpenSSH and SSHFS FUSE pinned backup, create-only restore
+    uses: ./.github/workflows/ssh-sshfs-live-integration.yml
+
+  webdav_https:
+    name: Real authenticated TLS WebDAV mounted RO plus conditional ciphertext PUT and GET
+    uses: ./.github/workflows/webdav-live-r046.yml
+
+  lustre_qemu:
+    name: True Rocky 9 KVM Lustre MDT OST and encrypted Rust FULL backup/restore
+    uses: ./.github/workflows/lustre-qemu-rust-e2e-r182.yml
+
+  nfs_smb_gluster:
+    name: Five authentic kernel/FUSE NFSv3 Samba SMB3 GlusterFS and GPFS protocol-compat labs
+    uses: ./.github/workflows/network-filesystems-live-r042.yml
+
+  native_installers:
+    name: Actual native Ubuntu DEB, macOS Apple Intel and Windows Inno application installation
+    uses: ./.github/workflows/native-installers-r217.yml
+
+  rc-security-policy:
+    name: RC preflight policy negatives and limited publish rights
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate untrusted catalog and false-certification denial
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rc_preflight_r217.py -v
+          python3 -m unittest discover -s tests -p test_platform_artifacts_r217.py -v
+          python3 -m unittest discover -s tests -p test_platform_artifacts_r217.py -v
+          python3 -m unittest discover -s tests -p test_rc_preflight_r214.py -v
+          python3 -m py_compile scripts/ci/rc-preflight-r217.py
+      - name: Install mandatory release static and dependency-security auditors
+        run: |
+          set -euo pipefail
+          python3 -m pip install 'bandit>=1.7,<2' 'ruff>=0.9,<1' 'pip-audit>=2.7,<3'
+      - name: Check Python syntax correctness, injection and dependency vulnerabilities
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_rc_security_r214.py -v
+          ruff check --select E4,E9,F63,F7,F82 --extend-select E722 .
+          bandit -q -r . -x ./tests,./.git -ll
+          python3 -m pip_audit -r requirements.txt
+          python3 -m pip_audit -r requirements-docs.txt
+          echo 'PASS r217 Python static correctness, Bandit medium/high security and both pip-audit dependency manifests' >> "$GITHUB_STEP_SUMMARY"
+      - name: No publication authorization in this workflow
+        run: |
+          test "${{ github.event_name }}" != "release"
+          echo "RC preflight is nonpublishing; no main merge, tag, release or stable channel mutation" >> "$GITHUB_STEP_SUMMARY"
+
+  current-sha-linux-candidate:
+    name: Exact-commit signed-by-age Linux native preview bundle (NOT published RC)
+    needs: [scoped_ready, full-software, real-database-roundtrip,
+            mysql84, ceph_rbd_cephfs, iscsi_tgt, oracle_free, minio_worm_iam,
+            minio_s3_object, openssh_sshfs, webdav_https, lustre_qemu, nfs_smb_gluster,
+            native_installers, rc-security-policy]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Enforce positive same-source production preflight, never accept skipped suites
+        env:
+          POSIX_RESULT: ${{ needs.scoped_ready.result }}
+          SOFTWARE_RESULT: ${{ needs.full-software.result }}
+          DATABASE_RESULT: ${{ needs.real-database-roundtrip.result }}
+          POLICY_RESULT: ${{ needs.rc-security-policy.result }}
+          MYSQL84_RESULT: ${{ needs.mysql84.result }}
+          CEPH_RESULT: ${{ needs.ceph_rbd_cephfs.result }}
+          ISCSI_RESULT: ${{ needs.iscsi_tgt.result }}
+          ORACLE_RESULT: ${{ needs.oracle_free.result }}
+          VAULT_RESULT: ${{ needs.minio_worm_iam.result }}
+          OBJECT_RESULT: ${{ needs.minio_s3_object.result }}
+          SSH_RESULT: ${{ needs.openssh_sshfs.result }}
+          DAV_RESULT: ${{ needs.webdav_https.result }}
+          LUSTRE_RESULT: ${{ needs.lustre_qemu.result }}
+          NETWORK_FS_RESULT: ${{ needs.nfs_smb_gluster.result }}
+          NATIVE_INSTALLERS_RESULT: ${{ needs.native_installers.result }}
+        run: |
+          set -euo pipefail
+          for value in "$POSIX_RESULT" "$SOFTWARE_RESULT" "$DATABASE_RESULT" "$POLICY_RESULT" \
+            "$MYSQL84_RESULT" "$CEPH_RESULT" "$ISCSI_RESULT" "$ORACLE_RESULT" "$VAULT_RESULT" "$OBJECT_RESULT" \
+            "$SSH_RESULT" "$DAV_RESULT" "$LUSTRE_RESULT" "$NETWORK_FS_RESULT" "$NATIVE_INSTALLERS_RESULT"; do
+            if test "$value" != success;then
+              echo "DENIED RC artifact: required current-SHA suite conclusion is $value" >&2
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build native CLI and agent from this exact approved branch commit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          cargo build --manifest-path rust/Cargo.toml --release \
+            --bin multi-backup-native --bin multi-backup-agent
+          rust/target/release/multi-backup-native --version
+      - name: Generate immutable current-run provider lab proof (never from external text)
+        env:
+          MYSQL84_RESULT: ${{ needs.mysql84.result }}
+          CEPH_RESULT: ${{ needs.ceph_rbd_cephfs.result }}
+          ISCSI_RESULT: ${{ needs.iscsi_tgt.result }}
+          ORACLE_RESULT: ${{ needs.oracle_free.result }}
+          VAULT_RESULT: ${{ needs.minio_worm_iam.result }}
+          OBJECT_RESULT: ${{ needs.minio_s3_object.result }}
+          SSH_RESULT: ${{ needs.openssh_sshfs.result }}
+          DAV_RESULT: ${{ needs.webdav_https.result }}
+          LUSTRE_RESULT: ${{ needs.lustre_qemu.result }}
+          NETWORK_FS_RESULT: ${{ needs.nfs_smb_gluster.result }}
+          INSTALLERS_RESULT: ${{ needs.native_installers.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          python3 - <<'PY'
+          import json,os
+          evidence={
+              'source_sha':os.environ['GITHUB_SHA'],
+              'actions_run_id':int(os.environ['GITHUB_RUN_ID']),
+              'mysql84':os.environ['MYSQL84_RESULT'],
+              'ceph_rbd_cephfs':os.environ['CEPH_RESULT'],
+              'iscsi_tgt':os.environ['ISCSI_RESULT'],
+              'oracle_free':os.environ['ORACLE_RESULT'],
+              'minio_worm_iam':os.environ['VAULT_RESULT'],
+              'minio_s3_object':os.environ['OBJECT_RESULT'],
+              'openssh_sshfs':os.environ['SSH_RESULT'],
+              'webdav_https':os.environ['DAV_RESULT'],
+              'lustre_qemu':os.environ['LUSTRE_RESULT'],
+              'nfs_smb_gluster':os.environ['NETWORK_FS_RESULT'],
+          }
+          if any(evidence[k]!='success' for k in
+                 ('mysql84','ceph_rbd_cephfs','iscsi_tgt','oracle_free','minio_worm_iam','minio_s3_object','openssh_sshfs','webdav_https','lustre_qemu','nfs_smb_gluster')):
+              raise SystemExit('Missing/failed same-run provider field acceptance')
+          with open('preview/field-gates.json','x') as f:
+              json.dump(evidence,f,sort_keys=True,indent=2)
+              f.write('\n')
+          installers={
+              'source_sha':os.environ['GITHUB_SHA'],
+              'actions_run_id':int(os.environ['GITHUB_RUN_ID']),
+              'linux_deb':os.environ['INSTALLERS_RESULT'],
+              'macos_arm64_dmg':os.environ['INSTALLERS_RESULT'],
+              'macos_x86_64_dmg':os.environ['INSTALLERS_RESULT'],
+              'windows_x64_inno':os.environ['INSTALLERS_RESULT'],
+          }
+          if any(installers[k]!='success' for k in
+                 ('linux_deb','macos_arm64_dmg','macos_x86_64_dmg','windows_x64_inno')):
+              raise SystemExit('Native installation fan-in not completely green')
+          with open('preview/installer-gates.json','x') as f:
+              json.dump(installers,f,sort_keys=True,indent=2)
+              f.write('\n')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rc216-*
+          path: platform-assets
+          merge-multiple: false
+      - name: Independently hash all four actual native installers downloaded from the same run
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/verify-platform-artifacts-r217.py \
+            --root platform-assets --source-sha "$GITHUB_SHA" \
+            --output preview/platform-assets-manifest.json
+      - name: Generate fail-closed machine-readable provider and RC limitations
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          rust/target/release/multi-backup-native plugins list --json > /tmp/rc-catalog.json
+          rust/target/release/multi-backup-native plugins plan \
+            --mode backup --input posix --output posix --json > /tmp/rc-backup.json
+          rust/target/release/multi-backup-native plugins plan \
+            --mode restore --input posix --output posix --json > /tmp/rc-restore.json
+          python3 scripts/ci/rc-preflight-r217.py \
+            --catalog /tmp/rc-catalog.json \
+            --backup-plan /tmp/rc-backup.json \
+            --restore-plan /tmp/rc-restore.json \
+            --field-gates preview/field-gates.json \
+            --installer-gates preview/installer-gates.json \
+            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
+            --output preview/rc-preflight-manifest.json
+          cp rust/target/release/multi-backup-native preview/
+          cp rust/target/release/multi-backup-agent preview/
+          cp docs/RC_READINESS_R217_IT.md preview/RC_SCOPE_R217_IT.md
+          (cd preview && sha256sum multi-backup-native multi-backup-agent rc-preflight-manifest.json field-gates.json installer-gates.json platform-assets-manifest.json RC_SCOPE_R217_IT.md > SHA256SUMS)
+          tar --create --gzip --file "multi-backup-r217-installable-rc0-$GITHUB_SHA.tar.gz" \
+            preview platform-assets
+          test -s "multi-backup-r217-installable-rc0-$GITHUB_SHA.tar.gz"
+          sha256sum "multi-backup-r217-installable-rc0-$GITHUB_SHA.tar.gz" > "multi-backup-r217-installable-rc0-$GITHUB_SHA.tar.gz.sha256"
+      - name: Store CI artifact as pre-RC only; do not publish a GitHub release
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-backup-r217-installable-rc0
+          path: |
+            multi-backup-r217-installable-rc0-*.tar.gz
+            multi-backup-r217-installable-rc0-*.tar.gz.sha256
+          retention-days: 14
+          if-no-files-found: error
+      - name: Explicit remaining RC and stable gates
+        if: success()
+        run: |
+          echo 'PASS installable cross-platform RC0-preview with native Linux/Mac/Windows binaries, SHA256 and exact source-SHA lab evidence; NOT stable.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'BLOCKED before signed stable: Apple Developer ID notarization, Windows Authenticode, production RPM/DEB matrix and physical HA/provider gaps.' >> "$GITHUB_STEP_SUMMARY"
+          echo '16 provider paths READY only for explicitly qualified, same-SHA field-tested scopes; 17 other catalog plugins NOT READY.' >> "$GITHUB_STEP_SUMMARY"
