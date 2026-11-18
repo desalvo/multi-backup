@@ -42,19 +42,35 @@ def main():
             proc=subprocess.Popen([str(BIN),"--docs-page",page],env=env,
                 stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
             try:
-                time.sleep(3.2)
-                if proc.poll() is not None:
-                    raise RuntimeError(f"Rust UI exited on page {page}: {proc.stderr.read()[-2000:]!r}")
                 path=output/name
-                subprocess.run(["import","-window","root","-silent",str(path)],
-                    check=True,timeout=25)
-                with Image.open(path) as image:
-                    if image.width<1000 or image.height<700:
-                        raise RuntimeError(f"Unexpected small Xvfb screenshot: {path}")
-                    # Reject all-blank output, not merely existence of a PNG.
-                    gray=image.convert("L").resize((60,40))
-                    if len(set(gray.getdata()))<14:
-                        raise RuntimeError(f"Blank/uncaptured GUI surface: {path}")
+                # Software GL drivers can require several frames to initialize.
+                # Retry rendering, but NEVER accept a blank or fabricated image.
+                ready=False
+                for attempt in range(4):
+                    time.sleep(3.2 if attempt==0 else 2.0)
+                    if proc.poll() is not None:
+                        raise RuntimeError(f"Rust UI exited on page {page}: {proc.stderr.read()[-2000:]!r}")
+                    subprocess.run(["import","-window","root","-silent",str(path)],
+                        check=True,timeout=25)
+                    with Image.open(path) as image:
+                        if image.width<1000 or image.height<700:
+                            raise RuntimeError(f"Unexpected small Xvfb screenshot: {path}")
+                        gray=image.convert("L").resize((60,40))
+                        # Count distinct pixels without deprecated Image.getdata.
+                        colors=gray.getcolors(maxcolors=256)
+                        ready=colors is not None and len(colors)>=14
+                    if ready:
+                        break
+                if not ready:
+                    proc.terminate()
+                    try:
+                        _,diagnostic=proc.communicate(timeout=6)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        _,diagnostic=proc.communicate(timeout=6)
+                    raise RuntimeError(
+                        f"Blank/unrendered real Rust UI page {page} after retries: "
+                        f"{diagnostic[-3500:]!r}")
                 print("CAPTURED real Rust desktop",page,path,flush=True)
             finally:
                 proc.terminate()
