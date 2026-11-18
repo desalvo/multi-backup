@@ -1,0 +1,60 @@
+name: Multi Backup r218 - 16 bounded READY in 34-provider catalog and POSIX acceptance
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scoped-ready:
+    name: Native Rust READY roles, exact dispatcher and age restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+      - name: Real age and native executable prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+      - name: Run native provider policy, source signatures and POSIX end-to-end tests
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml --lib plugins -- --nocapture
+          cargo test --manifest-path rust/Cargo.toml --lib plugin_executor
+          cargo test --manifest-path rust/Cargo.toml --test plugin_dispatch_roundtrip -- --nocapture
+      - name: Check compiled native catalog matches the r217 audited role matrix
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path rust/Cargo.toml --bin multi-backup-native
+          BIN=rust/target/debug/multi-backup-native
+          "$BIN" plugins list --json > /tmp/mb-r215.json
+          "$BIN" plugins plan --mode backup --input posix --output posix --json > /tmp/posix-backup.json
+          "$BIN" plugins plan --mode restore --input posix --output posix --json > /tmp/posix-restore.json
+          python3 - <<'PY'
+          import json,runpy
+          mod=runpy.run_path('scripts/ci/rc-preflight-r217.py')
+          catalog=json.load(open('/tmp/mb-r215.json'))
+          roles=mod['READY_ROLES']
+          assert len(catalog)==34
+          observed={}
+          for p in catalog:
+              stages=tuple(p[x] for x in mod['FIELDS'])
+              if 'ready' in stages:
+                  assert p['id'] in roles,(p['id'],stages)
+                  assert stages==roles[p['id']][0],(p['id'],stages)
+                  assert roles[p['id']][1] in p['ready_scope']
+                  observed[p['id']]=p['ready_scope']
+              else:
+                  assert p['ready_scope'] is None,p['id']
+          assert set(observed)==set(roles),(observed,roles)
+          for mode in ['backup','restore']:
+              p=json.load(open('/tmp/posix-'+mode+'.json'))
+              assert p['executable'] and not p['preview_executable']
+              assert p['confirmation_required_before_writes']
+          print('PASS r218 compiled Rust catalog: 16 qualified scoped READY providers and 18 not READY')
+          PY
+      - name: Explicit per-provider Ready versus general production limits
+        if: success()
+        run: |
+          echo 'PASS r218 READY stage/role scope. Generic dispatcher remains POSIX-only; all other provider commands are individually typed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Genuine provider hardware/IAM/Oracle/MySQL/3OSD labs are separate mandatory same-source jobs, never a simulated substitute.' >> "$GITHUB_STEP_SUMMARY"

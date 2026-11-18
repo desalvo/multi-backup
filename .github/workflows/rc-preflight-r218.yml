@@ -13,6 +13,7 @@ on:
       - ".github/workflows/software-readiness-r168.yml"
       - ".github/workflows/native-installers-r217.yml"
       - ".github/workflows/scoped-ready-r217.yml"
+      - ".github/workflows/scoped-ready-r218.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,7 +21,7 @@ permissions:
   pull-requests: read
 concurrency:
   group: mb-r218-exact-source-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 # A single SHA across all jobs. Never publish stable/early-release tags here.
 # Uses the native r217 installer *recipe* on r218 source; filenames still
@@ -28,7 +29,7 @@ concurrency:
 jobs:
   scoped-ready:
     name: Exact-SHA bounded provider READY acceptance
-    uses: ./.github/workflows/scoped-ready-r217.yml
+    uses: ./.github/workflows/scoped-ready-r218.yml
 
   software:
     name: Rust core/server/GUI, PG agents, OCI and Kind
@@ -53,6 +54,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install XML entity-expansion prevention dependency
+        run: python3 -m pip install 'defusedxml>=0.7.1,<1'
       - name: Validate preflight and packaging security fail-closed cases
         shell: bash
         run: |

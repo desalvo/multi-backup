@@ -185,6 +185,29 @@ if "$BIN" plugins cloud-backup-restore --config "$TMP/private/rclone.conf" \
   echo 'ERROR tampered encrypted volume accepted' >&2;exit 1
 fi
 test ! -e "$TMP/private/corrupt-out"
+# Real AGE streaming/restore smoke for every supported per-store compressor.
+# xz is already covered by the full cloud ZIP64 roundtrip above.
+for CODEC in zstd gzip none; do
+  STORE="$TMP/private/store-$CODEC"
+  "$BIN" storage init --root "$STORE" --recipient "$RECIPIENT" \
+    --compressor "$CODEC" --chunk-mib 1 >/dev/null
+  "$BIN" storage backup --root "$STORE" --identity "$TMP/private/key.txt" \
+    --label "Real $CODEC end-to-end" --sources-json "$TMP/private/sources.json" \
+    > "$TMP/private/snapshot-$CODEC.json"
+  CODEC_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["id"])' "$TMP/private/snapshot-$CODEC.json")"
+  "$BIN" storage verify --root "$STORE" --identity "$TMP/private/key.txt" \
+    --id "$CODEC_ID" > "$TMP/private/verified-$CODEC.json"
+  python3 - "$TMP/private/verified-$CODEC.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1]))["healthy"] is True
+PY
+  "$BIN" storage restore --root "$STORE" --identity "$TMP/private/key.txt" \
+    --id "$CODEC_ID" --selection docs/restore.txt \
+    --destination "$TMP/private/recovered-$CODEC" >/dev/null
+  cmp "$TMP/private/source/restore.txt" "$TMP/private/recovered-$CODEC/docs/restore.txt"
+done
+echo 'PASS real AGE/full backup/verification/fresh restore for zstd,xz-LZMA2,gzip,none'
+
 echo 'PASS remote AGE/XZ ZIP64 multi-step authenticated selective restore with tamper negatives'
 
 echo 'PASS cloud browser list, download, create-new, delete and fail-closed negative tests (fake rclone only)'
